@@ -311,6 +311,23 @@ function createThreadPlanCatalogSelector(threadIds: readonly ThreadId[]) {
   };
 }
 
+function deriveThreadPlanCatalogThreadIds(input: {
+  activeThreadId: ThreadId | null;
+  sourceProposedPlanThreadId: ThreadId | null;
+}): readonly ThreadId[] {
+  const threadIds: ThreadId[] = [];
+  if (input.activeThreadId) {
+    threadIds.push(input.activeThreadId);
+  }
+  if (
+    input.sourceProposedPlanThreadId &&
+    input.sourceProposedPlanThreadId !== input.activeThreadId
+  ) {
+    threadIds.push(input.sourceProposedPlanThreadId);
+  }
+  return threadIds;
+}
+
 function useThreadPlanCatalog(threadIds: readonly ThreadId[]): ThreadPlanCatalogEntry[] {
   const selectThreadPlanCatalog = useMemo(
     () => createThreadPlanCatalogSelector(threadIds),
@@ -1024,19 +1041,17 @@ export default function ChatView(props: ChatViewProps) {
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys]);
   const activeLatestTurn = activeThread?.latestTurn ?? null;
-  const threadPlanCatalog = useThreadPlanCatalog(
-    useMemo(() => {
-      const threadIds: ThreadId[] = [];
-      if (activeThread?.id) {
-        threadIds.push(activeThread.id);
-      }
-      const sourceThreadId = activeLatestTurn?.sourceProposedPlan?.threadId;
-      if (sourceThreadId && sourceThreadId !== activeThread?.id) {
-        threadIds.push(sourceThreadId);
-      }
-      return threadIds;
-    }, [activeLatestTurn?.sourceProposedPlan?.threadId, activeThread?.id]),
+  const activeThreadId = activeThread?.id ?? null;
+  const sourceProposedPlanThreadId = activeLatestTurn?.sourceProposedPlan?.threadId ?? null;
+  const threadPlanCatalogThreadIds = useMemo(
+    () =>
+      deriveThreadPlanCatalogThreadIds({
+        activeThreadId,
+        sourceProposedPlanThreadId,
+      }),
+    [activeThreadId, sourceProposedPlanThreadId],
   );
+  const threadPlanCatalog = useThreadPlanCatalog(threadPlanCatalogThreadIds);
   useEffect(() => {
     setMountedTerminalThreadKeys((currentThreadIds) => {
       const nextThreadIds = reconcileMountedTerminalThreadIds({

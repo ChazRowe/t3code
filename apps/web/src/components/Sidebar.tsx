@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
+  GitBranchPlusIcon,
   Globe2Icon,
   SearchIcon,
   SettingsIcon,
@@ -2658,6 +2659,63 @@ interface SidebarProjectsContentProps {
   suppressProjectClickForContextMenuRef: React.RefObject<boolean>;
   attachProjectListAutoAnimateRef: (node: HTMLElement | null) => void;
   projectsLength: number;
+}
+
+interface SidebarNewSessionButtonProps {
+  onNewSession: () => void;
+  onNewSessionWithContext: () => void;
+  disabled: boolean;
+  newSessionShortcutLabel: string | null;
+  newSessionWithContextShortcutLabel: string | null;
+}
+
+export function SidebarNewSessionButton({
+  onNewSession,
+  onNewSessionWithContext,
+  disabled,
+  newSessionShortcutLabel,
+  newSessionWithContextShortcutLabel,
+}: SidebarNewSessionButtonProps) {
+  return (
+    <div className="flex items-center gap-1">
+      <SidebarMenuButton
+        size="sm"
+        data-testid="sidebar-new-session"
+        disabled={disabled}
+        className="flex-1 gap-2 px-2 py-1.5 font-medium hover:bg-accent hover:text-foreground focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={onNewSession}
+      >
+        <SquarePenIcon className="size-3.5" />
+        <span className="flex-1 truncate text-left text-xs">New Session</span>
+        {newSessionShortcutLabel ? (
+          <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
+            {newSessionShortcutLabel}
+          </Kbd>
+        ) : null}
+      </SidebarMenuButton>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label="New session with current context"
+              data-testid="sidebar-new-session-with-context"
+              disabled={disabled}
+              className={`${SIDEBAR_ICON_ACTION_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-50`}
+              onClick={onNewSessionWithContext}
+            />
+          }
+        >
+          <GitBranchPlusIcon className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup side="right">
+          {newSessionWithContextShortcutLabel
+            ? `New session with current context (${newSessionWithContextShortcutLabel})`
+            : "New session with current context"}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
+  );
 }
 
 const SidebarProjectsContent = memo(function SidebarProjectsContent(

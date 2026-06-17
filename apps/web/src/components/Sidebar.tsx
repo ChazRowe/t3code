@@ -2692,7 +2692,7 @@ export function SidebarNewSessionButton({
         size="sm"
         data-testid="sidebar-new-session"
         disabled={disabled}
-        className="flex-1 gap-2 px-2 py-1.5 font-medium hover:bg-accent hover:text-foreground focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex-1 gap-2 px-2 py-1.5 font-medium hover:bg-accent hover:text-foreground focus-visible:ring-0"
         onClick={onNewSession}
       >
         <SquarePenIcon className="size-3.5" />
@@ -2711,7 +2711,7 @@ export function SidebarNewSessionButton({
               aria-label="New session with current context"
               data-testid="sidebar-new-session-with-context"
               disabled={disabled}
-              className={`${SIDEBAR_ICON_ACTION_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-50`}
+              className={`${SIDEBAR_ICON_ACTION_BUTTON_CLASS} disabled:opacity-50`}
               onClick={onNewSessionWithContext}
             />
           }

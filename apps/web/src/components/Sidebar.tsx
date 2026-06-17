@@ -92,7 +92,13 @@ import { useShortcutModifierState } from "../shortcutModifierState";
 import { useVcsStatus } from "../lib/vcsStatusState";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useHandleNewThread, useNewThreadHandler } from "../hooks/useHandleNewThread";
+import {
+  resolveThreadActionProjectRef,
+  startNewLocalThreadFromContext,
+  startNewThreadFromContext,
+  type ChatThreadActionContext,
+} from "../lib/chatThreadActions";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -2649,6 +2655,10 @@ interface SidebarProjectsContentProps {
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
   newThreadShortcutLabel: string | null;
+  onNewSession: () => void;
+  onNewSessionWithContext: () => void;
+  canCreateNewSession: boolean;
+  newSessionWithContextShortcutLabel: string | null;
   commandPaletteShortcutLabel: string | null;
   threadJumpLabelByKey: ReadonlyMap<string, string>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
@@ -2747,6 +2757,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     activeRouteProjectKey,
     routeThreadKey,
     newThreadShortcutLabel,
+    onNewSession,
+    onNewSessionWithContext,
+    canCreateNewSession,
+    newSessionWithContextShortcutLabel,
     commandPaletteShortcutLabel,
     threadJumpLabelByKey,
     attachThreadListAutoAnimateRef,
@@ -2786,6 +2800,19 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
   return (
     <SidebarContent className="gap-0">
+      <SidebarGroup className="px-2 pt-2 pb-1">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarNewSessionButton
+              onNewSession={onNewSession}
+              onNewSessionWithContext={onNewSessionWithContext}
+              disabled={!canCreateNewSession}
+              newSessionShortcutLabel={newThreadShortcutLabel}
+              newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}
+            />
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
       <SidebarGroup className="px-2 pt-2 pb-1">
         <SidebarMenu>
           <SidebarMenuItem>
@@ -2965,7 +2992,12 @@ export default function Sidebar() {
   const projectGroupingSettings = useSettings(selectProjectGroupingSettings);
   const sidebarThreadPreviewCount = useSettings((s) => s.sidebarThreadPreviewCount);
   const { updateSettings } = useUpdateSettings();
-  const { handleNewThread } = useNewThreadHandler();
+  const {
+    activeThread: newSessionActiveThread,
+    activeDraftThread: newSessionActiveDraftThread,
+    defaultProjectRef: newSessionDefaultProjectRef,
+    handleNewThread,
+  } = useHandleNewThread();
   const { archiveThread, deleteThread } = useThreadActions();
   const { isMobile, setOpenMobile } = useSidebar();
   const routeThreadRef = useParams({
@@ -3112,6 +3144,51 @@ export default function Sidebar() {
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.newLocal", newThreadShortcutLabelOptions) ??
     shortcutLabelForCommand(keybindings, "chat.new", newThreadShortcutLabelOptions);
+
+  const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
+    (settings) => settings.defaultThreadEnvMode,
+  );
+
+  const newSessionWithContextShortcutLabel = shortcutLabelForCommand(
+    keybindings,
+    "chat.new",
+    newThreadShortcutLabelOptions,
+  );
+
+  const newSessionContext = useMemo<ChatThreadActionContext>(
+    () => ({
+      activeThread: newSessionActiveThread,
+      activeDraftThread: newSessionActiveDraftThread,
+      defaultProjectRef: newSessionDefaultProjectRef,
+      defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
+        defaultEnvMode: defaultThreadEnvMode,
+      }),
+      handleNewThread,
+    }),
+    [
+      newSessionActiveThread,
+      newSessionActiveDraftThread,
+      newSessionDefaultProjectRef,
+      defaultThreadEnvMode,
+      handleNewThread,
+    ],
+  );
+
+  const canCreateNewSession = resolveThreadActionProjectRef(newSessionContext) != null;
+
+  const handleNewSessionClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void startNewLocalThreadFromContext(newSessionContext);
+  }, [isMobile, setOpenMobile, newSessionContext]);
+
+  const handleNewSessionWithContextClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void startNewThreadFromContext(newSessionContext);
+  }, [isMobile, setOpenMobile, newSessionContext]);
 
   const navigateToThread = useCallback(
     (threadRef: ScopedThreadRef) => {
@@ -3610,6 +3687,10 @@ export default function Sidebar() {
             activeRouteProjectKey={activeRouteProjectKey}
             routeThreadKey={routeThreadKey}
             newThreadShortcutLabel={newThreadShortcutLabel}
+            onNewSession={handleNewSessionClick}
+            onNewSessionWithContext={handleNewSessionWithContextClick}
+            canCreateNewSession={canCreateNewSession}
+            newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}
             commandPaletteShortcutLabel={commandPaletteShortcutLabel}
             threadJumpLabelByKey={visibleThreadJumpLabelByKey}
             attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}

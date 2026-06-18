@@ -2642,4 +2642,61 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       ]);
     }),
   );
+
+  it.effect("unattended-run state round-trips through projection row", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const threadId = ThreadId.make("thread-unattended-roundtrip");
+      const projectId = ProjectId.make("project-unattended-roundtrip");
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-unattended-project"),
+        projectId,
+        title: "Unattended Project",
+        workspaceRoot: "/tmp/project-unattended-roundtrip",
+        defaultModelSelection: null,
+        createdAt,
+      });
+
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-unattended-thread"),
+        threadId,
+        projectId,
+        title: "Unattended Thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      } as const);
+
+      yield* engine.dispatch({
+        type: "thread.unattended-run.start",
+        commandId: CommandId.make("cmd-unattended-start"),
+        threadId,
+        totalIterations: 5,
+        createdAt,
+      });
+
+      const rows = yield* sql<{ readonly unattendedRun: string | null }>`
+        SELECT unattended_run AS "unattendedRun"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.equal(rows.length, 1);
+      assert.isNotNull(rows[0]!.unattendedRun);
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const parsed = JSON.parse(rows[0]!.unattendedRun!) as { status: string; totalIterations: number };
+      assert.equal(parsed.status, "running");
+      assert.equal(parsed.totalIterations, 5);
+    }),
+  );
 });

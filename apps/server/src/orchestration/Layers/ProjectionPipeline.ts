@@ -5,6 +5,7 @@ import {
   type OrchestrationSessionStatus,
   ThreadId,
 } from "@t3tools/contracts";
+import { applyUnattendedRunEvent } from "@t3tools/shared/unattendedRun";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -612,6 +613,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
             deletedAt: null,
+            unattendedRun: null,
           });
           return;
 
@@ -796,6 +798,26 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             latestTurnId,
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId);
+          return;
+        }
+
+        case "thread.unattended-run-started":
+        case "thread.unattended-run-iteration-advanced":
+        case "thread.unattended-run-paused":
+        case "thread.unattended-run-resumed":
+        case "thread.unattended-run-finished": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            unattendedRun: applyUnattendedRunEvent(existingRow.value.unattendedRun, event),
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);

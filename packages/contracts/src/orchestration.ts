@@ -14,6 +14,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ProviderItemId,
   ThreadId,
@@ -124,6 +125,32 @@ export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";
+
+export const UNATTENDED_RUN_MAX_ITERATIONS = 100;
+
+export const UnattendedRunStatus = Schema.Literals(["running", "paused", "completed", "stopped"]);
+export type UnattendedRunStatus = typeof UnattendedRunStatus.Type;
+
+export const UnattendedRunPauseReason = Schema.Literals(["no-sentinel", "error", "manual"]);
+export type UnattendedRunPauseReason = typeof UnattendedRunPauseReason.Type;
+
+export const UnattendedRunOutcome = Schema.Literals(["completed", "stopped"]);
+export type UnattendedRunOutcome = typeof UnattendedRunOutcome.Type;
+
+export const UnattendedRunIterations = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: UNATTENDED_RUN_MAX_ITERATIONS }),
+);
+
+export const UnattendedRunState = Schema.Struct({
+  status: UnattendedRunStatus,
+  totalIterations: UnattendedRunIterations,
+  currentIteration: PositiveInt,
+  pauseReason: Schema.NullOr(UnattendedRunPauseReason),
+  startedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type UnattendedRunState = typeof UnattendedRunState.Type;
+
 export const ProviderRequestKind = Schema.Literals(["command", "file-read", "file-change"]);
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);

@@ -166,6 +166,10 @@
     "./relayTracing": {
       "types": "./src/relayTracing.ts",
       "import": "./src/relayTracing.ts"
+    },
+    "./unattendedRun": {
+      "types": "./src/unattendedRun.ts",
+      "import": "./src/unattendedRun.ts"
     }
   },
   "scripts": {

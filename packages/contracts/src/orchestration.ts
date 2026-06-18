@@ -686,6 +686,51 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadUnattendedRunStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.unattended-run.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  totalIterations: UnattendedRunIterations,
+  createdAt: IsoDateTime,
+});
+const ThreadUnattendedRunPauseCommand = Schema.Struct({
+  type: Schema.Literal("thread.unattended-run.pause"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+const ThreadUnattendedRunResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.unattended-run.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+const ThreadUnattendedRunStopCommand = Schema.Struct({
+  type: Schema.Literal("thread.unattended-run.stop"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+const ThreadUnattendedRunAdvanceCommand = Schema.Struct({
+  type: Schema.Literal("thread.unattended-run.advance"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+const ThreadUnattendedRunFaultCommand = Schema.Struct({
+  type: Schema.Literal("thread.unattended-run.fault"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  reason: UnattendedRunPauseReason,
+  createdAt: IsoDateTime,
+});
+const ThreadUnattendedRunCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.unattended-run.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -703,6 +748,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadUnattendedRunStartCommand,
+  ThreadUnattendedRunPauseCommand,
+  ThreadUnattendedRunResumeCommand,
+  ThreadUnattendedRunStopCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -724,6 +773,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadUnattendedRunStartCommand,
+  ThreadUnattendedRunPauseCommand,
+  ThreadUnattendedRunResumeCommand,
+  ThreadUnattendedRunStopCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -800,6 +853,9 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  ThreadUnattendedRunAdvanceCommand,
+  ThreadUnattendedRunFaultCommand,
+  ThreadUnattendedRunCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 

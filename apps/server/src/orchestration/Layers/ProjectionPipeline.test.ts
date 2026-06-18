@@ -2704,8 +2704,11 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         const snapshotQuery = yield* ProjectionSnapshotQuery;
         return yield* snapshotQuery.getThreadDetailById(threadId);
       }).pipe(
-        Effect.provide(OrchestrationProjectionSnapshotQueryLive),
-        Effect.provide(RepositoryIdentityResolverLive),
+        Effect.provide(
+          OrchestrationProjectionSnapshotQueryLive.pipe(
+            Layer.provide(RepositoryIdentityResolverLive),
+          ),
+        ),
       );
       assert.equal(threadDetail._tag, "Some");
       if (threadDetail._tag === "Some") {

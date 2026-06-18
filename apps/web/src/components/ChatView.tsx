@@ -177,6 +177,9 @@ import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./Branch
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { UnattendedRunDialog } from "./chat/UnattendedRunDialog";
+import { buildUnattendedRunBannerItem } from "./chat/unattendedRunBanner.tsx";
+import { useThreadActions } from "../hooks/useThreadActions";
 import {
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
@@ -1177,6 +1180,7 @@ function ChatViewContent(props: ChatViewProps) {
   // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false);
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
+  const [unattendedDialogOpen, setUnattendedDialogOpen] = useState(false);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
   const [terminalUiLaunchContext, setTerminalUiLaunchContext] =
@@ -1208,6 +1212,13 @@ function ChatViewContent(props: ChatViewProps) {
   const storeNewTerminal = useTerminalUiStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
+
+  const {
+    startUnattendedRun,
+    pauseUnattendedRun,
+    resumeUnattendedRun,
+    stopUnattendedRun,
+  } = useThreadActions();
 
   const fallbackDraftProjectRef = draftThread
     ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
@@ -1808,13 +1819,30 @@ function ChatViewContent(props: ChatViewProps) {
         },
       });
     }
+    if (activeThread?.unattendedRun && activeThreadRef) {
+      const ref = activeThreadRef;
+      const bannerItem = buildUnattendedRunBannerItem({
+        run: activeThread.unattendedRun,
+        onPause: () => void pauseUnattendedRun(ref),
+        onResume: () => void resumeUnattendedRun(ref),
+        onStop: () => void stopUnattendedRun(ref),
+      });
+      if (bannerItem) {
+        items.push(bannerItem);
+      }
+    }
     return items;
   }, [
     activeEnvironmentUnavailableState,
+    activeThread?.unattendedRun,
+    activeThreadRef,
     handleReconnectActiveEnvironment,
     navigate,
+    pauseUnattendedRun,
     reconnectingEnvironmentId,
+    resumeUnattendedRun,
     showVersionMismatchBanner,
+    stopUnattendedRun,
     versionMismatch,
     versionMismatchDismissKey,
     versionMismatchServerLabel,
@@ -4966,6 +4994,13 @@ function ChatViewContent(props: ChatViewProps) {
                     scheduleComposerFocus={scheduleComposerFocus}
                     setThreadError={setThreadError}
                     onExpandImage={onExpandTimelineImage}
+                    onStartUnattendedRun={() => setUnattendedDialogOpen(true)}
+                    canStartUnattendedRun={
+                      (!activeThread?.unattendedRun ||
+                        activeThread.unattendedRun.status === "completed" ||
+                        activeThread.unattendedRun.status === "stopped") &&
+                      !isWorking
+                    }
                   />
                 </div>
               </div>
@@ -5089,6 +5124,15 @@ function ChatViewContent(props: ChatViewProps) {
       {expandedImage && (
         <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
       )}
+
+      <UnattendedRunDialog
+        open={unattendedDialogOpen}
+        onOpenChange={setUnattendedDialogOpen}
+        onConfirm={(n) => {
+          if (activeThreadRef) void startUnattendedRun(activeThreadRef, n);
+          setUnattendedDialogOpen(false);
+        }}
+      />
     </div>
   );
 }

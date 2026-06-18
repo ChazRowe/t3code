@@ -30,6 +30,10 @@ interface UnattendedRunDialogProps {
 export function UnattendedRunDialog({ open, onOpenChange, onConfirm }: UnattendedRunDialogProps) {
   const [count, setCount] = React.useState(5);
 
+  React.useEffect(() => {
+    if (open) setCount(5);
+  }, [open]);
+
   const handleConfirm = () => {
     const clamped = Math.max(1, Math.min(UNATTENDED_RUN_MAX_ITERATIONS, count));
     onConfirm(clamped);

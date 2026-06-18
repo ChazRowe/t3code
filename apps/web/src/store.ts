@@ -22,6 +22,7 @@ import { isProviderDriverKind, ProviderDriverKind } from "@t3tools/contracts";
 import type { ThreadId, TurnId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { resolveModelSlugForProvider } from "@t3tools/shared/model";
+import { applyUnattendedRunEvent } from "@t3tools/shared/unattendedRun";
 import { create } from "zustand";
 import {
   type ChatMessage,
@@ -254,6 +255,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     worktreePath: thread.worktreePath,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
+    unattendedRun: thread.unattendedRun ?? null,
   };
 }
 
@@ -281,6 +283,7 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    unattendedRun: null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -329,6 +332,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    unattendedRun: thread.unattendedRun,
   };
 }
 
@@ -424,7 +428,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.archivedAt === right.archivedAt &&
     left.updatedAt === right.updatedAt &&
     left.branch === right.branch &&
-    left.worktreePath === right.worktreePath
+    left.worktreePath === right.worktreePath &&
+    left.unattendedRun === right.unattendedRun
   );
 }
 
@@ -1295,6 +1300,7 @@ function applyEnvironmentOrchestrationEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          unattendedRun: null,
         },
         environmentId,
       );
@@ -1550,6 +1556,17 @@ function applyEnvironmentOrchestrationEvent(
               updatedAt: event.occurredAt,
             },
       );
+
+    case "thread.unattended-run-started":
+    case "thread.unattended-run-iteration-advanced":
+    case "thread.unattended-run-paused":
+    case "thread.unattended-run-resumed":
+    case "thread.unattended-run-finished":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        unattendedRun: applyUnattendedRunEvent(thread.unattendedRun, event),
+        updatedAt: event.occurredAt,
+      }));
 
     case "thread.proposed-plan-upserted":
       return updateThreadState(state, event.payload.threadId, (thread) => {

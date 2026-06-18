@@ -532,6 +532,10 @@ export interface ChatComposerProps {
   scheduleComposerFocus: () => void;
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
+
+  // Unattended run
+  onStartUnattendedRun?: () => void;
+  canStartUnattendedRun?: boolean;
 }
 
 // --------------------------------------------------------------------------
@@ -607,6 +611,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     scheduleComposerFocus,
     setThreadError,
     onExpandImage,
+    onStartUnattendedRun,
+    canStartUnattendedRun,
   } = props;
 
   // ------------------------------------------------------------------
@@ -2516,6 +2522,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onToggleInteractionMode={toggleInteractionMode}
                     onTogglePlanSidebar={togglePlanSidebar}
                     onRuntimeModeChange={handleRuntimeModeChange}
+                    {...(onStartUnattendedRun !== undefined ? { onStartUnattendedRun } : {})}
+                    {...(canStartUnattendedRun !== undefined ? { canStartUnattendedRun } : {})}
                   />
                 ) : (
                   <>

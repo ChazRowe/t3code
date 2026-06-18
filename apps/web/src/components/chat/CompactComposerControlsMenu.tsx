@@ -1,6 +1,6 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon, ListTodoIcon } from "lucide-react";
+import { EllipsisIcon, ListTodoIcon, PlayIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -23,6 +23,8 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onStartUnattendedRun?: () => void;
+  canStartUnattendedRun?: boolean;
 }) {
   return (
     <Menu>
@@ -84,6 +86,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             </MenuItem>
           </>
         ) : null}
+        <MenuDivider />
+        <MenuItem onClick={props.onStartUnattendedRun} disabled={!props.canStartUnattendedRun}>
+          <PlayIcon className="size-4 shrink-0" />
+          Start unattended run…
+        </MenuItem>
       </MenuPopup>
     </Menu>
   );

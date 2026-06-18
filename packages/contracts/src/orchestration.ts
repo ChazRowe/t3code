@@ -391,6 +391,9 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  unattendedRun: Schema.NullOr(UnattendedRunState).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 

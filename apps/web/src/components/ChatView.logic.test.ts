@@ -385,6 +385,7 @@ const makeThread = (input?: {
   worktreePath: null,
   turnDiffSummaries: [],
   activities: [],
+  unattendedRun: null,
 });
 
 function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) {
@@ -428,6 +429,7 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
           updatedAt: thread.updatedAt,
           branch: thread.branch,
           worktreePath: thread.worktreePath,
+          unattendedRun: thread.unattendedRun,
         },
       ]),
     ),
@@ -626,6 +628,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      unattendedRun: null,
     });
 
     expect(
@@ -663,6 +666,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      unattendedRun: null,
     });
 
     expect(
@@ -709,6 +713,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      unattendedRun: null,
     });
 
     expect(
@@ -752,6 +757,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      unattendedRun: null,
     });
 
     expect(
@@ -795,6 +801,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      unattendedRun: null,
     });
 
     expect(
@@ -845,6 +852,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       worktreePath: null,
       turnDiffSummaries: [],
       activities: [],
+      unattendedRun: null,
     });
 
     expect(

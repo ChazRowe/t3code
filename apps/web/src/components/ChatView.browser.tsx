@@ -454,6 +454,7 @@ function createSnapshotForTargetUser(options: {
           lastError: null,
           updatedAt: NOW_ISO,
         },
+        unattendedRun: null,
       },
     ],
     updatedAt: NOW_ISO,
@@ -520,6 +521,7 @@ function addThreadToSnapshot(
           lastError: null,
           updatedAt: NOW_ISO,
         },
+        unattendedRun: null,
       },
     ],
   };
@@ -855,6 +857,7 @@ function createSnapshotWithSecondaryProject(options?: {
             updatedAt: isoAt(31),
           },
           archivedAt: null,
+          unattendedRun: null,
         },
       ]
     : [];
@@ -887,6 +890,7 @@ function createSnapshotWithSecondaryProject(options?: {
             updatedAt: isoAt(25),
           },
           archivedAt: isoAt(26),
+          unattendedRun: null,
         },
       ]
     : [];

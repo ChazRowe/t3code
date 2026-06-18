@@ -56,6 +56,7 @@ const BASE_THREAD: OrchestrationThread = {
   activities: [],
   checkpoints: [],
   session: null,
+  unattendedRun: null,
 };
 
 const TARGET = {

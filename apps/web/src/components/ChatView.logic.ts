@@ -52,6 +52,7 @@ export function buildLocalDraftThread(
     turnDiffSummaries: [],
     activities: [],
     proposedPlans: [],
+    unattendedRun: null,
   };
 }
 

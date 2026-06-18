@@ -231,6 +231,7 @@ function createMinimalSnapshot(): OrchestrationReadModel {
           lastError: null,
           updatedAt: NOW_ISO,
         },
+        unattendedRun: null,
       },
     ],
     updatedAt: NOW_ISO,

@@ -97,6 +97,7 @@ export function applyThreadDetailEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          unattendedRun: null,
         },
       };
 

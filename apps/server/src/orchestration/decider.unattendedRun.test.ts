@@ -123,4 +123,93 @@ it.layer(NodeServices.layer)("decider unattended run", (it) => {
       expect((event.payload as { outcome: string }).outcome).toBe("completed");
     }),
   );
+
+  it.effect("pause on a running run emits paused with reason manual", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedThread({ started: true, total: 3 });
+      const result = yield* decideOrchestrationCommand({
+        command: { type: "thread.unattended-run.pause", commandId: CommandId.make("c6"),
+          threadId: asThreadId("t1"), createdAt: now },
+        readModel,
+      });
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event.type).toBe("thread.unattended-run-paused");
+      expect((event.payload as { reason: string }).reason).toBe("manual");
+    }),
+  );
+
+  it.effect("stop on a running run emits finished/stopped with currentIteration", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedThread({ started: true, total: 3 });
+      const result = yield* decideOrchestrationCommand({
+        command: { type: "thread.unattended-run.stop", commandId: CommandId.make("c7"),
+          threadId: asThreadId("t1"), createdAt: now },
+        readModel,
+      });
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event.type).toBe("thread.unattended-run-finished");
+      expect((event.payload as { outcome: string }).outcome).toBe("stopped");
+      expect((event.payload as { iteration: number }).iteration).toBe(1);
+    }),
+  );
+
+  it.effect("resume on a paused run emits resumed", () =>
+    Effect.gen(function* () {
+      let readModel = yield* seedThread({ started: true, total: 3 });
+      // Inject paused state directly (projector support comes in Task 9).
+      readModel = {
+        ...readModel,
+        threads: readModel.threads.map((t) =>
+          t.id === asThreadId("t1")
+            ? {
+                ...t,
+                unattendedRun: {
+                  status: "paused" as const,
+                  totalIterations: 3,
+                  currentIteration: 1,
+                  pauseReason: "no-sentinel" as const,
+                  startedAt: now,
+                  updatedAt: now,
+                },
+              }
+            : t,
+        ),
+      };
+      const result = yield* decideOrchestrationCommand({
+        command: { type: "thread.unattended-run.resume", commandId: CommandId.make("c8"),
+          threadId: asThreadId("t1"), createdAt: now },
+        readModel,
+      });
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event.type).toBe("thread.unattended-run-resumed");
+    }),
+  );
+
+  it.effect("resume on a running run fails", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedThread({ started: true, total: 3 });
+      const exit = yield* Effect.exit(
+        decideOrchestrationCommand({
+          command: { type: "thread.unattended-run.resume", commandId: CommandId.make("c9"),
+            threadId: asThreadId("t1"), createdAt: now },
+          readModel,
+        }),
+      );
+      expect(exit._tag).toBe("Failure");
+    }),
+  );
+
+  it.effect("stop on a thread with no run fails", () =>
+    Effect.gen(function* () {
+      const readModel = yield* seedThread({});
+      const exit = yield* Effect.exit(
+        decideOrchestrationCommand({
+          command: { type: "thread.unattended-run.stop", commandId: CommandId.make("c10"),
+            threadId: asThreadId("t1"), createdAt: now },
+          readModel,
+        }),
+      );
+      expect(exit._tag).toBe("Failure");
+    }),
+  );
 });

@@ -274,19 +274,20 @@ const make = Effect.gen(function* () {
       snapshot.threads.filter(
         (t) => t.unattendedRun?.status === "running" && t.session?.status !== "running",
       ),
-      (thread) => issueContinueTurn(thread),
+      (thread) =>
+        issueContinueTurn(thread).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.failCause(cause)
+              : Effect.logWarning("unattended run reactor rehydration failed", {
+                  threadId: thread.id,
+                  cause: Cause.pretty(cause),
+                }),
+          ),
+        ),
       { concurrency: 1, discard: true },
     );
-  }).pipe(
-    Effect.orDie,
-    Effect.catchCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.failCause(cause)
-        : Effect.logWarning("unattended run reactor rehydration failed", {
-            cause: Cause.pretty(cause),
-          }),
-    ),
-  );
+  }).pipe(Effect.orDie);
 
   const start: UnattendedRunReactorShape["start"] = Effect.fn("start")(function* () {
     yield* rehydrate;

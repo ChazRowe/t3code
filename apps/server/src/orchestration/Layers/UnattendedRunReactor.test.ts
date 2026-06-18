@@ -4,6 +4,7 @@ import {
   MessageId,
   type ModelSelection,
   type OrchestrationSession,
+  type OrchestrationThread,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -363,4 +364,145 @@ effectIt.effect(
         `expected a continue turn; got ${userMessages.length} user message(s)`,
       );
     }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+const threadId2 = ThreadId.make("thread-2");
+
+// Build a layer identical to makeTestLayer() except the ProjectionSnapshotQuery
+// wraps getSnapshot() to prepend a ghost thread whose ID does not exist in the
+// real engine. When the reactor rehydrates, dispatching issueContinueTurn for
+// the ghost thread fails (OrchestrationCommandInvariantError via the engine),
+// exercising the per-thread catchCause isolation introduced in Task 14.
+const makeTestLayerWithGhostThread = () => {
+  const ghostThread: OrchestrationThread = {
+    id: ThreadId.make("ghost-thread-nonexistent"),
+    projectId,
+    title: "Ghost Thread",
+    modelSelection,
+    runtimeMode: "full-access",
+    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: now,
+    updatedAt: now,
+    archivedAt: null,
+    deletedAt: null,
+    messages: [],
+    proposedPlans: [],
+    activities: [],
+    checkpoints: [],
+    session: null,
+    unattendedRun: {
+      status: "running",
+      totalIterations: 2,
+      currentIteration: 1,
+      pauseReason: null,
+      startedAt: now,
+      updatedAt: now,
+    },
+  };
+
+  const orchestrationLayer = OrchestrationEngineLive.pipe(
+    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+    Layer.provide(OrchestrationProjectionPipelineLive),
+    Layer.provide(OrchestrationEventStoreLive),
+    Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provide(RepositoryIdentityResolverLive),
+    Layer.provide(SqlitePersistenceMemory),
+  );
+  const realSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provide(RepositoryIdentityResolverLive),
+    Layer.provide(SqlitePersistenceMemory),
+  );
+  // Wrap the real snapshot query so getSnapshot() prepends the ghost thread.
+  const wrappedSnapshotLayer = Layer.effect(
+    ProjectionSnapshotQuery,
+    Effect.gen(function* () {
+      const real = yield* ProjectionSnapshotQuery;
+      return {
+        ...real,
+        getSnapshot: () =>
+          real.getSnapshot().pipe(
+            Effect.map((snapshot) => ({
+              ...snapshot,
+              threads: [ghostThread, ...snapshot.threads],
+            })),
+          ),
+      };
+    }),
+  ).pipe(Layer.provide(realSnapshotLayer));
+
+  return UnattendedRunReactorLive.pipe(
+    Layer.provideMerge(orchestrationLayer),
+    Layer.provideMerge(wrappedSnapshotLayer),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(NodeServices.layer),
+  );
+};
+
+effectIt.effect(
+  "rehydration is per-thread isolated: first thread failure does not skip second thread",
+  () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const reactor = yield* UnattendedRunReactor;
+
+      // Seed a real project and thread-2 with a running unattended run.
+      // The reactor has NOT started yet. The wrapped snapshot layer will also
+      // inject a ghost thread (thread-1) that does not exist in the engine,
+      // so its issueContinueTurn dispatch will fail.
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-isolation-project"),
+        projectId,
+        title: "Isolation Project",
+        workspaceRoot: "/tmp/isolation-project",
+        defaultModelSelection: modelSelection,
+        createdAt: now,
+      });
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-isolation-thread2"),
+        threadId: threadId2,
+        projectId,
+        title: "Thread 2",
+        modelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      });
+      yield* engine.dispatch({
+        type: "thread.unattended-run.start",
+        commandId: CommandId.make("cmd-isolation-run2"),
+        threadId: threadId2,
+        totalIterations: 2,
+        createdAt: now,
+      });
+
+      // Confirm thread-2 has a running unattended run with no session.
+      const before2 = yield* snapshotQuery
+        .getThreadDetailById(threadId2)
+        .pipe(Effect.map(Option.getOrUndefined));
+      assert.strictEqual(before2?.unattendedRun?.status, "running");
+      assert.isNull(before2?.session ?? null);
+
+      // Start the reactor. The wrapped getSnapshot() returns [ghost, thread-2].
+      // Ghost dispatch fails → per-thread catchCause logs and continues.
+      // Thread-2 dispatch succeeds → continue turn is issued.
+      yield* reactor.start();
+      yield* reactor.drain;
+
+      const after2 = yield* snapshotQuery
+        .getThreadDetailById(threadId2)
+        .pipe(Effect.map(Option.getOrUndefined));
+      const userMessages2 = after2?.messages.filter((m) => m.role === "user") ?? [];
+      assert.ok(
+        userMessages2.some((m) => m.text === CONTINUE_MESSAGE),
+        `expected thread-2 to receive a continue turn despite ghost thread failure; got ${userMessages2.length} user message(s)`,
+      );
+    }).pipe(Effect.provide(Layer.fresh(makeTestLayerWithGhostThread()))),
 );

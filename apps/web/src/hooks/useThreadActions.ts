@@ -283,10 +283,59 @@ export function useThreadActions() {
     [confirmThreadDelete, deleteThread, resolveThreadTarget],
   );
 
+  const startUnattendedRun = useCallback(async (target: ScopedThreadRef, totalIterations: number) => {
+    const api = readEnvironmentApi(target.environmentId);
+    if (!api) return;
+    await api.orchestration.dispatchCommand({
+      type: "thread.unattended-run.start",
+      commandId: newCommandId(),
+      threadId: target.threadId,
+      totalIterations,
+      createdAt: new Date().toISOString(),
+    });
+  }, []);
+
+  const pauseUnattendedRun = useCallback(async (target: ScopedThreadRef) => {
+    const api = readEnvironmentApi(target.environmentId);
+    if (!api) return;
+    await api.orchestration.dispatchCommand({
+      type: "thread.unattended-run.pause",
+      commandId: newCommandId(),
+      threadId: target.threadId,
+      createdAt: new Date().toISOString(),
+    });
+  }, []);
+
+  const resumeUnattendedRun = useCallback(async (target: ScopedThreadRef) => {
+    const api = readEnvironmentApi(target.environmentId);
+    if (!api) return;
+    await api.orchestration.dispatchCommand({
+      type: "thread.unattended-run.resume",
+      commandId: newCommandId(),
+      threadId: target.threadId,
+      createdAt: new Date().toISOString(),
+    });
+  }, []);
+
+  const stopUnattendedRun = useCallback(async (target: ScopedThreadRef) => {
+    const api = readEnvironmentApi(target.environmentId);
+    if (!api) return;
+    await api.orchestration.dispatchCommand({
+      type: "thread.unattended-run.stop",
+      commandId: newCommandId(),
+      threadId: target.threadId,
+      createdAt: new Date().toISOString(),
+    });
+  }, []);
+
   return {
     archiveThread,
     unarchiveThread,
     deleteThread,
     confirmAndDeleteThread,
+    startUnattendedRun,
+    pauseUnattendedRun,
+    resumeUnattendedRun,
+    stopUnattendedRun,
   };
 }

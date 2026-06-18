@@ -888,6 +888,11 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.unattended-run-started",
+  "thread.unattended-run-iteration-advanced",
+  "thread.unattended-run-paused",
+  "thread.unattended-run-resumed",
+  "thread.unattended-run-finished",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -972,6 +977,33 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadUnattendedRunStartedPayload = Schema.Struct({
+  threadId: ThreadId,
+  totalIterations: UnattendedRunIterations,
+  startedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export const ThreadUnattendedRunIterationAdvancedPayload = Schema.Struct({
+  threadId: ThreadId,
+  iteration: PositiveInt,
+  updatedAt: IsoDateTime,
+});
+export const ThreadUnattendedRunPausedPayload = Schema.Struct({
+  threadId: ThreadId,
+  reason: UnattendedRunPauseReason,
+  updatedAt: IsoDateTime,
+});
+export const ThreadUnattendedRunResumedPayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+export const ThreadUnattendedRunFinishedPayload = Schema.Struct({
+  threadId: ThreadId,
+  outcome: UnattendedRunOutcome,
+  iteration: PositiveInt,
   updatedAt: IsoDateTime,
 });
 
@@ -1193,6 +1225,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unattended-run-started"),
+    payload: ThreadUnattendedRunStartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unattended-run-iteration-advanced"),
+    payload: ThreadUnattendedRunIterationAdvancedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unattended-run-paused"),
+    payload: ThreadUnattendedRunPausedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unattended-run-resumed"),
+    payload: ThreadUnattendedRunResumedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unattended-run-finished"),
+    payload: ThreadUnattendedRunFinishedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

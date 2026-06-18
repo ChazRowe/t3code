@@ -8,6 +8,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import { applyUnattendedRunEvent } from "@t3tools/shared/unattendedRun";
+
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
@@ -291,6 +293,7 @@ export function projectEvent(
             activities: [],
             checkpoints: [],
             session: null,
+            unattendedRun: null,
           },
           event.type,
           "thread",
@@ -691,6 +694,22 @@ export function projectEvent(
           };
         }),
       );
+
+    case "thread.unattended-run-started":
+    case "thread.unattended-run-iteration-advanced":
+    case "thread.unattended-run-paused":
+    case "thread.unattended-run-resumed":
+    case "thread.unattended-run-finished":
+      return Effect.succeed({
+        ...nextBase,
+        threads: updateThread(nextBase.threads, event.payload.threadId, {
+          unattendedRun: applyUnattendedRunEvent(
+            nextBase.threads.find((t) => t.id === event.payload.threadId)?.unattendedRun ?? null,
+            event,
+          ),
+          updatedAt: event.occurredAt,
+        }),
+      });
 
     default:
       return Effect.succeed(nextBase);

@@ -95,6 +95,7 @@ describe("orchestration projector", () => {
         activities: [],
         checkpoints: [],
         session: null,
+        unattendedRun: null,
       },
     ]);
   });
@@ -951,5 +952,38 @@ describe("orchestration projector", () => {
     expect(thread?.checkpoints).toHaveLength(500);
     expect(thread?.checkpoints[0]?.turnId).toBe("turn-100");
     expect(thread?.checkpoints.at(-1)?.turnId).toBe("turn-599");
+  });
+
+  it("projects an unattended run lifecycle onto the thread", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    let model = await Effect.runPromise(
+      projectEvent(createEmptyReadModel(now), makeEvent({
+        sequence: 1, type: "thread.created", aggregateKind: "thread", aggregateId: "thread-1",
+        occurredAt: now, commandId: "cmd-create",
+        payload: { threadId: "thread-1", projectId: "project-1", title: "demo",
+          modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null,
+          createdAt: now, updatedAt: now } }),
+      ),
+    );
+    expect(model.threads[0]?.unattendedRun).toBe(null);
+
+    model = await Effect.runPromise(
+      projectEvent(model, makeEvent({
+        sequence: 2, type: "thread.unattended-run-started", aggregateKind: "thread",
+        aggregateId: "thread-1", occurredAt: now, commandId: null,
+        payload: { threadId: "thread-1", totalIterations: 4, startedAt: now, updatedAt: now } }),
+      ),
+    );
+    expect(model.threads[0]?.unattendedRun).toMatchObject({ status: "running", totalIterations: 4, currentIteration: 1 });
+
+    model = await Effect.runPromise(
+      projectEvent(model, makeEvent({
+        sequence: 3, type: "thread.unattended-run-paused", aggregateKind: "thread",
+        aggregateId: "thread-1", occurredAt: now, commandId: null,
+        payload: { threadId: "thread-1", reason: "no-sentinel", updatedAt: now } }),
+      ),
+    );
+    expect(model.threads[0]?.unattendedRun).toMatchObject({ status: "paused", pauseReason: "no-sentinel" });
   });
 });

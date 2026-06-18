@@ -23,7 +23,7 @@ import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryI
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { UnattendedRunReactor } from "../Services/UnattendedRunReactor.ts";
-import { WRAP_SENTINEL } from "../unattendedRun.ts";
+import { CONTINUE_MESSAGE, WRAP_SENTINEL } from "../unattendedRun.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -299,4 +299,68 @@ effectIt.effect("completes after the final iteration ends with the wrap sentinel
     const afterSecond = yield* harness.readThread;
     assert.strictEqual(afterSecond?.unattendedRun?.status, "completed");
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+effectIt.effect(
+  "rehydrates a running unattended run with idle session when reactor starts",
+  () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const reactor = yield* UnattendedRunReactor;
+
+      // Seed persistence: create project + thread + start an unattended run.
+      // The reactor has NOT started yet, so no preamble turn is issued and no
+      // session is created — the thread has unattendedRun.status === "running"
+      // with session === null.
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-rehydrate-project"),
+        projectId,
+        title: "Rehydrate Project",
+        workspaceRoot: "/tmp/rehydrate-project",
+        defaultModelSelection: modelSelection,
+        createdAt: now,
+      });
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-rehydrate-thread"),
+        threadId,
+        projectId,
+        title: "Rehydrate Thread",
+        modelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      });
+      yield* engine.dispatch({
+        type: "thread.unattended-run.start",
+        commandId: CommandId.make("cmd-rehydrate-run-start"),
+        threadId,
+        totalIterations: 2,
+        createdAt: now,
+      });
+
+      // Confirm the thread has a running unattended run with no active session.
+      const beforeStart = yield* snapshotQuery
+        .getThreadDetailById(threadId)
+        .pipe(Effect.map(Option.getOrUndefined));
+      assert.strictEqual(beforeStart?.unattendedRun?.status, "running");
+      assert.isNull(beforeStart?.session ?? null);
+
+      // Now start the reactor — rehydration should issue a continue turn.
+      yield* reactor.start();
+      yield* reactor.drain;
+
+      const afterStart = yield* snapshotQuery
+        .getThreadDetailById(threadId)
+        .pipe(Effect.map(Option.getOrUndefined));
+      const userMessages = afterStart?.messages.filter((m) => m.role === "user") ?? [];
+      assert.ok(
+        userMessages.some((m) => m.text === CONTINUE_MESSAGE),
+        `expected a continue turn; got ${userMessages.length} user message(s)`,
+      );
+    }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );

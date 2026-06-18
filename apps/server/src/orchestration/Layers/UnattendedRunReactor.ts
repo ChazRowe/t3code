@@ -268,7 +268,28 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  const rehydrate = Effect.gen(function* () {
+    const snapshot = yield* projectionSnapshotQuery.getSnapshot();
+    yield* Effect.forEach(
+      snapshot.threads.filter(
+        (t) => t.unattendedRun?.status === "running" && t.session?.status !== "running",
+      ),
+      (thread) => issueContinueTurn(thread),
+      { concurrency: 1, discard: true },
+    );
+  }).pipe(
+    Effect.orDie,
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause)
+        : Effect.logWarning("unattended run reactor rehydration failed", {
+            cause: Cause.pretty(cause),
+          }),
+    ),
+  );
+
   const start: UnattendedRunReactorShape["start"] = Effect.fn("start")(function* () {
+    yield* rehydrate;
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => worker.enqueue(event)),
     );

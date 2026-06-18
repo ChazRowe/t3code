@@ -33,6 +33,7 @@ import {
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -2697,6 +2698,22 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       const parsed = JSON.parse(rows[0]!.unattendedRun!) as { status: string; totalIterations: number };
       assert.equal(parsed.status, "running");
       assert.equal(parsed.totalIterations, 5);
+
+      // Verify the decode-on-read path exercised by Schema.NullOr(Schema.fromJsonString(UnattendedRunState))
+      const threadDetail = yield* Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        return yield* snapshotQuery.getThreadDetailById(threadId);
+      }).pipe(
+        Effect.provide(OrchestrationProjectionSnapshotQueryLive),
+        Effect.provide(RepositoryIdentityResolverLive),
+      );
+      assert.equal(threadDetail._tag, "Some");
+      if (threadDetail._tag === "Some") {
+        const { unattendedRun } = threadDetail.value;
+        assert.isNotNull(unattendedRun);
+        assert.equal(unattendedRun!.status, "running");
+        assert.equal(unattendedRun!.totalIterations, 5);
+      }
     }),
   );
 });

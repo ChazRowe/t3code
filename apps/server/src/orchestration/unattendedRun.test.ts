@@ -24,6 +24,12 @@ describe("unattended run constants", () => {
     expect(preamble).toContain(WRAP_SENTINEL);
   });
 
+  it("preamble states a ~35% wrap-budget ceiling", () => {
+    const preamble = buildUnattendedPreamble(5);
+    expect(preamble).toContain("35%");
+    expect(preamble.toLowerCase()).toContain("ceiling");
+  });
+
   it("has a non-empty continue message", () => {
     expect(CONTINUE_MESSAGE.length).toBeGreaterThan(0);
   });

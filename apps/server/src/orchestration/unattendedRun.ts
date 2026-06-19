@@ -20,6 +20,11 @@ export const buildUnattendedPreamble = (totalIterations: number): string =>
     `on its own line. Seeing that line, I will clear the context and send you a`,
     `"continue" so you can resume from the handoff.`,
     ``,
+    `Treat about 35% of your context window as your wrap ceiling. When you cross`,
+    `it, finish your current step, invoke your wrap skill, and emit the sentinel —`,
+    `don't keep going to a "natural" stopping point. Wrapping early and often is`,
+    `correct here.`,
+    ``,
     `If you instead need a human decision, STOP and ask your question WITHOUT the`,
     `sentinel line — the run will pause for me.`,
   ].join("\n");

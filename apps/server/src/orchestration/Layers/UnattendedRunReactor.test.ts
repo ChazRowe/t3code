@@ -25,7 +25,7 @@ import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryI
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { UnattendedRunReactor } from "../Services/UnattendedRunReactor.ts";
-import { CONTINUE_MESSAGE, WRAP_SENTINEL } from "../unattendedRun.ts";
+import { CONTEXT_FRESH_ACTIVITY_KIND, CONTINUE_MESSAGE, WRAP_SENTINEL } from "../unattendedRun.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
@@ -495,6 +495,31 @@ effectIt.effect("emits a context-cleared marker with the last usage when an iter
     assert.strictEqual(cleared.length, 1);
     assert.ok(cleared[0]?.summary.includes("iteration 1 → 2"), cleared[0]?.summary);
     assert.ok(cleared[0]?.summary.includes("517k"), cleared[0]?.summary);
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+effectIt.effect("emits exactly one fresh-context marker on the first usage after a clear", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(3);
+
+    yield* harness.emitContextWindowUpdated("iter1", 517_000, 1_000_000);
+    yield* harness.driveTurnEnd("iter1", `wrap one\n${WRAP_SENTINEL}`);
+
+    // The fresh session (iteration 2) reports its first, small usage.
+    yield* harness.emitContextWindowUpdated("fresh", 4_000, 1_000_000);
+
+    let thread = yield* harness.readThread;
+    let fresh = thread?.activities.filter((a) => a.kind === CONTEXT_FRESH_ACTIVITY_KIND) ?? [];
+    assert.strictEqual(fresh.length, 1);
+    assert.ok(fresh[0]?.summary.includes("iteration 2"), fresh[0]?.summary);
+    assert.ok(fresh[0]?.summary.includes("4k"), fresh[0]?.summary);
+
+    // A second usage update within the same iteration must NOT add another marker.
+    yield* harness.emitContextWindowUpdated("fresh2", 9_000, 1_000_000);
+    thread = yield* harness.readThread;
+    fresh = thread?.activities.filter((a) => a.kind === CONTEXT_FRESH_ACTIVITY_KIND) ?? [];
+    assert.strictEqual(fresh.length, 1);
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 

@@ -18,8 +18,10 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import {
   buildContextClearedSummary,
+  buildContextFreshSummary,
   buildUnattendedPreamble,
   CONTEXT_CLEARED_ACTIVITY_KIND,
+  CONTEXT_FRESH_ACTIVITY_KIND,
   CONTINUE_MESSAGE,
   messageHasWrapSentinel,
 } from "../unattendedRun.ts";
@@ -303,9 +305,32 @@ const make = Effect.gen(function* () {
 
           if (activity.kind === "context-window.updated") {
             const usage = readContextWindowUsage(activity.payload);
-            if (usage) {
-              latestContextUsage.set(threadId, usage);
+            if (!usage) {
+              return;
             }
+            latestContextUsage.set(threadId, usage);
+            if (!awaitingFreshContextReading.get(threadId)) {
+              return;
+            }
+            const thread = yield* readThread(threadId);
+            if (thread?.unattendedRun?.status !== "running") {
+              return;
+            }
+            awaitingFreshContextReading.set(threadId, false);
+            yield* appendMarker(
+              thread.id,
+              CONTEXT_FRESH_ACTIVITY_KIND,
+              buildContextFreshSummary({
+                iteration: thread.unattendedRun.currentIteration,
+                usedTokens: usage.usedTokens,
+                maxTokens: usage.maxTokens,
+              }),
+              {
+                iteration: thread.unattendedRun.currentIteration,
+                usedTokens: usage.usedTokens,
+                maxTokens: usage.maxTokens,
+              },
+            );
             return;
           }
 

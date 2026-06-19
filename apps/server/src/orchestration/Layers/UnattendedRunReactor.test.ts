@@ -326,12 +326,35 @@ const setupHarness = Effect.fn("setupHarness")(function* () {
       yield* reactor.drain;
     });
 
+  // Emit a `context-window.updated` activity the way the provider does as token
+  // usage is reported during a turn.
+  const emitContextWindowUpdated = (label: string, usedTokens: number, maxTokens: number) =>
+    Effect.gen(function* () {
+      yield* engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make(`cmd-ctx-${label}`),
+        threadId,
+        activity: {
+          id: EventId.make(`ctx-${label}`),
+          tone: "info",
+          kind: "context-window.updated",
+          summary: "Context window updated",
+          payload: { usedTokens, maxTokens },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      });
+      yield* reactor.drain;
+    });
+
   return {
     readThread,
     startUnattendedRun,
     driveTurnEnd,
     emitSessionStatus,
     emitUserInputRequested,
+    emitContextWindowUpdated,
   };
 });
 
@@ -456,6 +479,22 @@ effectIt.effect("pauses with awaiting-input when the agent requests user input m
     const thread = yield* harness.readThread;
     assert.strictEqual(thread?.unattendedRun?.status, "paused");
     assert.strictEqual(thread?.unattendedRun?.pauseReason, "awaiting-input");
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+effectIt.effect("emits a context-cleared marker with the last usage when an iteration clears", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(3);
+
+    yield* harness.emitContextWindowUpdated("iter1", 517_000, 1_000_000);
+    yield* harness.driveTurnEnd("iter1", `wrap one\n${WRAP_SENTINEL}`);
+
+    const thread = yield* harness.readThread;
+    const cleared = thread?.activities.filter((a) => a.kind === "unattended.context-cleared") ?? [];
+    assert.strictEqual(cleared.length, 1);
+    assert.ok(cleared[0]?.summary.includes("iteration 1 → 2"), cleared[0]?.summary);
+    assert.ok(cleared[0]?.summary.includes("517k"), cleared[0]?.summary);
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 

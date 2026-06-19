@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import {
   CommandId,
+  EventId,
   MessageId,
   type OrchestrationEvent,
   type OrchestrationThread,
@@ -16,7 +17,9 @@ import {
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import {
+  buildContextClearedSummary,
   buildUnattendedPreamble,
+  CONTEXT_CLEARED_ACTIVITY_KIND,
   CONTINUE_MESSAGE,
   messageHasWrapSentinel,
 } from "../unattendedRun.ts";
@@ -76,6 +79,7 @@ const make = Effect.gen(function* () {
   const freshMessageId = crypto.randomUUIDv4.pipe(
     Effect.map((uuid) => MessageId.make(`unattended:${uuid}`)),
   );
+  const freshEventId = crypto.randomUUIDv4.pipe(Effect.map((uuid) => EventId.make(uuid)));
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   // Per-thread accumulator of the latest assistant text (reset at turn start).
@@ -84,6 +88,12 @@ const make = Effect.gen(function* () {
   // started? Distinguishes a real turn end (idle/ready after running) from a
   // freshly recreated session's warm-up status (idle/ready before running).
   const sawRunningSinceTurnStart = new Map<string, boolean>();
+  // Per-thread latest reported context-window usage (from `context-window.updated`
+  // activities), used to label the context-clear markers.
+  const latestContextUsage = new Map<string, { usedTokens: number; maxTokens: number }>();
+  // Per-thread flag: a clear just happened and we still owe a "fresh" marker for
+  // the next context-window reading.
+  const awaitingFreshContextReading = new Map<string, boolean>();
 
   const readThread = (threadId: string) =>
     projectionSnapshotQuery
@@ -120,6 +130,51 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const readContextWindowUsage = (
+    payload: unknown,
+  ): { usedTokens: number; maxTokens: number } | undefined => {
+    if (payload === null || typeof payload !== "object") return undefined;
+    const record = payload as Record<string, unknown>;
+    const usedTokens = record.usedTokens;
+    const maxTokens = record.maxTokens;
+    if (typeof usedTokens === "number" && typeof maxTokens === "number" && maxTokens > 0) {
+      return { usedTokens, maxTokens };
+    }
+    return undefined;
+  };
+
+  // Append a marker activity. Best-effort: a failure here must never fault or
+  // stall the run, so non-interrupt causes are logged and swallowed.
+  const appendMarker = (
+    threadId: OrchestrationThread["id"],
+    kind: string,
+    summary: string,
+    payload: unknown,
+  ) =>
+    Effect.gen(function* () {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: yield* serverCommandId("unattended-marker"),
+        threadId,
+        activity: {
+          id: yield* freshEventId,
+          tone: "info",
+          kind,
+          summary,
+          payload,
+          turnId: null,
+          createdAt: yield* nowIso,
+        },
+        createdAt: yield* nowIso,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("unattended marker append failed", { cause: Cause.pretty(cause) }),
+      ),
+    );
+
   // Stop the session, wait for it to settle, advance the iteration, then re-arm
   // the loop with a continue turn. Any failure becomes a fault rather than an
   // unhandled defect.
@@ -149,6 +204,24 @@ const make = Effect.gen(function* () {
       if (!settled) {
         return yield* new UnattendedRunStopTimeoutError({ threadId: thread.id });
       }
+
+      const clearedFrom = thread.unattendedRun?.currentIteration ?? 0;
+      const clearedUsage = latestContextUsage.get(thread.id);
+      yield* appendMarker(
+        thread.id,
+        CONTEXT_CLEARED_ACTIVITY_KIND,
+        buildContextClearedSummary({
+          fromIteration: clearedFrom,
+          toIteration: clearedFrom + 1,
+          ...(clearedUsage ?? {}),
+        }),
+        {
+          fromIteration: clearedFrom,
+          toIteration: clearedFrom + 1,
+          ...(clearedUsage ?? {}),
+        },
+      );
+      awaitingFreshContextReading.set(thread.id, true);
 
       yield* orchestrationEngine.dispatch({
         type: "thread.unattended-run.advance",
@@ -225,16 +298,27 @@ const make = Effect.gen(function* () {
           return;
         }
         case "thread.activity-appended": {
+          const activity = event.payload.activity;
+          const threadId = event.payload.threadId;
+
+          if (activity.kind === "context-window.updated") {
+            const usage = readContextWindowUsage(activity.payload);
+            if (usage) {
+              latestContextUsage.set(threadId, usage);
+            }
+            return;
+          }
+
           // The agent asked the human a question via an interactive tool
           // (AskUserQuestion). That SUSPENDS the turn waiting for an answer —
           // no turn-end (idle/ready) fires — so the no-sentinel pause path
           // never triggers and the run would hang. Pause it here for the human;
           // leave the session/turn suspended so they can answer in place, then
           // resume the run when ready.
-          if (event.payload.activity.kind !== "user-input.requested") {
+          if (activity.kind !== "user-input.requested") {
             return;
           }
-          const thread = yield* readThread(event.payload.threadId);
+          const thread = yield* readThread(threadId);
           if (thread?.unattendedRun?.status !== "running") {
             return;
           }

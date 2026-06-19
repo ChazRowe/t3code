@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  buildContextClearedSummary,
+  buildContextFreshSummary,
   buildUnattendedPreamble,
   CONTINUE_MESSAGE,
+  CONTEXT_CLEARED_ACTIVITY_KIND,
+  CONTEXT_FRESH_ACTIVITY_KIND,
   messageHasWrapSentinel,
   WRAP_SENTINEL,
 } from "./unattendedRun.ts";
@@ -32,5 +36,35 @@ describe("unattended run constants", () => {
 
   it("has a non-empty continue message", () => {
     expect(CONTINUE_MESSAGE.length).toBeGreaterThan(0);
+  });
+});
+
+describe("context-clear marker formatting", () => {
+  it("exposes the two marker kinds", () => {
+    expect(CONTEXT_CLEARED_ACTIVITY_KIND).toBe("unattended.context-cleared");
+    expect(CONTEXT_FRESH_ACTIVITY_KIND).toBe("unattended.context-fresh");
+  });
+
+  it("formats a cleared marker with before-usage and percentage", () => {
+    expect(
+      buildContextClearedSummary({
+        fromIteration: 4,
+        toIteration: 5,
+        usedTokens: 517_000,
+        maxTokens: 1_000_000,
+      }),
+    ).toBe("Context cleared · iteration 4 → 5 · before 517k / 1M (52%)");
+  });
+
+  it("formats a fresh marker with the new usage and a sub-1% percentage", () => {
+    expect(
+      buildContextFreshSummary({ iteration: 5, usedTokens: 4_000, maxTokens: 1_000_000 }),
+    ).toBe("Fresh context · iteration 5 · now 4k / 1M (0.4%)");
+  });
+
+  it("handles unknown usage on the cleared marker", () => {
+    expect(buildContextClearedSummary({ fromIteration: 1, toIteration: 2 })).toBe(
+      "Context cleared · iteration 1 → 2 · before usage unknown",
+    );
   });
 });

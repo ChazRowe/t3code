@@ -32,3 +32,53 @@ export const buildUnattendedPreamble = (totalIterations: number): string =>
 /** Message sent for iterations 2..N after the context is cleared. */
 export const CONTINUE_MESSAGE =
   "continue — read the latest handoff document and resume the unattended run.";
+
+/** Activity kind for the marker emitted when an iteration's context is cleared. */
+export const CONTEXT_CLEARED_ACTIVITY_KIND = "unattended.context-cleared";
+/** Activity kind for the marker emitted when the fresh session first reports usage. */
+export const CONTEXT_FRESH_ACTIVITY_KIND = "unattended.context-fresh";
+
+/** Compact token count: 1_000_000 -> "1M", 517_000 -> "517k", 4_000 -> "4k". */
+const formatTokens = (tokens: number): string =>
+  tokens >= 1_000_000
+    ? `${Number((tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1))}M`
+    : tokens >= 1_000
+      ? `${Math.round(tokens / 1_000)}k`
+      : `${tokens}`;
+
+/** Percentage of the window used; one decimal under 1%, whole numbers otherwise. */
+const formatPercent = (usedTokens: number, maxTokens: number): string => {
+  if (maxTokens <= 0) return "—";
+  const pct = (usedTokens / maxTokens) * 100;
+  return pct < 1 ? `${pct.toFixed(1)}%` : `${Math.round(pct)}%`;
+};
+
+const formatUsage = (
+  prefix: string,
+  usage: { usedTokens?: number; maxTokens?: number },
+  unknownLabel: string,
+): string =>
+  usage.usedTokens !== undefined && usage.maxTokens !== undefined
+    ? `${prefix} ${formatTokens(usage.usedTokens)} / ${formatTokens(usage.maxTokens)} (${formatPercent(usage.usedTokens, usage.maxTokens)})`
+    : unknownLabel;
+
+/** Human summary for the context-cleared marker. */
+export const buildContextClearedSummary = (input: {
+  fromIteration: number;
+  toIteration: number;
+  usedTokens?: number;
+  maxTokens?: number;
+}): string =>
+  `Context cleared · iteration ${input.fromIteration} → ${input.toIteration} · ${formatUsage(
+    "before",
+    input,
+    "before usage unknown",
+  )}`;
+
+/** Human summary for the fresh-context marker. */
+export const buildContextFreshSummary = (input: {
+  iteration: number;
+  usedTokens?: number;
+  maxTokens?: number;
+}): string =>
+  `Fresh context · iteration ${input.iteration} · ${formatUsage("now", input, "fresh session")}`;

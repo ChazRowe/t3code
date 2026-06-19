@@ -984,6 +984,14 @@ const make = Effect.gen(function* () {
       yield* providerService.stopSession({ threadId: thread.id });
     }
 
+    // Stopping the process leaves the persisted resume cursor intact so a
+    // manual stop stays resumable. A resetContext stop (unattended "clear
+    // context between iterations") additionally drops that cursor so the next
+    // turn binds a fresh conversation instead of resuming the prior one.
+    if (event.payload.resetContext === true) {
+      yield* providerService.clearResumeCursor({ threadId: thread.id });
+    }
+
     yield* setThreadSession({
       threadId: thread.id,
       session: {

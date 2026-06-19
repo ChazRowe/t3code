@@ -688,6 +688,10 @@ const ThreadSessionStopCommand = Schema.Struct({
   type: Schema.Literal("thread.session.stop"),
   commandId: CommandId,
   threadId: ThreadId,
+  // When true, also drop the persisted provider resume cursor so the next turn
+  // starts a fresh conversation instead of resuming. Used by the unattended-run
+  // "clear context between iterations" flow; a plain stop stays resumable.
+  resetContext: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
@@ -1073,6 +1077,7 @@ export const ThreadRevertedPayload = Schema.Struct({
 
 export const ThreadSessionStopRequestedPayload = Schema.Struct({
   threadId: ThreadId,
+  resetContext: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 

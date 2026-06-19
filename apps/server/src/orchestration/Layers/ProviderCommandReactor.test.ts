@@ -238,6 +238,7 @@ describe("ProviderCommandReactor", () => {
         }
       }),
     );
+    const clearResumeCursor = vi.fn<ProviderServiceShape["clearResumeCursor"]>(() => Effect.void);
     const renameBranch = vi.fn((input: unknown) =>
       Effect.succeed({
         branch:
@@ -300,6 +301,7 @@ describe("ProviderCommandReactor", () => {
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
+      clearResumeCursor: clearResumeCursor as ProviderServiceShape["clearResumeCursor"],
       listSessions: () => Effect.succeed(runtimeSessions),
       getCapabilities: (_provider) =>
         Effect.succeed({
@@ -416,6 +418,7 @@ describe("ProviderCommandReactor", () => {
       respondToRequest,
       respondToUserInput,
       stopSession,
+      clearResumeCursor,
       renameBranch,
       refreshStatus,
       generateBranchName,
@@ -2092,5 +2095,48 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
     expect(thread?.session?.activeTurnId).toBeNull();
+    // A plain stop must stay resumable: the persisted cursor is left intact.
+    expect(harness.clearResumeCursor).not.toHaveBeenCalled();
+  });
+
+  it("reacts to a resetContext thread.session.stop by clearing the persisted resume cursor", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-for-reset"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex_work"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.make("cmd-session-stop-reset"),
+        threadId: ThreadId.make("thread-1"),
+        resetContext: true,
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.clearResumeCursor.mock.calls.length === 1);
+    expect(harness.stopSession.mock.calls.length).toBe(1);
+    const clearArg = harness.clearResumeCursor.mock.calls[0]?.[0] as
+      | { threadId?: string }
+      | undefined;
+    expect(clearArg?.threadId).toBe("thread-1");
   });
 });

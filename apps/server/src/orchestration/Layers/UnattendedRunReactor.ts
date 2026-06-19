@@ -186,6 +186,9 @@ const make = Effect.gen(function* () {
         type: "thread.session.stop",
         commandId: yield* serverCommandId("unattended-session-stop"),
         threadId: thread.id,
+        // Forget the conversation so the next iteration starts with a fresh
+        // context window instead of resuming the prior one.
+        resetContext: true,
         createdAt: yield* nowIso,
       });
 

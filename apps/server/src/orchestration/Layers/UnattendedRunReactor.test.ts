@@ -13,12 +13,14 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it as effectIt } from "@effect/vitest";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
+import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
@@ -176,10 +178,14 @@ const modelSelection: ModelSelection = {
 };
 
 const makeTestLayer = () => {
+  // Hoist the event store onto a single layer reference so the engine writes to
+  // it AND the test can read it back (Effect memoizes by reference, the same way
+  // the projection below shares the engine's persistence).
+  const eventStoreLayer = OrchestrationEventStoreLive;
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
-    Layer.provide(OrchestrationEventStoreLive),
+    Layer.provide(eventStoreLayer),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
     Layer.provide(RepositoryIdentityResolverLive),
     Layer.provide(SqlitePersistenceMemory),
@@ -191,6 +197,7 @@ const makeTestLayer = () => {
   return UnattendedRunReactorLive.pipe(
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(projectionSnapshotLayer),
+    Layer.provideMerge(eventStoreLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -385,6 +392,29 @@ effectIt.effect("advances and continues when a turn ends with the wrap sentinel"
     const userMessages = thread?.messages.filter((message) => message.role === "user") ?? [];
     assert.strictEqual(userMessages.length, 2);
     assert.ok(userMessages[1]?.text.includes("continue"));
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+effectIt.effect("clears context on continue by requesting a resetContext session stop", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    yield* harness.driveTurnEnd("wrap", `done for now\n${WRAP_SENTINEL}`);
+
+    // The clear-and-continue path must stop the session asking to forget the
+    // conversation, so the next iteration starts with a fresh context window
+    // rather than resuming the prior one.
+    const eventStore = yield* OrchestrationEventStore;
+    const events = yield* Stream.runCollect(eventStore.readAll());
+    const stopRequests = Array.from(events).filter(
+      (event) => event.type === "thread.session-stop-requested",
+    );
+    assert.strictEqual(stopRequests.length, 1);
+    assert.strictEqual(
+      (stopRequests[0]?.payload as { resetContext?: boolean }).resetContext,
+      true,
+    );
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 

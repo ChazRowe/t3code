@@ -80,6 +80,19 @@ export interface ProviderServiceShape {
   ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Drop the persisted resume cursor for a thread's provider session.
+   *
+   * The session binding (cwd, model, runtime mode) is preserved, but the
+   * conversation cursor is cleared so the next `startSession` cannot resume the
+   * prior conversation and instead begins with a fresh context window. Used by
+   * the unattended-run "clear context between iterations" flow. A no-op when no
+   * binding exists.
+   */
+  readonly clearResumeCursor: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
    * List active provider sessions.
    *
    * Aggregates runtime session lists from all registered adapters.

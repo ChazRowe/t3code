@@ -874,6 +874,32 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const clearResumeCursor: ProviderServiceShape["clearResumeCursor"] = Effect.fn(
+    "clearResumeCursor",
+  )(function* (input) {
+    const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+    if (!binding) {
+      return;
+    }
+    yield* Effect.annotateCurrentSpan({
+      "provider.operation": "clear-resume-cursor",
+      "provider.kind": binding.provider,
+      "provider.thread_id": input.threadId,
+      "provider.resume_cursor.present": binding.resumeCursor != null,
+    });
+    // Preserve the binding (cwd, model, runtime mode) but null the cursor so
+    // the next startSession's persisted-cursor fallback finds nothing and
+    // begins a fresh conversation.
+    yield* directory.upsert({
+      threadId: input.threadId,
+      provider: binding.provider,
+      ...(binding.providerInstanceId !== undefined
+        ? { providerInstanceId: binding.providerInstanceId }
+        : {}),
+      resumeCursor: null,
+    });
+  });
+
   const listSessions: ProviderServiceShape["listSessions"] = Effect.fn("listSessions")(
     function* () {
       const currentAdapters = yield* getAdapterEntries;
@@ -1064,6 +1090,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    clearResumeCursor,
     listSessions,
     getCapabilities,
     getInstanceInfo,

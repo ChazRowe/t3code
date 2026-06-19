@@ -958,6 +958,59 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("clearResumeCursor drops the persisted cursor so the next start is fresh", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = asThreadId("thread-clear-cursor");
+
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/project-clear-cursor",
+        runtimeMode: "full-access",
+      });
+
+      yield* provider.stopSession({ threadId });
+      yield* provider.clearResumeCursor({ threadId });
+
+      // The persisted binding survives (cwd/model preserved) but its resume
+      // cursor is gone, so nothing can resurrect the prior conversation.
+      const persistedAfterClear = yield* runtimeRepository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(persistedAfterClear), true);
+      if (Option.isSome(persistedAfterClear)) {
+        assert.equal(persistedAfterClear.value.resumeCursor, null);
+      }
+
+      routing.codex.startSession.mockClear();
+
+      // The continue turn re-starts the session with no explicit cursor; with
+      // the persisted cursor cleared, the adapter must receive no resumeCursor.
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(routing.codex.startSession.mock.calls.length, 1);
+      const restartInput = routing.codex.startSession.mock.calls[0]?.[0];
+      assert.equal(typeof restartInput === "object" && restartInput !== null, true);
+      if (restartInput && typeof restartInput === "object") {
+        const startPayload = restartInput as {
+          cwd?: string;
+          resumeCursor?: unknown;
+          threadId?: string;
+        };
+        assert.equal(startPayload.resumeCursor, undefined);
+        // cwd is recovered from the preserved binding.
+        assert.equal(startPayload.cwd, "/tmp/project-clear-cursor");
+        assert.equal(startPayload.threadId, threadId);
+      }
+    }),
+  );
+
   it.effect("routes explicit claudeAgent provider session starts to the claude adapter", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;

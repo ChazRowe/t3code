@@ -543,32 +543,31 @@ function normalizeClaudeTaskProgressTokenUsage(
     return undefined;
   }
 
-  const lastUsedTokens = context.lastKnownTokenUsage?.usedTokens;
-  const activeTokens =
-    lastUsedTokens !== undefined ? Math.max(totalTokens, lastUsedTokens) : totalTokens;
-  if (lastUsedTokens !== undefined && activeTokens === lastUsedTokens) {
+  // `task_progress` / `task_notification` report a *subagent's* cumulative token
+  // usage, which lives in that subagent's own context window — not the main
+  // thread's. Plotting it as the main thread's resident occupancy inflates the
+  // meter (often clamping it to 100%) and then snaps back when an authoritative
+  // reading arrives. So keep the last known main-context occupancy for
+  // `usedTokens` and surface the subagent total only as `totalProcessedTokens`.
+  const lastKnown = context.lastKnownTokenUsage;
+  if (!lastKnown) {
+    // No authoritative main-context reading yet — nothing meaningful to show as
+    // occupancy, so don't move the meter.
     return undefined;
   }
 
   const usage = value as Record<string, unknown>;
-  const snapshot = makeClaudeTokenUsageSnapshot({
-    activeTokens,
-    ...(context.lastKnownContextWindow !== undefined
-      ? { contextWindow: context.lastKnownContextWindow }
-      : {}),
-    totalProcessedTokens: Math.max(
-      totalTokens,
-      context.lastKnownTotalProcessedTokens ?? totalTokens,
-    ),
-  });
-  if (!snapshot) {
-    return undefined;
-  }
-
   const toolUses = finiteNonNegativeInteger(usage.tool_uses);
   const durationMs = finiteNonNegativeInteger(usage.duration_ms);
+  const totalProcessedTokens = Math.max(
+    totalTokens,
+    context.lastKnownTotalProcessedTokens ?? totalTokens,
+    lastKnown.usedTokens,
+  );
+
   return {
-    ...snapshot,
+    ...lastKnown,
+    ...(totalProcessedTokens > lastKnown.usedTokens ? { totalProcessedTokens } : {}),
     ...(toolUses !== undefined ? { toolUses } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
   };

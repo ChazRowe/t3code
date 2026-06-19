@@ -1584,10 +1584,10 @@ describe("ClaudeAdapterLive", () => {
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
-        Stream.runCollect,
-        Effect.forkChild,
-      );
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "task.progress",
+      ).pipe(Stream.runCollect, Effect.forkChild);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -1626,15 +1626,116 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("emits thread token usage updates from Claude task progress", () => {
+  it.effect("holds main-context occupancy when a subagent reports task progress", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
-        Stream.runCollect,
-        Effect.forkChild,
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      // Establish a real main-context occupancy baseline (16000 tokens).
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-subagent",
+        uuid: "stream-baseline",
+        parent_tool_use_id: null,
+        event: {
+          type: "message_delta",
+          usage: {
+            input_tokens: 10000,
+            cache_read_input_tokens: 6000,
+            output_tokens: 0,
+          },
+        },
+      } as unknown as SDKMessage);
+
+      // A Task subagent reports its own cumulative usage (way larger than the
+      // main context). It must NOT be plotted as the main thread's occupancy.
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "subagent-1",
+        description: "Subagent churning through files",
+        usage: {
+          total_tokens: 800000,
+          tool_uses: 3,
+          duration_ms: 900,
+        },
+        session_id: "sdk-session-subagent",
+        uuid: "subagent-progress-1",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-subagent",
+        uuid: "result-subagent",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const usageEvents = runtimeEvents.filter(
+        (event) => event.type === "thread.token-usage.updated",
       );
+
+      // The subagent's cumulative total never becomes the occupancy reading.
+      for (const event of usageEvents) {
+        if (event.type === "thread.token-usage.updated") {
+          assert.equal(event.payload.usage.usedTokens, 16000);
+        }
+      }
+
+      // The subagent progress snapshot holds occupancy but records the subagent
+      // total as processed tokens (with its tool/duration stats).
+      const subagentUsage = usageEvents.find(
+        (event) =>
+          event.type === "thread.token-usage.updated" &&
+          event.payload.usage.toolUses !== undefined,
+      );
+      assert.equal(subagentUsage?.type, "thread.token-usage.updated");
+      if (subagentUsage?.type === "thread.token-usage.updated") {
+        assert.deepEqual(subagentUsage.payload, {
+          usage: {
+            usedTokens: 16000,
+            lastUsedTokens: 16000,
+            inputTokens: 16000,
+            totalProcessedTokens: 800000,
+            toolUses: 3,
+            durationMs: 900,
+          },
+        });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("does not move the meter from task progress without a context baseline", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "task.progress",
+      ).pipe(Stream.runCollect, Effect.forkChild);
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -1659,21 +1760,11 @@ describe("ClaudeAdapterLive", () => {
       const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
       const usageEvent = runtimeEvents.find((event) => event.type === "thread.token-usage.updated");
       const progressEvent = runtimeEvents.find((event) => event.type === "task.progress");
-      assert.equal(usageEvent?.type, "thread.token-usage.updated");
-      if (usageEvent?.type === "thread.token-usage.updated") {
-        assert.deepEqual(usageEvent.payload, {
-          usage: {
-            usedTokens: 321,
-            lastUsedTokens: 321,
-            toolUses: 2,
-            durationMs: 654,
-          },
-        });
-      }
+
+      // Without an authoritative main-context reading, a subagent's cumulative
+      // tokens are not plotted as occupancy — so no token-usage update is emitted.
+      assert.equal(usageEvent, undefined);
       assert.equal(progressEvent?.type, "task.progress");
-      if (usageEvent && progressEvent) {
-        assert.notStrictEqual(usageEvent.eventId, progressEvent.eventId);
-      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -1811,7 +1902,7 @@ describe("ClaudeAdapterLive", () => {
   });
 
   it.effect(
-    "preserves oversized Claude result totals after task progress snapshots are recorded",
+    "clamps an oversized Claude result to the context window even after task progress",
     () => {
       const harness = makeHarness();
       return Effect.gen(function* () {
@@ -1877,8 +1968,8 @@ describe("ClaudeAdapterLive", () => {
         if (finalUsageEvent?.type === "thread.token-usage.updated") {
           assert.deepEqual(finalUsageEvent.payload, {
             usage: {
-              usedTokens: 190000,
-              lastUsedTokens: 190000,
+              usedTokens: 200000,
+              lastUsedTokens: 200000,
               totalProcessedTokens: 535000,
               maxTokens: 200000,
             },

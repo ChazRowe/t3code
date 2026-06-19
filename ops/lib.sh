@@ -24,7 +24,7 @@ require_systemd_unit() {
 wait_for_http() {
   local url="$1" timeout="${2:-30}" i=0
   while [ "$i" -lt "$timeout" ]; do
-    if curl -sf -o /dev/null "$url" 2>/dev/null; then return 0; fi
+    if curl -sf --max-time 5 -o /dev/null "$url" 2>/dev/null; then return 0; fi
     sleep 1
     i=$((i + 1))
   done

@@ -193,6 +193,7 @@ interface ClaudeSessionContext {
   }>;
   readonly inFlightTools: Map<number, ToolInFlight>;
   readonly claudeTasks: Map<string, ClaudeTaskState>;
+  readonly subagentItemCounts: Map<string, number>;
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
@@ -912,6 +913,8 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
+
+const MAX_SUBAGENT_ITEMS_PER_PARENT = 200;
 
 function buildPromptText(
   input: ProviderSendTurnInput,
@@ -2486,6 +2489,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     message: SDKMessage,
     parentToolUseId: string,
   ) {
+    const emitted = context.subagentItemCounts.get(parentToolUseId) ?? 0;
+    if (emitted >= MAX_SUBAGENT_ITEMS_PER_PARENT) {
+      if (emitted === MAX_SUBAGENT_ITEMS_PER_PARENT) {
+        context.subagentItemCounts.set(parentToolUseId, emitted + 1);
+        yield* Effect.logWarning("subagent activity cap reached; dropping further nested items", {
+          parentToolUseId,
+          cap: MAX_SUBAGENT_ITEMS_PER_PARENT,
+        });
+      }
+      return;
+    }
+    context.subagentItemCounts.set(parentToolUseId, emitted + 1);
+
     const parentItemId = asRuntimeItemId(parentToolUseId);
     const turnIdPart = context.turnState
       ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
@@ -3261,6 +3277,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
       const inFlightTools = new Map<number, ToolInFlight>();
       const claudeTasks = new Map<string, ClaudeTaskState>();
+      const subagentItemCounts = new Map<string, number>();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
 
@@ -3703,6 +3720,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         turns: [],
         inFlightTools,
         claudeTasks,
+        subagentItemCounts,
         turnState: undefined,
         lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,

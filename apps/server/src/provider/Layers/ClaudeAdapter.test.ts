@@ -3917,6 +3917,90 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("caps nested subagent items per parent at MAX_SUBAGENT_ITEMS_PER_PARENT", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "go",
+        attachments: [],
+      });
+
+      // Emit 250 subagent messages for the same parent — only 200 should produce item.started.
+      for (let i = 0; i < 250; i++) {
+        harness.query.emit({
+          type: "assistant",
+          session_id: "s",
+          uuid: `sa-${i}`,
+          parent_tool_use_id: "task-parent",
+          message: {
+            id: `m-${i}`,
+            role: "assistant",
+            content: [{ type: "tool_use", id: `inner-${i}`, name: "Bash", input: { command: "ls" } }],
+          },
+        } as unknown as SDKMessage);
+      }
+
+      // A DIFFERENT parent gets its own fresh budget.
+      harness.query.emit({
+        type: "assistant",
+        session_id: "s",
+        uuid: "sa-other",
+        parent_tool_use_id: "task-other",
+        message: {
+          id: "m-other",
+          role: "assistant",
+          content: [{ type: "tool_use", id: "inner-other", name: "Bash", input: { command: "pwd" } }],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "s",
+        uuid: "result-cap",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      // Exactly 200 nested item.started events for task-parent (capped).
+      const startedForParent = runtimeEvents.filter(
+        (e) =>
+          e.type === "item.started" &&
+          e.payload.parentItemId !== undefined &&
+          String(e.payload.parentItemId) === "task-parent",
+      );
+      assert.equal(startedForParent.length, 200);
+
+      // The different parent still gets its own budget (1 message → 1 item.started).
+      const startedForOther = runtimeEvents.filter(
+        (e) =>
+          e.type === "item.started" &&
+          e.payload.parentItemId !== undefined &&
+          String(e.payload.parentItemId) === "task-other",
+      );
+      assert.equal(startedForOther.length, 1);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("does not push subagent messages into the main turn or emit token-usage events", () => {
     const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
     return Effect.gen(function* () {

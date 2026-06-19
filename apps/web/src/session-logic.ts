@@ -78,6 +78,16 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  /**
+   * Set on child entries (nested subagent items). The value is the parent Task
+   * tool-use item ID — matches the parent entry's `toolItemId`.
+   */
+  parentItemId?: string;
+  /**
+   * Set on parent "Subagent task" entries. The value is the tool-use item ID
+   * of this entry's runtime item — matches child entries' `parentItemId`.
+   */
+  toolItemId?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -760,6 +770,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
     entry.collapseKey = collapseKey;
+  }
+  const parentItemId = asTrimmedString((payload as Record<string, unknown> | null)?.parentItemId);
+  if (parentItemId) {
+    entry.parentItemId = parentItemId;
+  }
+  const toolItemId = asTrimmedString((payload as Record<string, unknown> | null)?.itemId);
+  if (toolItemId) {
+    entry.toolItemId = toolItemId;
   }
   return entry;
 }

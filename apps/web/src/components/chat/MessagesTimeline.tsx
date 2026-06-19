@@ -731,12 +731,30 @@ const WorkGroupSection = memo(function WorkGroupSection({
     () => groupedEntries.filter((entry) => !workEntryIndicatesToolNeutralStatus(entry)),
     [groupedEntries],
   );
-  const hasOverflow = nonEmptyEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
-  const visibleEntries =
+  // Build the full parent→children map from all non-empty entries so children
+  // travel with their parent even when the overflow window slices the list.
+  const allChildrenByParent = useMemo(() => {
+    const map = new Map<string, TimelineWorkEntry[]>();
+    for (const e of nonEmptyEntries) {
+      if (e.parentItemId) {
+        const list = map.get(e.parentItemId) ?? [];
+        list.push(e);
+        map.set(e.parentItemId, list);
+      }
+    }
+    return map;
+  }, [nonEmptyEntries]);
+  // Overflow is counted by top-level entries so children travel with parents.
+  const allTopLevelEntries = useMemo(
+    () => nonEmptyEntries.filter((e) => !e.parentItemId),
+    [nonEmptyEntries],
+  );
+  const hasOverflow = allTopLevelEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+  const topLevelEntries =
     hasOverflow && !isExpanded
-      ? nonEmptyEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
-      : nonEmptyEntries;
-  const hiddenCount = nonEmptyEntries.length - visibleEntries.length;
+      ? allTopLevelEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
+      : allTopLevelEntries;
+  const hiddenCount = allTopLevelEntries.length - topLevelEntries.length;
   const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry));
   const groupLabel = onlyToolEntries
     ? nonEmptyEntries.length === 1
@@ -786,12 +804,18 @@ const WorkGroupSection = memo(function WorkGroupSection({
         </p>
       )}
       <div className="space-y-px">
-        {visibleEntries.map((workEntry) => (
-          <SimpleWorkEntryRow
-            key={workEntry.id}
-            workEntry={workEntry}
-            workspaceRoot={workspaceRoot}
-          />
+        {topLevelEntries.map((workEntry) => (
+          <Fragment key={workEntry.id}>
+            <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
+            {(allChildrenByParent.get(workEntry.toolItemId ?? "") ?? []).map((child) => (
+              <SimpleWorkEntryRow
+                key={child.id}
+                workEntry={child}
+                workspaceRoot={workspaceRoot}
+                indented
+              />
+            ))}
+          </Fragment>
         ))}
       </div>
       {hasOverflow && (
@@ -1548,8 +1572,9 @@ const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation(
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
+  indented?: boolean;
 }) {
-  const { workEntry, workspaceRoot } = props;
+  const { workEntry, workspaceRoot, indented } = props;
   const activity = use(TimelineRowActivityCtx);
   const [expanded, setExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
@@ -1611,6 +1636,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         "flex flex-col rounded-md px-0.5 py-0.5 transition-colors",
         canExpand &&
           "cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        indented && "ml-4 border-l border-border/40 pl-2",
       )}
       {...rowToggleProps}
     >

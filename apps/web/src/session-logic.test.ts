@@ -1600,6 +1600,51 @@ describe("deriveWorkLogEntries context window handling", () => {
   });
 });
 
+describe("deriveWorkLogEntries subagent nesting", () => {
+  it("surfaces parentItemId from the activity payload onto the derived entry", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        id: "child-act-1",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Command run completed",
+        tone: "tool",
+        payload: { itemType: "command_execution", parentItemId: "task-parent" },
+      }),
+    ]);
+    expect(entry?.parentItemId).toBe("task-parent");
+  });
+
+  it("surfaces toolItemId from the activity payload itemId onto the parent derived entry", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        id: "parent-act-1",
+        createdAt: "2026-06-19T00:00:00.000Z",
+        kind: "tool.completed",
+        summary: "Subagent task",
+        tone: "tool",
+        payload: { itemType: "collab_agent_tool_call", itemId: "tool-use-abc123" },
+      }),
+    ]);
+    expect(entry?.toolItemId).toBe("tool-use-abc123");
+  });
+
+  it("does not set parentItemId when payload has none", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        id: "no-parent-act",
+        createdAt: "2026-06-19T00:00:00.000Z",
+        kind: "tool.completed",
+        summary: "Standalone tool",
+        tone: "tool",
+        payload: { itemType: "command_execution" },
+      }),
+    ]);
+    expect(entry?.parentItemId).toBeUndefined();
+    expect(entry?.toolItemId).toBeUndefined();
+  });
+});
+
 describe("isLatestTurnSettled", () => {
   const latestTurn = {
     turnId: TurnId.make("turn-1"),

@@ -358,4 +358,49 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("lucide-x");
     expect(markup).toContain('aria-label="Tool call failed"');
   });
+
+  it("renders child entries indented under their parent via parentItemId/toolItemId", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Subagent task",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-abc123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+          {
+            id: "entry-child",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            entry: {
+              id: "work-child",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Subagent command",
+              tone: "tool",
+              itemType: "command_execution",
+              parentItemId: "tool-use-abc123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Subagent task");
+    expect(markup).toContain("Subagent command");
+    // Child row should carry the indent classes
+    expect(markup).toContain("ml-4");
+    expect(markup).toContain("border-l");
+  });
 });

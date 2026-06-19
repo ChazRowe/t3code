@@ -136,7 +136,7 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  forwardSubagentActivity: Config.boolean("T3_FORWARD_SUBAGENT_ACTIVITY").pipe(
+  forwardSubagentActivity: Config.boolean("T3CODE_FORWARD_SUBAGENT_ACTIVITY").pipe(
     Config.withDefault(false),
   ),
 });

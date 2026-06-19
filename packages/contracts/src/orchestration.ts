@@ -131,7 +131,12 @@ export const UNATTENDED_RUN_MAX_ITERATIONS = 100;
 export const UnattendedRunStatus = Schema.Literals(["running", "paused", "completed", "stopped"]);
 export type UnattendedRunStatus = typeof UnattendedRunStatus.Type;
 
-export const UnattendedRunPauseReason = Schema.Literals(["no-sentinel", "error", "manual"]);
+export const UnattendedRunPauseReason = Schema.Literals([
+  "no-sentinel",
+  "error",
+  "manual",
+  "awaiting-input",
+]);
 export type UnattendedRunPauseReason = typeof UnattendedRunPauseReason.Type;
 
 export const UnattendedRunOutcome = Schema.Literals(["completed", "stopped"]);
@@ -697,6 +702,9 @@ const ThreadUnattendedRunPauseCommand = Schema.Struct({
   type: Schema.Literal("thread.unattended-run.pause"),
   commandId: CommandId,
   threadId: ThreadId,
+  // Defaults to "manual" (a human hit pause) when omitted. The reactor sets
+  // "awaiting-input" when the agent suspends the turn to ask the human.
+  reason: Schema.optional(UnattendedRunPauseReason),
   createdAt: IsoDateTime,
 });
 const ThreadUnattendedRunResumeCommand = Schema.Struct({

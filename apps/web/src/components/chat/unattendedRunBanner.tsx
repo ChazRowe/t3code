@@ -13,6 +13,9 @@ function describeReason(reason: UnattendedRunState["pauseReason"]): string {
   if (reason === "manual") {
     return "Paused by you.";
   }
+  if (reason === "awaiting-input") {
+    return "The agent asked a question — answer it, then resume the run.";
+  }
   return "The run is paused.";
 }
 

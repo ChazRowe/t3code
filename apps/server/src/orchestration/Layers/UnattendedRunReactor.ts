@@ -224,6 +224,29 @@ const make = Effect.gen(function* () {
           latestAssistantText.set(threadId, previous + event.payload.text);
           return;
         }
+        case "thread.activity-appended": {
+          // The agent asked the human a question via an interactive tool
+          // (AskUserQuestion). That SUSPENDS the turn waiting for an answer —
+          // no turn-end (idle/ready) fires — so the no-sentinel pause path
+          // never triggers and the run would hang. Pause it here for the human;
+          // leave the session/turn suspended so they can answer in place, then
+          // resume the run when ready.
+          if (event.payload.activity.kind !== "user-input.requested") {
+            return;
+          }
+          const thread = yield* readThread(event.payload.threadId);
+          if (thread?.unattendedRun?.status !== "running") {
+            return;
+          }
+          yield* orchestrationEngine.dispatch({
+            type: "thread.unattended-run.pause",
+            commandId: yield* serverCommandId("unattended-await-input"),
+            threadId: thread.id,
+            reason: "awaiting-input",
+            createdAt: yield* nowIso,
+          });
+          return;
+        }
         case "thread.unattended-run-started": {
           const thread = yield* readThread(event.payload.threadId);
           if (!thread) {

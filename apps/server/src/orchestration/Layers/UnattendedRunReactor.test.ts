@@ -1,6 +1,7 @@
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   MessageId,
   type ModelSelection,
   type OrchestrationSession,
@@ -302,7 +303,36 @@ const setupHarness = Effect.fn("setupHarness")(function* () {
       yield* reactor.drain;
     });
 
-  return { readThread, startUnattendedRun, driveTurnEnd, emitSessionStatus };
+  // Emit a `user-input.requested` activity the way the provider does when the
+  // agent asks the human a question via an interactive tool (AskUserQuestion).
+  // This suspends the turn rather than ending it — there is no turn-end signal.
+  const emitUserInputRequested = (label: string) =>
+    Effect.gen(function* () {
+      yield* engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make(`cmd-activity-${label}`),
+        threadId,
+        activity: {
+          id: EventId.make(`activity-${label}`),
+          tone: "info",
+          kind: "user-input.requested",
+          summary: "User input requested",
+          payload: { questions: [] },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      });
+      yield* reactor.drain;
+    });
+
+  return {
+    readThread,
+    startUnattendedRun,
+    driveTurnEnd,
+    emitSessionStatus,
+    emitUserInputRequested,
+  };
 });
 
 effectIt.effect("issues a preamble turn when the unattended run starts", () =>
@@ -407,6 +437,38 @@ effectIt.effect("completes when the final iteration ends without the wrap sentin
     const thread = yield* harness.readThread;
     assert.strictEqual(thread?.unattendedRun?.status, "completed");
     assert.strictEqual(thread?.unattendedRun?.pauseReason ?? null, null);
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+// The agent asks the human a question via an interactive tool (AskUserQuestion)
+// instead of wrapping. That surfaces as a `user-input.requested` activity and
+// SUSPENDS the turn — no turn-end (idle/ready) ever fires, so the run cannot
+// rely on the no-sentinel turn-end path to pause. The reactor must pause the
+// run on the activity itself, otherwise it hangs until a human intervenes.
+effectIt.effect("pauses with awaiting-input when the agent requests user input mid-run", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(3);
+
+    yield* harness.emitSessionStatus("running", "running");
+    yield* harness.emitUserInputRequested("ask1");
+
+    const thread = yield* harness.readThread;
+    assert.strictEqual(thread?.unattendedRun?.status, "paused");
+    assert.strictEqual(thread?.unattendedRun?.pauseReason, "awaiting-input");
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+// A `user-input.requested` activity outside a running unattended run (ordinary
+// interactive use, or an already-paused run) must not touch run state.
+effectIt.effect("ignores user-input.requested when no unattended run is active", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+
+    yield* harness.emitUserInputRequested("ask-no-run");
+
+    const thread = yield* harness.readThread;
+    assert.strictEqual(thread?.unattendedRun ?? null, null);
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 

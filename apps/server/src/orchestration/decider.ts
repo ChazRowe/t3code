@@ -793,7 +793,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return {
         ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
         type: "thread.unattended-run-paused",
-        payload: { threadId: command.threadId, reason: "manual", updatedAt: occurredAt },
+        payload: { threadId: command.threadId, reason: command.reason ?? "manual", updatedAt: occurredAt },
       };
     }
 

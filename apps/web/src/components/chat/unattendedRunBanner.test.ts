@@ -19,6 +19,14 @@ describe("buildUnattendedRunBannerItem", () => {
     });
     expect(item?.variant).toBe("warning");
   });
+  it("describes an awaiting-input pause as a question to answer", () => {
+    const item = buildUnattendedRunBannerItem({
+      run: { status: "paused", totalIterations: 3, currentIteration: 2, pauseReason: "awaiting-input", startedAt: "x", updatedAt: "x" },
+      ...handlers,
+    });
+    expect(item?.variant).toBe("warning");
+    expect(item?.description).toContain("asked a question");
+  });
   it("returns null for terminal runs", () => {
     expect(buildUnattendedRunBannerItem({
       run: { status: "completed", totalIterations: 3, currentIteration: 3, pauseReason: null, startedAt: "x", updatedAt: "x" },

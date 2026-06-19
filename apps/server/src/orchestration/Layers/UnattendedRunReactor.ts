@@ -208,20 +208,16 @@ const make = Effect.gen(function* () {
       }
 
       const clearedFrom = thread.unattendedRun?.currentIteration ?? 0;
-      const clearedUsage = latestContextUsage.get(thread.id);
+      const clearedFields = {
+        fromIteration: clearedFrom,
+        toIteration: clearedFrom + 1,
+        ...latestContextUsage.get(thread.id),
+      };
       yield* appendMarker(
         thread.id,
         CONTEXT_CLEARED_ACTIVITY_KIND,
-        buildContextClearedSummary({
-          fromIteration: clearedFrom,
-          toIteration: clearedFrom + 1,
-          ...(clearedUsage ?? {}),
-        }),
-        {
-          fromIteration: clearedFrom,
-          toIteration: clearedFrom + 1,
-          ...(clearedUsage ?? {}),
-        },
+        buildContextClearedSummary(clearedFields),
+        clearedFields,
       );
       awaitingFreshContextReading.set(thread.id, true);
 
@@ -317,19 +313,16 @@ const make = Effect.gen(function* () {
               return;
             }
             awaitingFreshContextReading.set(threadId, false);
+            const freshFields = {
+              iteration: thread.unattendedRun.currentIteration,
+              usedTokens: usage.usedTokens,
+              maxTokens: usage.maxTokens,
+            };
             yield* appendMarker(
               thread.id,
               CONTEXT_FRESH_ACTIVITY_KIND,
-              buildContextFreshSummary({
-                iteration: thread.unattendedRun.currentIteration,
-                usedTokens: usage.usedTokens,
-                maxTokens: usage.maxTokens,
-              }),
-              {
-                iteration: thread.unattendedRun.currentIteration,
-                usedTokens: usage.usedTokens,
-                maxTokens: usage.maxTokens,
-              },
+              buildContextFreshSummary(freshFields),
+              freshFields,
             );
             return;
           }

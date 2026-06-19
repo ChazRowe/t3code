@@ -1643,6 +1643,97 @@ describe("deriveWorkLogEntries subagent nesting", () => {
     expect(entry?.parentItemId).toBeUndefined();
     expect(entry?.toolItemId).toBeUndefined();
   });
+
+  it("collapses a subagent child started+completed into one row with invocation label and result detail", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "child-bash-started",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Bash: mix test",
+        tone: "tool",
+        payload: {
+          parentItemId: "task-parent-item",
+          data: { toolCallId: "call-child-1" },
+        },
+      }),
+      makeActivity({
+        id: "child-bash-completed",
+        createdAt: "2026-06-19T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Command run completed",
+        tone: "tool",
+        payload: {
+          parentItemId: "task-parent-item",
+          detail: "Exit 0",
+          data: { toolCallId: "call-child-1" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      label: "Bash: mix test",
+      detail: "Exit 0",
+      parentItemId: "task-parent-item",
+    });
+  });
+
+  it("shows an in-progress subagent child (started only) as a single row with the invocation label", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "child-read-started",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Read: /tmp/app.ts",
+        tone: "tool",
+        payload: {
+          parentItemId: "task-parent-item",
+          data: { toolCallId: "call-child-2" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      label: "Read: /tmp/app.ts",
+      parentItemId: "task-parent-item",
+    });
+  });
+
+  it("does not add a duplicate started row for main-thread tool calls (regression)", () => {
+    // A main-thread tool call (no parentItemId) must produce exactly one row
+    // via the completed entry, just like before.
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "main-tool-started",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Bash: ls",
+        tone: "tool",
+        payload: {
+          data: { toolCallId: "call-main-1" },
+        },
+      }),
+      makeActivity({
+        id: "main-tool-completed",
+        createdAt: "2026-06-19T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Command run completed",
+        tone: "tool",
+        payload: {
+          detail: "apps  packages",
+          data: { toolCallId: "call-main-1" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.id).toBe("main-tool-completed");
+  });
 });
 
 describe("isLatestTurnSettled", () => {

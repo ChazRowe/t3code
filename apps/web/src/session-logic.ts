@@ -641,7 +641,16 @@ export function deriveWorkLogEntries(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
-    if (activity.kind === "tool.started") continue;
+    if (
+      activity.kind === "tool.started" &&
+      !(
+        activity.payload &&
+        typeof activity.payload === "object" &&
+        "parentItemId" in activity.payload &&
+        (activity.payload as Record<string, unknown>).parentItemId
+      )
+    )
+      continue;
     if (activity.kind === "task.started") continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
@@ -767,13 +776,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolLifecycleStatus) {
     entry.toolLifecycleStatus = toolLifecycleStatus;
   }
-  const collapseKey = deriveToolLifecycleCollapseKey(entry);
-  if (collapseKey) {
-    entry.collapseKey = collapseKey;
-  }
   const parentItemId = asTrimmedString((payload as Record<string, unknown> | null)?.parentItemId);
   if (parentItemId) {
     entry.parentItemId = parentItemId;
+  }
+  const collapseKey = deriveToolLifecycleCollapseKey(entry);
+  if (collapseKey) {
+    entry.collapseKey = collapseKey;
   }
   const toolItemId = asTrimmedString((payload as Record<string, unknown> | null)?.itemId);
   if (toolItemId) {
@@ -801,6 +810,17 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
+  // Allow a subagent child tool.started to collapse into its following tool.updated/tool.completed
+  // when they share the same collapse key (keyed on toolCallId + parentItemId).
+  if (
+    previous.activityKind === "tool.started" &&
+    previous.parentItemId !== undefined &&
+    (next.activityKind === "tool.updated" || next.activityKind === "tool.completed") &&
+    previous.collapseKey !== undefined &&
+    previous.collapseKey === next.collapseKey
+  ) {
+    return true;
+  }
   if (previous.activityKind !== "tool.updated" && previous.activityKind !== "tool.completed") {
     return false;
   }
@@ -837,9 +857,13 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  // When collapsing a subagent child started→completed pair, preserve the invocation label
+  // (e.g. "Bash: mix test") from the started entry rather than using the generic completed label.
+  const label = previous.activityKind === "tool.started" ? previous.label : next.label;
   return {
     ...previous,
     ...next,
+    label,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
@@ -866,7 +890,11 @@ function mergeChangedFiles(
 }
 
 function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
-  if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") {
+  if (
+    entry.activityKind !== "tool.updated" &&
+    entry.activityKind !== "tool.completed" &&
+    !(entry.activityKind === "tool.started" && entry.parentItemId)
+  ) {
     return undefined;
   }
   if (entry.toolCallId) {

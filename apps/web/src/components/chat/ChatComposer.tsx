@@ -92,6 +92,7 @@ import {
   CircleAlertIcon,
   ListTodoIcon,
   PencilRulerIcon,
+  PlayIcon,
   type LucideIcon,
   LockIcon,
   LockOpenIcon,
@@ -184,7 +185,7 @@ function isInsideComposerFloatingLayer(element: Element): boolean {
   return element.closest(COMPOSER_FLOATING_LAYER_SELECTOR) !== null;
 }
 
-const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
+export const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
@@ -194,6 +195,8 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTogglePlanSidebar: () => void;
+  onStartUnattendedRun?: () => void;
+  canStartUnattendedRun?: boolean;
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
@@ -314,6 +317,35 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
               <span className="sr-only sm:not-sr-only">{props.planSidebarLabel}</span>
             </TooltipTrigger>
             <TooltipPopup side="top">{planSidebarTooltip}</TooltipPopup>
+          </Tooltip>
+        </>
+      ) : null}
+
+      {props.onStartUnattendedRun ? (
+        <>
+          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                  size="sm"
+                  type="button"
+                  onClick={props.onStartUnattendedRun}
+                  disabled={!props.canStartUnattendedRun}
+                  aria-label="Start unattended run"
+                />
+              }
+            >
+              <PlayIcon />
+              <span className="sr-only sm:not-sr-only">Unattended</span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {props.canStartUnattendedRun
+                ? "Start unattended run"
+                : "Finish the current turn to start an unattended run"}
+            </TooltipPopup>
           </Tooltip>
         </>
       ) : null}
@@ -2543,6 +2575,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       onToggleInteractionMode={toggleInteractionMode}
                       onRuntimeModeChange={handleRuntimeModeChange}
                       onTogglePlanSidebar={togglePlanSidebar}
+                      {...(onStartUnattendedRun !== undefined ? { onStartUnattendedRun } : {})}
+                      {...(canStartUnattendedRun !== undefined ? { canStartUnattendedRun } : {})}
                     />
                   </>
                 )}

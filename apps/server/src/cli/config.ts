@@ -136,6 +136,9 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  forwardSubagentActivity: Config.boolean("T3_FORWARD_SUBAGENT_ACTIVITY").pipe(
+    Config.withDefault(false),
+  ),
 });
 
 export interface CliServerFlags {
@@ -374,6 +377,7 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      forwardSubagentActivity: env.forwardSubagentActivity,
     };
 
     return config;

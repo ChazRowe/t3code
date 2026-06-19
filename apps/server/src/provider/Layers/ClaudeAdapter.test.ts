@@ -33,7 +33,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
-import { ServerConfig } from "../../config.ts";
+import { ServerConfig, type ServerConfigShape } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
@@ -156,6 +156,7 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly serverConfigOverrides?: Partial<ServerConfigShape>;
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -183,6 +184,23 @@ function makeHarness(config?: {
       : {}),
   };
 
+  const serverConfigOverrides = config?.serverConfigOverrides;
+  const baseServerConfigLayer = ServerConfig.layerTest(
+    config?.cwd ?? "/tmp/claude-adapter-test",
+    config?.baseDir ?? "/tmp",
+  );
+  const serverConfigLayer =
+    serverConfigOverrides !== undefined
+      ? baseServerConfigLayer.pipe(
+          Layer.flatMap((ctx) =>
+            Layer.succeed(ServerConfig, {
+              ...Context.get(ctx, ServerConfig),
+              ...serverConfigOverrides,
+            }),
+          ),
+        )
+      : baseServerConfigLayer;
+
   return {
     layer: Layer.effect(
       ClaudeAdapter,
@@ -191,12 +209,7 @@ function makeHarness(config?: {
         return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
       }),
     ).pipe(
-      Layer.provideMerge(
-        ServerConfig.layerTest(
-          config?.cwd ?? "/tmp/claude-adapter-test",
-          config?.baseDir ?? "/tmp",
-        ),
-      ),
+      Layer.provideMerge(serverConfigLayer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     ),
@@ -3790,6 +3803,42 @@ describe("ClaudeAdapterLive", () => {
         nativeThreadIds.every((threadId) => threadId === String(THREAD_ID)),
         true,
       );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("passes forwardSubagentText to query when the flag is enabled", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.forwardSubagentText, true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("omits forwardSubagentText when the flag is disabled", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: false } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.forwardSubagentText, undefined);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

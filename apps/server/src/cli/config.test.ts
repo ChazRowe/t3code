@@ -118,6 +118,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        forwardSubagentActivity: false,
       });
     }),
   );
@@ -184,6 +185,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: true,
         tailscaleServePort: 8443,
+        forwardSubagentActivity: false,
       });
     }),
   );
@@ -253,6 +255,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        forwardSubagentActivity: false,
       });
     }),
   );
@@ -327,6 +330,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        forwardSubagentActivity: false,
       });
       assert.equal(join(baseDir, "userdata"), resolved.stateDir);
     }),
@@ -452,6 +456,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        forwardSubagentActivity: false,
       });
     }),
   );
@@ -521,6 +526,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        forwardSubagentActivity: false,
       });
     }),
   );
@@ -584,6 +590,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        forwardSubagentActivity: false,
       });
     }),
   );

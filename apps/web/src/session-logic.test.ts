@@ -1490,6 +1490,30 @@ describe("deriveWorkLogEntries", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.id).toBe("a-complete-same-timestamp");
   });
+
+  it("keeps unattended context-clear markers as visible entries", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "ctx-cleared",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "unattended.context-cleared",
+        summary: "Context cleared · iteration 1 → 2 · before 517k / 1M (52%)",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "ctx-fresh",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "unattended.context-fresh",
+        summary: "Fresh context · iteration 2 · now 4k / 1M (0.4%)",
+        tone: "info",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries.map((entry) => entry.id)).toEqual(["ctx-cleared", "ctx-fresh"]);
+    expect(entries[0]?.label).toContain("Context cleared");
+    expect(entries[0]?.sourceActivityKind).toBe("unattended.context-cleared");
+  });
 });
 
 describe("deriveTimelineEntries", () => {

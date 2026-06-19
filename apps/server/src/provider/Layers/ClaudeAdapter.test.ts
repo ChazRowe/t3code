@@ -3977,6 +3977,35 @@ describe("ClaudeAdapterLive", () => {
         (e) => e.type === "item.started" && e.itemId !== undefined,
       );
       assert.equal(itemStartedFromSubagent.length, 0);
+
+      // Guard: the subagent message must NOT pollute the main turn's item list.
+      //
+      // If routing were broken and the message fell through to handleAssistantMessage,
+      // it would (a) push to turnState.items and (b) call backfillAssistantTextBlocksFromSnapshot,
+      // which emits content.delta + item.completed("assistant_message") WITHOUT a parentItemId.
+      //
+      // The correct path through handleSubagentMessage also emits item.completed("assistant_message")
+      // but always carries a parentItemId in the payload, so main-turn pollution is detectable.
+      //
+      // Assert:
+      //   1. No content.delta events (handleSubagentMessage never emits those).
+      //   2. Any item.completed("assistant_message") events carry parentItemId (nested, not main-turn).
+      const contentDeltaEvents = runtimeEvents.filter((e) => e.type === "content.delta");
+      assert.equal(
+        contentDeltaEvents.length,
+        0,
+        "Subagent text must not produce content.delta on the main turn",
+      );
+      const assistantItemCompleted = runtimeEvents.filter(
+        (e) => e.type === "item.completed" && e.payload.itemType === "assistant_message",
+      );
+      for (const event of assistantItemCompleted) {
+        assert.notEqual(
+          event.type === "item.completed" ? event.payload.parentItemId : undefined,
+          undefined,
+          "item.completed(assistant_message) from subagent must carry parentItemId (not a main-turn item)",
+        );
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

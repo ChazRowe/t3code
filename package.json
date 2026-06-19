@@ -16,6 +16,7 @@
     "build": "vp run --filter './apps/*' --filter './packages/*' --filter './oxlint-plugin-t3code' --filter './scripts' build",
     "build:marketing": "vp run --filter @t3tools/marketing build",
     "build:desktop": "vp run --filter @t3tools/desktop --filter t3 build",
+    "build:server": "vp run --filter t3 build",
     "typecheck": "vp run -r --concurrency-limit 2 typecheck",
     "tc": "vp run -r --concurrency-limit 2 typecheck",
     "lint": "vp lint --report-unused-disable-directives",
@@ -35,7 +36,14 @@
     "dist:desktop:win:x64": "node scripts/build-desktop-artifact.ts --platform win --target nsis --arch x64",
     "release:smoke": "node scripts/release-smoke.ts",
     "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist apps/*/dist-electron packages/*/dist .vite-plus apps/*/.vite-plus packages/*/.vite-plus",
-    "sync:repos": "node scripts/sync-reference-repos.ts"
+    "sync:repos": "node scripts/sync-reference-repos.ts",
+    "daemon:deploy": "ops/deploy.sh",
+    "daemon:dev": "ops/dev.sh",
+    "daemon:start": "ops/daemon.sh start",
+    "daemon:stop": "ops/daemon.sh stop",
+    "daemon:restart": "ops/daemon.sh restart",
+    "daemon:status": "ops/daemon.sh status",
+    "daemon:logs": "ops/daemon.sh logs"
   },
   "devDependencies": {
     "@babel/plugin-transform-react-jsx": "7.28.6",

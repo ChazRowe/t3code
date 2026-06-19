@@ -403,4 +403,52 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("ml-4");
     expect(markup).toContain("border-l");
   });
+
+  it("renders in-progress subagent parent and nests live children under it", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Subagent task",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-live123",
+              // inProgress — parent is still running while children arrive
+              toolLifecycleStatus: "inProgress",
+            },
+          },
+          {
+            id: "entry-child",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            entry: {
+              id: "work-child",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Live subagent command",
+              tone: "tool",
+              itemType: "command_execution",
+              parentItemId: "tool-use-live123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // In-progress parent must render (not be filtered out)
+    expect(markup).toContain("Subagent task");
+    // Child must also render (nested under the in-progress parent)
+    expect(markup).toContain("Live subagent command");
+    // Child row should carry the indent classes indicating it is nested
+    expect(markup).toContain("ml-4");
+    expect(markup).toContain("border-l");
+  });
 });

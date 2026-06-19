@@ -28,6 +28,7 @@ import {
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
+  type WorkLogEntry,
 } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
@@ -717,6 +718,18 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 // re-render only the affected row, not the entire list.
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns true when the entry is an in-progress subagent/agent parent row
+ * (itemType "collab_agent_tool_call"). These must survive the neutral-status
+ * filter so their live children can nest under them while the subagent runs.
+ */
+function isInProgressSubagentParent(entry: WorkLogEntry): boolean {
+  return (
+    entry.itemType === "collab_agent_tool_call" &&
+    entry.toolLifecycleStatus === "inProgress"
+  );
+}
+
 /** Collapsed state shows the earliest chunk so "Show more" only appends rows downward. */
 const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
@@ -727,8 +740,15 @@ const WorkGroupSection = memo(function WorkGroupSection({
   const [isExpanded, setIsExpanded] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const anchorBottomBeforeToggleRef = useRef<number | null>(null);
+  // In-progress subagent parent rows must survive the neutral-status filter so
+  // their children (which carry a matching parentItemId) can nest under them live.
   const nonEmptyEntries = useMemo(
-    () => groupedEntries.filter((entry) => !workEntryIndicatesToolNeutralStatus(entry)),
+    () =>
+      groupedEntries.filter(
+        (entry) =>
+          !workEntryIndicatesToolNeutralStatus(entry) ||
+          isInProgressSubagentParent(entry),
+      ),
     [groupedEntries],
   );
   // Build the full parent→children map from all non-empty entries so children

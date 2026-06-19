@@ -618,6 +618,7 @@ function runtimeEventToActivities(
             itemType: event.payload.itemType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.parentItemId ? { parentItemId: event.payload.parentItemId } : {}),
+            ...(event.itemId ? { itemId: event.itemId } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

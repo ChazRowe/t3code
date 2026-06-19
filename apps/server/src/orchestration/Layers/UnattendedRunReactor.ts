@@ -38,13 +38,23 @@ export const decideTurnEndAction = (input: {
   readonly hasSentinel: boolean;
   readonly currentIteration: number;
   readonly totalIterations: number;
+  readonly sawRunningSinceTurnStart: boolean;
 }): TurnEndAction => {
   if (input.status === "error") return { kind: "fault", reason: "error" };
   if (input.status !== "idle" && input.status !== "ready") return { kind: "ignore" };
+  // A freshly (re)created session passes through `ready`/`idle` while it warms up
+  // for the next turn — BEFORE the agent has run. That is not a turn end. Only
+  // treat idle/ready as a turn end once we've actually seen the turn running;
+  // otherwise the warm-up status of each continued iteration is misread as an
+  // empty turn and faults `no-sentinel`.
+  if (!input.sawRunningSinceTurnStart) return { kind: "ignore" };
+  // The final iteration's turn end ends the run whether or not it wrapped: there
+  // is no further iteration to continue into, so a missing sentinel here means
+  // "done" rather than "stopped early for a human". Mid-run, a sentinel-less
+  // turn end IS the stop-for-human signal and pauses.
+  if (input.currentIteration >= input.totalIterations) return { kind: "complete" };
   if (!input.hasSentinel) return { kind: "fault", reason: "no-sentinel" };
-  return input.currentIteration < input.totalIterations
-    ? { kind: "clear-continue" }
-    : { kind: "complete" };
+  return { kind: "clear-continue" };
 };
 
 const STOP_POLL_MAX_TRIES = 20;
@@ -70,6 +80,10 @@ const make = Effect.gen(function* () {
 
   // Per-thread accumulator of the latest assistant text (reset at turn start).
   const latestAssistantText = new Map<string, string>();
+  // Per-thread flag: has the session reported `running` since the current turn
+  // started? Distinguishes a real turn end (idle/ready after running) from a
+  // freshly recreated session's warm-up status (idle/ready before running).
+  const sawRunningSinceTurnStart = new Map<string, boolean>();
 
   const readThread = (threadId: string) =>
     projectionSnapshotQuery
@@ -163,12 +177,17 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (event.payload.session.status === "running") {
+      sawRunningSinceTurnStart.set(threadId, true);
+    }
+
     const hasSentinel = messageHasWrapSentinel(latestAssistantText.get(threadId) ?? "");
     const action = decideTurnEndAction({
       status: event.payload.session.status,
       hasSentinel,
       currentIteration: run.currentIteration,
       totalIterations: run.totalIterations,
+      sawRunningSinceTurnStart: sawRunningSinceTurnStart.get(threadId) ?? false,
     });
 
     switch (action.kind) {
@@ -193,6 +212,7 @@ const make = Effect.gen(function* () {
       switch (event.type) {
         case "thread.turn-start-requested": {
           latestAssistantText.set(event.payload.threadId, "");
+          sawRunningSinceTurnStart.set(event.payload.threadId, false);
           return;
         }
         case "thread.message-sent": {

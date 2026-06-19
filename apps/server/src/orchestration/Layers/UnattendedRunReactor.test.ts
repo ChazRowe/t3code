@@ -40,6 +40,7 @@ describe("decideTurnEndAction", () => {
         hasSentinel: true,
         currentIteration: 1,
         totalIterations: 3,
+        sawRunningSinceTurnStart: true,
       }),
     ).toEqual({ kind: "fault", reason: "error" });
   });
@@ -51,6 +52,7 @@ describe("decideTurnEndAction", () => {
         hasSentinel: true,
         currentIteration: 1,
         totalIterations: 3,
+        sawRunningSinceTurnStart: true,
       }),
     ).toEqual({ kind: "ignore" });
   });
@@ -62,6 +64,7 @@ describe("decideTurnEndAction", () => {
         hasSentinel: true,
         currentIteration: 1,
         totalIterations: 3,
+        sawRunningSinceTurnStart: true,
       }),
     ).toEqual({ kind: "ignore" });
   });
@@ -73,6 +76,31 @@ describe("decideTurnEndAction", () => {
         hasSentinel: false,
         currentIteration: 1,
         totalIterations: 3,
+        sawRunningSinceTurnStart: true,
+      }),
+    ).toEqual({ kind: "ignore" });
+  });
+
+  it("ready before the turn has run (session warm-up) is ignored", () => {
+    expect(
+      decideTurnEndAction({
+        status: "ready",
+        hasSentinel: false,
+        currentIteration: 2,
+        totalIterations: 5,
+        sawRunningSinceTurnStart: false,
+      }),
+    ).toEqual({ kind: "ignore" });
+  });
+
+  it("idle before the turn has run (session warm-up) is ignored", () => {
+    expect(
+      decideTurnEndAction({
+        status: "idle",
+        hasSentinel: false,
+        currentIteration: 2,
+        totalIterations: 5,
+        sawRunningSinceTurnStart: false,
       }),
     ).toEqual({ kind: "ignore" });
   });
@@ -84,6 +112,7 @@ describe("decideTurnEndAction", () => {
         hasSentinel: true,
         currentIteration: 1,
         totalIterations: 3,
+        sawRunningSinceTurnStart: true,
       }),
     ).toEqual({ kind: "clear-continue" });
   });
@@ -95,17 +124,31 @@ describe("decideTurnEndAction", () => {
         hasSentinel: true,
         currentIteration: 3,
         totalIterations: 3,
+        sawRunningSinceTurnStart: true,
       }),
     ).toEqual({ kind: "complete" });
   });
 
-  it("idle without sentinel faults with reason no-sentinel", () => {
+  it("without sentinel on the last iteration completes (final turn end ends the run)", () => {
+    expect(
+      decideTurnEndAction({
+        status: "idle",
+        hasSentinel: false,
+        currentIteration: 3,
+        totalIterations: 3,
+        sawRunningSinceTurnStart: true,
+      }),
+    ).toEqual({ kind: "complete" });
+  });
+
+  it("idle without sentinel after the turn ran faults with reason no-sentinel", () => {
     expect(
       decideTurnEndAction({
         status: "idle",
         hasSentinel: false,
         currentIteration: 1,
         totalIterations: 3,
+        sawRunningSinceTurnStart: true,
       }),
     ).toEqual({ kind: "fault", reason: "no-sentinel" });
   });
@@ -117,6 +160,7 @@ describe("decideTurnEndAction", () => {
         hasSentinel: true,
         currentIteration: 1,
         totalIterations: 2,
+        sawRunningSinceTurnStart: true,
       }),
     ).toEqual({ kind: "clear-continue" });
   });
@@ -209,11 +253,28 @@ const setupHarness = Effect.fn("setupHarness")(function* () {
       yield* reactor.drain;
     });
 
-  // Drive a turn end: record the assistant message, then flip the session to
-  // idle (the real turn-end signal) and immediately to stopped so the reactor's
-  // clear+continue poll can settle against the read model.
+  // Emit a single session status transition and let the reactor process it.
+  const emitSessionStatus = (label: string, status: OrchestrationSession["status"]) =>
+    Effect.gen(function* () {
+      yield* engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make(`cmd-session-${status}-${label}`),
+        threadId,
+        session: buildSession(status),
+        createdAt: now,
+      });
+      yield* reactor.drain;
+    });
+
+  // Drive a turn end the way a real provider does: the session goes `running`
+  // (the turn is actually executing), the assistant streams its message, then
+  // the session flips to idle (the real turn-end signal) and immediately to
+  // stopped so the reactor's clear+continue poll can settle against the read
+  // model.
   const driveTurnEnd = (label: string, assistantText: string) =>
     Effect.gen(function* () {
+      yield* emitSessionStatus(label, "running");
+
       yield* engine.dispatch({
         type: "thread.message.assistant.delta",
         commandId: CommandId.make(`cmd-assistant-${label}`),
@@ -241,7 +302,7 @@ const setupHarness = Effect.fn("setupHarness")(function* () {
       yield* reactor.drain;
     });
 
-  return { readThread, startUnattendedRun, driveTurnEnd };
+  return { readThread, startUnattendedRun, driveTurnEnd, emitSessionStatus };
 });
 
 effectIt.effect("issues a preamble turn when the unattended run starts", () =>
@@ -287,6 +348,36 @@ effectIt.effect("pauses with no-sentinel when a turn ends without the wrap senti
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 
+// Regression: a continued iteration recreates the provider session, which emits
+// a warm-up `ready` BEFORE the turn runs. That must NOT be read as an empty
+// turn end and pause the run. (Previously every iteration >= 2 faulted
+// `no-sentinel` on this warm-up status.)
+effectIt.effect("does not fault on the warm-up ready of a freshly continued iteration", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(3);
+
+    // Iteration 1 ends cleanly → advance to iteration 2 and issue a continue turn.
+    yield* harness.driveTurnEnd("iter1", `wrap one\n${WRAP_SENTINEL}`);
+    const advanced = yield* harness.readThread;
+    assert.strictEqual(advanced?.unattendedRun?.currentIteration, 2);
+    assert.strictEqual(advanced?.unattendedRun?.status, "running");
+
+    // The recreated session reports `ready` while warming up, before any output.
+    yield* harness.emitSessionStatus("warmup", "ready");
+
+    const afterWarmup = yield* harness.readThread;
+    assert.strictEqual(afterWarmup?.unattendedRun?.status, "running");
+    assert.strictEqual(afterWarmup?.unattendedRun?.pauseReason ?? null, null);
+
+    // And the iteration still completes normally once it actually runs.
+    yield* harness.driveTurnEnd("iter2", `wrap two\n${WRAP_SENTINEL}`);
+    const afterSecond = yield* harness.readThread;
+    assert.strictEqual(afterSecond?.unattendedRun?.currentIteration, 3);
+    assert.strictEqual(afterSecond?.unattendedRun?.status, "running");
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
 effectIt.effect("completes after the final iteration ends with the wrap sentinel", () =>
   Effect.gen(function* () {
     const harness = yield* setupHarness();
@@ -299,6 +390,23 @@ effectIt.effect("completes after the final iteration ends with the wrap sentinel
     yield* harness.driveTurnEnd("iter2", `wrap two\n${WRAP_SENTINEL}`);
     const afterSecond = yield* harness.readThread;
     assert.strictEqual(afterSecond?.unattendedRun?.status, "completed");
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+// A run that finishes its work on the LAST iteration omits the sentinel (work is
+// done, nothing to continue into). That final sentinel-less turn end completes
+// the run rather than pausing it `no-sentinel`.
+effectIt.effect("completes when the final iteration ends without the wrap sentinel", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    yield* harness.driveTurnEnd("iter1", `wrap one\n${WRAP_SENTINEL}`);
+    yield* harness.driveTurnEnd("iter2", "All done — STATUS: COMPLETE, no sentinel.");
+
+    const thread = yield* harness.readThread;
+    assert.strictEqual(thread?.unattendedRun?.status, "completed");
+    assert.strictEqual(thread?.unattendedRun?.pauseReason ?? null, null);
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 

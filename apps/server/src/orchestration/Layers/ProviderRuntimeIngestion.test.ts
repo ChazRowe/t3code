@@ -3061,4 +3061,117 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("runtime still processed");
   });
+
+  it("propagates parentItemId from item.started into the activity payload", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.started",
+      eventId: asEventId("evt-item-started-with-parent"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-parent-item"),
+      payload: {
+        itemType: "command_execution",
+        status: "in_progress",
+        title: "Command run",
+        parentItemId: "task-parent",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === "evt-item-started-with-parent" && activity.kind === "tool.started",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-item-started-with-parent",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.started");
+    expect(payload?.parentItemId).toBe("task-parent");
+  });
+
+  it("propagates parentItemId from item.updated into the activity payload", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.updated",
+      eventId: asEventId("evt-item-updated-with-parent"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-parent-item-updated"),
+      itemId: asItemId("item-parent-updated"),
+      payload: {
+        itemType: "command_execution",
+        status: "in_progress",
+        title: "Command updated",
+        parentItemId: "task-parent-updated",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === "evt-item-updated-with-parent" && activity.kind === "tool.updated",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-item-updated-with-parent",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.updated");
+    expect(payload?.parentItemId).toBe("task-parent-updated");
+  });
+
+  it("propagates parentItemId from item.completed into the activity payload", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-item-completed-with-parent"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-parent-item-completed"),
+      itemId: asItemId("item-parent-completed"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Command completed",
+        parentItemId: "task-parent-completed",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) =>
+          activity.id === "evt-item-completed-with-parent" && activity.kind === "tool.completed",
+      ),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-item-completed-with-parent",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("tool.completed");
+    expect(payload?.parentItemId).toBe("task-parent-completed");
+  });
 });

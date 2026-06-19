@@ -2477,6 +2477,141 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
   });
 
+  // Handles forwarded subagent assistant/user messages (those with a non-null
+  // parent_tool_use_id). Emits nested item lifecycle events tagged with
+  // parentItemId, but NEVER touches turnState.items, token usage, or the
+  // main-thread assistant-text accumulation.
+  const handleSubagentMessage = Effect.fn("handleSubagentMessage")(function* (
+    context: ClaudeSessionContext,
+    message: SDKMessage,
+    parentToolUseId: string,
+  ) {
+    const parentItemId = asRuntimeItemId(parentToolUseId);
+    const turnIdPart = context.turnState
+      ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+      : {};
+
+    // assistant: tool_use blocks → nested item.started; text/thinking → nested item.completed.
+    if (message.type === "assistant") {
+      const content = (message.message as { content?: unknown } | undefined)?.content;
+      if (!Array.isArray(content)) {
+        return;
+      }
+      for (const block of content) {
+        if (!block || typeof block !== "object") {
+          continue;
+        }
+        const b = block as {
+          type?: unknown;
+          id?: unknown;
+          name?: unknown;
+          input?: unknown;
+          text?: unknown;
+          thinking?: unknown;
+        };
+
+        if (b.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+          const itemType = classifyToolItemType(b.name);
+          const toolInput =
+            typeof b.input === "object" && b.input !== null
+              ? (b.input as Record<string, unknown>)
+              : {};
+          const detail = summarizeToolRequest(b.name, toolInput);
+          const stamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "item.started",
+            eventId: stamp.eventId,
+            provider: PROVIDER,
+            createdAt: stamp.createdAt,
+            threadId: context.session.threadId,
+            ...turnIdPart,
+            itemId: asRuntimeItemId(b.id),
+            payload: {
+              itemType,
+              status: "inProgress",
+              title: titleForTool(itemType),
+              ...(detail ? { detail } : {}),
+              data: { toolName: b.name, input: toolInput },
+              parentItemId,
+            },
+            providerRefs: nativeProviderRefs(context, { providerItemId: b.id }),
+            raw: {
+              source: "claude.sdk.message",
+              method: "claude/assistant/subagent",
+              payload: message,
+            },
+          });
+          continue;
+        }
+
+        const text =
+          b.type === "text" && typeof b.text === "string"
+            ? b.text
+            : b.type === "thinking" && typeof b.thinking === "string"
+              ? b.thinking
+              : undefined;
+        if (text && text.trim().length > 0 && typeof message.uuid === "string") {
+          const stamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "item.completed",
+            eventId: stamp.eventId,
+            provider: PROVIDER,
+            createdAt: stamp.createdAt,
+            threadId: context.session.threadId,
+            ...turnIdPart,
+            itemId: asRuntimeItemId(`${message.uuid}:${String(b.type)}`),
+            payload: {
+              itemType: b.type === "thinking" ? "reasoning" : "assistant_message",
+              status: "completed",
+              title: b.type === "thinking" ? "Subagent thinking" : "Subagent message",
+              detail: text.trim().slice(0, 400),
+              parentItemId,
+            },
+            providerRefs: nativeProviderRefs(context),
+            raw: {
+              source: "claude.sdk.message",
+              method: "claude/assistant/subagent",
+              payload: message,
+            },
+          });
+        }
+      }
+      return;
+    }
+
+    // user: tool_result blocks → nested item.completed (closes the matching nested tool item).
+    if (message.type === "user") {
+      for (const toolResult of toolResultBlocksFromUserMessage(message)) {
+        const stamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "item.completed",
+          eventId: stamp.eventId,
+          provider: PROVIDER,
+          createdAt: stamp.createdAt,
+          threadId: context.session.threadId,
+          ...turnIdPart,
+          itemId: asRuntimeItemId(toolResult.toolUseId),
+          payload: {
+            itemType: "dynamic_tool_call",
+            status: toolResult.isError ? "failed" : "completed",
+            title: "Subagent tool result",
+            ...(toolResult.text.trim().length > 0
+              ? { detail: toolResult.text.trim().slice(0, 400) }
+              : {}),
+            parentItemId,
+          },
+          providerRefs: nativeProviderRefs(context, { providerItemId: toolResult.toolUseId }),
+          raw: {
+            source: "claude.sdk.message",
+            method: "claude/user/subagent",
+            payload: message,
+          },
+        });
+      }
+      return;
+    }
+  });
+
   const handleAssistantMessage = Effect.fn("handleAssistantMessage")(function* (
     context: ClaudeSessionContext,
     message: SDKMessage,
@@ -2879,9 +3014,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* handleStreamEvent(context, message);
         return;
       case "user":
+        if (message.parent_tool_use_id) {
+          yield* handleSubagentMessage(context, message, message.parent_tool_use_id);
+          return;
+        }
         yield* handleUserMessage(context, message);
         return;
       case "assistant":
+        if (message.parent_tool_use_id) {
+          yield* handleSubagentMessage(context, message, message.parent_tool_use_id);
+          return;
+        }
         yield* handleAssistantMessage(context, message);
         return;
       case "result":

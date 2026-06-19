@@ -3844,4 +3844,142 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect("emits nested work-log items for forwarded subagent tool calls", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // Collect events until we see the inner item.started for "inner-bash-1".
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "item.started" && String(event.itemId) === "inner-bash-1",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "go",
+        attachments: [],
+      });
+
+      // Parent Task tool call (main loop) — registers itemId "task-parent".
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "s",
+        uuid: "p0",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "task-parent",
+            name: "Agent",
+            input: { subagent_type: "general-purpose", description: "do work" },
+          },
+        },
+      } as unknown as SDKMessage);
+
+      // Forwarded subagent assistant message carrying an inner tool_use.
+      harness.query.emit({
+        type: "assistant",
+        session_id: "s",
+        uuid: "sa1",
+        parent_tool_use_id: "task-parent",
+        message: {
+          id: "msg-sa1",
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "inner-bash-1", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const started = runtimeEvents.filter(
+        (e) => e.type === "item.started" && String(e.itemId) === "inner-bash-1",
+      );
+      assert.equal(started.length, 1);
+      const startedEvent = started[0];
+      if (startedEvent?.type === "item.started") {
+        assert.equal(startedEvent.payload.itemType, "command_execution");
+        assert.equal(String(startedEvent.payload.parentItemId), "task-parent");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("does not push subagent messages into the main turn or emit token-usage events", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // Collect events until we see the result (turn completed).
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "go",
+        attachments: [],
+      });
+
+      // Forwarded subagent assistant message with text only — no tool_use.
+      harness.query.emit({
+        type: "assistant",
+        session_id: "s",
+        uuid: "sa2",
+        parent_tool_use_id: "task-parent",
+        message: {
+          id: "msg-sa2",
+          role: "assistant",
+          content: [{ type: "text", text: "subagent thinking out loud" }],
+        },
+      } as unknown as SDKMessage);
+
+      // End the turn so the fiber can complete.
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "s",
+        uuid: "result-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      // The subagent text message must NOT emit thread.token-usage.updated.
+      const tokenUsageEvents = runtimeEvents.filter(
+        (e) => e.type === "thread.token-usage.updated",
+      );
+      assert.equal(tokenUsageEvents.length, 0);
+
+      // The subagent text message must NOT produce item.started events
+      // (text blocks do not create started items — only tool_use does).
+      const itemStartedFromSubagent = runtimeEvents.filter(
+        (e) => e.type === "item.started" && e.itemId !== undefined,
+      );
+      assert.equal(itemStartedFromSubagent.length, 0);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
 });

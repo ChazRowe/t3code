@@ -41,6 +41,7 @@ import {
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
   OrchestrationReplayEventsError,
+  type OrchestrationSubagentRef,
   FilesystemBrowseError,
   AssetAccessError,
   EnvironmentAuthorizationError,
@@ -135,6 +136,38 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   );
 }
 
+// A subagent ref is any collab_agent_tool_call lifecycle activity, at ANY depth
+// (top-level OR nested). itemType lives on the activity payload; itemId is top-level.
+function isSubagentRefEvent(
+  event: OrchestrationEvent,
+): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> {
+  if (event.type !== "thread.activity-appended") {
+    return false;
+  }
+  const activity = event.payload.activity;
+  const payload =
+    typeof activity.payload === "object" && activity.payload !== null
+      ? (activity.payload as { itemType?: unknown })
+      : null;
+  return (
+    payload?.itemType === "collab_agent_tool_call" &&
+    activity.itemId !== undefined &&
+    activity.itemId !== null
+  );
+}
+
+// A subagent's direct child = a thread.activity-appended whose activity's
+// parentItemId (top-level) equals the watched subagent's rootItemId.
+function isSubagentDirectChildEvent(
+  event: OrchestrationEvent,
+  rootItemId: string,
+): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> {
+  if (event.type !== "thread.activity-appended") {
+    return false;
+  }
+  return event.payload.activity.parentItemId === rootItemId;
+}
+
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
@@ -145,6 +178,8 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.subscribeShell, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.subscribeSubagentTree, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.subscribeSubagent, AuthOrchestrationReadScope],
   [WS_METHODS.serverGetConfig, AuthOrchestrationReadScope],
   [WS_METHODS.serverRefreshProviders, AuthOrchestrationOperateScope],
   [WS_METHODS.serverUpdateProvider, AuthOrchestrationOperateScope],
@@ -1006,6 +1041,138 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                   snapshot: {
                     snapshotSequence,
                     thread: threadDetail.value,
+                  },
+                }),
+                liveStream,
+              );
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeSubagentTree]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeSubagentTree,
+            Effect.gen(function* () {
+              const [refs, snapshotSequence] = yield* Effect.all([
+                projectionSnapshotQuery.getSubagentTree({ threadId: input.threadId }).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to load subagent tree for thread ${input.threadId}`,
+                        cause,
+                      }),
+                  ),
+                ),
+                projectionSnapshotQuery.getSnapshotSequence().pipe(
+                  Effect.map(({ snapshotSequence }) => snapshotSequence),
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to load orchestration snapshot sequence",
+                        cause,
+                      }),
+                  ),
+                ),
+              ]);
+
+              // On any subagent-ref lifecycle event (root or nested), recompute the tree and
+              // emit the single changed ref so depth/childSubagentCount/status stay consistent.
+              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+                Stream.filter(
+                  (
+                    event,
+                  ): event is Extract<
+                    OrchestrationEvent,
+                    { type: "thread.activity-appended" }
+                  > =>
+                    event.aggregateKind === "thread" &&
+                    event.aggregateId === input.threadId &&
+                    isSubagentRefEvent(event),
+                ),
+                Stream.mapEffect((event) =>
+                  projectionSnapshotQuery.getSubagentTree({ threadId: input.threadId }).pipe(
+                    Effect.map((nextRefs) => {
+                      const changedItemId = event.payload.activity.itemId;
+                      const changed = nextRefs.find((ref) => ref.rootItemId === changedItemId);
+                      return changed === undefined
+                        ? Option.none<OrchestrationSubagentRef>()
+                        : Option.some(changed);
+                    }),
+                    Effect.orElseSucceed(() => Option.none<OrchestrationSubagentRef>()),
+                  ),
+                ),
+                Stream.flatMap((maybeRef) =>
+                  Option.isSome(maybeRef)
+                    ? Stream.succeed({ kind: "ref-changed" as const, ref: maybeRef.value })
+                    : Stream.empty,
+                ),
+              );
+
+              return Stream.concat(
+                Stream.make({
+                  kind: "snapshot" as const,
+                  snapshot: {
+                    snapshotSequence,
+                    threadId: input.threadId,
+                    refs,
+                  },
+                }),
+                liveStream,
+              );
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.subscribeSubagent]: (input) =>
+          observeRpcStreamEffect(
+            ORCHESTRATION_WS_METHODS.subscribeSubagent,
+            Effect.gen(function* () {
+              const [activities, snapshotSequence] = yield* Effect.all([
+                projectionSnapshotQuery
+                  .getSubagentActivities({
+                    threadId: input.threadId,
+                    rootItemId: input.rootItemId,
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new OrchestrationGetSnapshotError({
+                          message: `Failed to load subagent ${input.rootItemId} for thread ${input.threadId}`,
+                          cause,
+                        }),
+                    ),
+                  ),
+                projectionSnapshotQuery.getSnapshotSequence().pipe(
+                  Effect.map(({ snapshotSequence }) => snapshotSequence),
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: "Failed to load orchestration snapshot sequence",
+                        cause,
+                      }),
+                  ),
+                ),
+              ]);
+
+              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+                Stream.filter(
+                  (event) =>
+                    event.aggregateKind === "thread" &&
+                    event.aggregateId === input.threadId &&
+                    isSubagentDirectChildEvent(event, input.rootItemId),
+                ),
+                Stream.map((event) => ({
+                  kind: "event" as const,
+                  event,
+                })),
+              );
+
+              return Stream.concat(
+                Stream.make({
+                  kind: "snapshot" as const,
+                  snapshot: {
+                    snapshotSequence,
+                    threadId: input.threadId,
+                    rootItemId: input.rootItemId,
+                    activities,
                   },
                 }),
                 liveStream,

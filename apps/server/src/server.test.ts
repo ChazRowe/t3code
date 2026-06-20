@@ -25,6 +25,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
+  RuntimeItemId,
   ThreadId,
   WS_METHODS,
   WsRpcGroup,
@@ -5433,6 +5434,206 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(result.failure.cause instanceof Error);
       assert.include(result.failure.cause.message, projectionError.message);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "routes websocket rpc subscribeSubagentTree replays snapshot then emits ref-changed",
+    () =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make("thread-subagent-tree");
+        const baseRef = {
+          threadId,
+          rootItemId: RuntimeItemId.make("item-root-a"),
+          parentItemId: null,
+          label: "Explore: find the bug",
+          subagentType: "Explore",
+          description: "find the bug",
+          status: "inProgress" as const,
+          iteration: null,
+          turnId: null,
+          depth: 0,
+          childSubagentCount: 0,
+          createdAt: "2026-06-20T00:00:01.000Z",
+          updatedAt: "2026-06-20T00:00:01.000Z",
+        };
+
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 7 }),
+              getSubagentTree: () => Effect.succeed([baseRef]),
+            },
+            orchestrationEngine: {
+              streamDomainEvents: Stream.make({
+                sequence: 1,
+                eventId: EventId.make("evt-root-a"),
+                aggregateKind: "thread",
+                aggregateId: threadId,
+                occurredAt: "2026-06-20T00:00:02.000Z",
+                commandId: null,
+                causationEventId: null,
+                correlationId: null,
+                metadata: {},
+                type: "thread.activity-appended",
+                payload: {
+                  threadId,
+                  activity: {
+                    id: EventId.make("act-root-a"),
+                    tone: "tool",
+                    kind: "tool.started",
+                    summary: "Explore: find the bug",
+                    payload: {
+                      itemType: "collab_agent_tool_call",
+                      itemId: "item-root-a",
+                    },
+                    turnId: null,
+                    itemId: RuntimeItemId.make("item-root-a"),
+                    createdAt: "2026-06-20T00:00:02.000Z",
+                  },
+                },
+              } satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeSubagentTree]({ threadId }).pipe(
+              Stream.take(2),
+              Stream.runCollect,
+            ),
+          ),
+        );
+
+        const [first, second] = Array.from(items);
+        assert.equal(first?.kind, "snapshot");
+        if (first?.kind === "snapshot") {
+          assert.equal(first.snapshot.snapshotSequence, 7);
+          assert.equal(first.snapshot.refs.length, 1);
+          assert.equal(first.snapshot.refs[0]?.rootItemId, "item-root-a");
+        }
+        assert.equal(second?.kind, "ref-changed");
+        if (second?.kind === "ref-changed") {
+          assert.equal(second.ref.rootItemId, "item-root-a");
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "routes websocket rpc subscribeSubagent replays snapshot then streams a direct child event",
+    () =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make("thread-subagent");
+        const snapshotChild = {
+          id: EventId.make("act-direct-1"),
+          tone: "tool" as const,
+          kind: "tool.completed",
+          summary: "Read file",
+          payload: {
+            itemType: "command_execution",
+            itemId: "item-direct-1",
+          },
+          turnId: null,
+          createdAt: "2026-06-20T00:00:02.000Z",
+        };
+
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 9 }),
+              getSubagentActivities: () => Effect.succeed([snapshotChild]),
+            },
+            orchestrationEngine: {
+              streamDomainEvents: Stream.make(
+                // Non-matching: a direct child of a DIFFERENT subagent root. The
+                // parentItemId filter must drop this so it never reaches the client.
+                {
+                  sequence: 1,
+                  eventId: EventId.make("evt-other-child"),
+                  aggregateKind: "thread",
+                  aggregateId: threadId,
+                  occurredAt: "2026-06-20T00:00:02.500Z",
+                  commandId: null,
+                  causationEventId: null,
+                  correlationId: null,
+                  metadata: {},
+                  type: "thread.activity-appended",
+                  payload: {
+                    threadId,
+                    activity: {
+                      id: EventId.make("act-other-child"),
+                      tone: "tool",
+                      kind: "tool.completed",
+                      summary: "Unrelated child",
+                      payload: {
+                        itemType: "command_execution",
+                        itemId: "item-other-child",
+                      },
+                      turnId: null,
+                      parentItemId: RuntimeItemId.make("item-other-root"),
+                      createdAt: "2026-06-20T00:00:02.500Z",
+                    },
+                  },
+                } satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>,
+                {
+                  sequence: 2,
+                  eventId: EventId.make("evt-direct-2"),
+                  aggregateKind: "thread",
+                  aggregateId: threadId,
+                  occurredAt: "2026-06-20T00:00:03.000Z",
+                  commandId: null,
+                  causationEventId: null,
+                  correlationId: null,
+                  metadata: {},
+                  type: "thread.activity-appended",
+                  payload: {
+                    threadId,
+                    activity: {
+                      id: EventId.make("act-direct-2"),
+                      tone: "info",
+                      kind: "assistant.message",
+                      summary: "Found it",
+                      payload: {
+                        itemType: "assistant_message",
+                        itemId: "item-direct-2",
+                      },
+                      turnId: null,
+                      parentItemId: RuntimeItemId.make("item-root-a"),
+                      createdAt: "2026-06-20T00:00:03.000Z",
+                    },
+                  },
+                } satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>,
+              ),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeSubagent]({
+              threadId,
+              rootItemId: RuntimeItemId.make("item-root-a"),
+            }).pipe(Stream.take(2), Stream.runCollect),
+          ),
+        );
+
+        const [first, second] = Array.from(items);
+        assert.equal(first?.kind, "snapshot");
+        if (first?.kind === "snapshot") {
+          assert.equal(first.snapshot.snapshotSequence, 9);
+          assert.equal(first.snapshot.rootItemId, "item-root-a");
+          assert.equal(first.snapshot.activities.length, 1);
+          assert.equal(first.snapshot.activities[0]?.id, "act-direct-1");
+        }
+        assert.equal(second?.kind, "event");
+        if (second?.kind === "event" && second.event.type === "thread.activity-appended") {
+          // The first surfaced live event is the matching direct child — proving the
+          // earlier "act-other-child" (different parent) was filtered out, not "act-direct-2".
+          assert.equal(second.event.payload.activity.id, "act-direct-2");
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("enriches replayed project events with repository identity metadata", () =>

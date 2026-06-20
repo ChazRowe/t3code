@@ -797,6 +797,30 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("keeps a subagent text child entry nested under its parent via parentItemId", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "subagent-text",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Subagent message",
+        tone: "info",
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+          detail: "I'll review this change rigorously.",
+          parentItemId: "tool-use-parent",
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.id).toBe("subagent-text");
+    expect(entry?.label).toBe("Subagent message");
+    expect(entry?.parentItemId).toBe("tool-use-parent");
+    expect(entry?.detail).toBe("I'll review this change rigorously.");
+  });
+
   it("omits checkpoint captured info entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

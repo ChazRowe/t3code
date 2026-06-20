@@ -581,6 +581,36 @@ function runtimeEventToActivities(
 
     case "item.completed": {
       if (!isToolLifecycleItemType(event.payload.itemType)) {
+        // Subagent text (assistant_message / reasoning) arrives as item.completed and is
+        // not a tool-lifecycle item. When it carries a parentItemId it belongs nested under
+        // its subagent parent in the work log — NOT as a top-level assistant message bubble
+        // (that routing lives in processRuntimeEvent and is gated on the same parentItemId).
+        if (
+          event.payload.parentItemId &&
+          (event.payload.itemType === "assistant_message" ||
+            event.payload.itemType === "reasoning")
+        ) {
+          const isReasoning = event.payload.itemType === "reasoning";
+          return [
+            {
+              id: event.eventId,
+              createdAt: event.createdAt,
+              tone: "info",
+              kind: "tool.completed",
+              summary:
+                event.payload.title ?? (isReasoning ? "Subagent thinking" : "Subagent message"),
+              payload: {
+                itemType: event.payload.itemType,
+                status: "completed",
+                ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+                parentItemId: event.payload.parentItemId,
+                ...(event.itemId ? { itemId: event.itemId } : {}),
+              },
+              turnId: toTurnId(event.turnId) ?? null,
+              ...maybeSequence,
+            },
+          ];
+        }
         return [];
       }
       return [
@@ -1463,7 +1493,12 @@ const make = Effect.gen(function* () {
       }
 
       const assistantCompletion =
-        event.type === "item.completed" && event.payload.itemType === "assistant_message"
+        event.type === "item.completed" &&
+        event.payload.itemType === "assistant_message" &&
+        // Subagent text carries a parentItemId and is projected as a nested work-log
+        // activity instead (see runtimeEventToActivities). Only top-level assistant
+        // messages become message bubbles.
+        !event.payload.parentItemId
           ? {
               messageId: MessageId.make(
                 `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,

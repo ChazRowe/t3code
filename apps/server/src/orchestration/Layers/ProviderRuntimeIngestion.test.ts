@@ -3174,4 +3174,130 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activity?.kind).toBe("tool.completed");
     expect(payload?.parentItemId).toBe("task-parent-completed");
   });
+
+  it("projects a subagent assistant_message child as a nested activity, not a top-level message", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-text"),
+      provider: ProviderDriverKind.make("claude"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-subagent-text"),
+      itemId: asItemId("subagent-text-item"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        title: "Subagent message",
+        detail: "I'll review this change rigorously.",
+        parentItemId: "task-parent-text",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-subagent-text",
+      ),
+    );
+
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-subagent-text",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+    expect(activity?.kind).toBe("tool.completed");
+    expect(payload?.parentItemId).toBe("task-parent-text");
+    expect(payload?.detail).toBe("I'll review this change rigorously.");
+
+    // Subagent text must NOT leak into the top-level message timeline.
+    const leakedMessage = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:subagent-text-item",
+    );
+    expect(leakedMessage).toBeUndefined();
+  });
+
+  it("projects a subagent reasoning child as a nested activity, not a top-level message", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-reasoning"),
+      provider: ProviderDriverKind.make("claude"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-subagent-reasoning"),
+      itemId: asItemId("subagent-reasoning-item"),
+      payload: {
+        itemType: "reasoning",
+        status: "completed",
+        title: "Subagent thinking",
+        detail: "Let me examine the key reference helpers.",
+        parentItemId: "task-parent-reasoning",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-subagent-reasoning",
+      ),
+    );
+
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-subagent-reasoning",
+    );
+    const payload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+    expect(activity?.kind).toBe("tool.completed");
+    expect(payload?.parentItemId).toBe("task-parent-reasoning");
+    expect(payload?.detail).toBe("Let me examine the key reference helpers.");
+
+    const leakedMessage = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:subagent-reasoning-item",
+    );
+    expect(leakedMessage).toBeUndefined();
+  });
+
+  it("still projects a top-level assistant_message (no parentItemId) as a message", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-top-level-text"),
+      provider: ProviderDriverKind.make("claude"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-top-level-text"),
+      itemId: asItemId("top-level-text-item"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "Top-level final answer.",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:top-level-text-item" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:top-level-text-item",
+    );
+    expect(message?.text).toBe("Top-level final answer.");
+
+    // And it must NOT also be projected as a work-log activity.
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-top-level-text",
+    );
+    expect(activity).toBeUndefined();
+  });
 });

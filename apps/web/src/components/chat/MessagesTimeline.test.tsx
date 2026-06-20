@@ -498,6 +498,57 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("border-border");
   });
 
+  it("renders a subagent text child (assistant_message) inside the card, not at top level", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "code-reviewer: Review the change",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-text123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+          {
+            id: "entry-text-child",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            // Shape produced by deriveWorkLogEntries for a subagent assistant_message
+            // child: no itemType (non-tool-lifecycle), tone "info", text in detail.
+            entry: {
+              id: "work-text-child",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Subagent message",
+              tone: "info",
+              detail: "I'll review this change rigorously.",
+              parentItemId: "tool-use-text123",
+              sourceActivityKind: "tool.completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Subagent:");
+    expect(markup).toContain("code-reviewer");
+    // The subagent's text must be present (nested inside the card).
+    expect(markup).toContain("I&#x27;ll review this change rigorously.");
+    // It must render within the bordered card, after the "Subagent:" header — i.e.
+    // the text appears after the header in document order, not as a sibling above it.
+    expect(markup.indexOf("Subagent:")).toBeLessThan(
+      markup.indexOf("I&#x27;ll review this change rigorously."),
+    );
+  });
+
   it("shows running indicator in card header when subagent parent is in-progress", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

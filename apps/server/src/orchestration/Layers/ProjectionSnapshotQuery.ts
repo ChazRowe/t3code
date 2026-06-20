@@ -1009,6 +1009,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const mapActivityRow = (
+    row: Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>,
+  ): OrchestrationThreadActivity => ({
+    id: row.activityId,
+    tone: row.tone,
+    kind: row.kind,
+    summary: row.summary,
+    payload: row.payload,
+    turnId: row.turnId,
+    ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+    ...(row.itemId !== null ? { itemId: row.itemId } : {}),
+    ...(row.parentItemId !== null ? { parentItemId: row.parentItemId } : {}),
+    ...(row.iteration !== null ? { iteration: row.iteration } : {}),
+    createdAt: row.createdAt,
+  });
+
   const getSnapshot: ProjectionSnapshotQueryShape["getSnapshot"] = () =>
     sql
       .withTransaction(
@@ -1154,16 +1170,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               for (const row of activityRows) {
                 updatedAt = maxIso(updatedAt, row.createdAt);
                 const threadActivities = activitiesByThread.get(row.threadId) ?? [];
-                threadActivities.push({
-                  id: row.activityId,
-                  tone: row.tone,
-                  kind: row.kind,
-                  summary: row.summary,
-                  payload: row.payload,
-                  turnId: row.turnId,
-                  ...(row.sequence !== null ? { sequence: row.sequence } : {}),
-                  createdAt: row.createdAt,
-                });
+                threadActivities.push(mapActivityRow(row));
                 activitiesByThread.set(row.threadId, threadActivities);
               }
 
@@ -2078,22 +2085,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           return message;
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
-        activities: activityRows.map((row) => {
-          const activity = {
-            id: row.activityId,
-            tone: row.tone,
-            kind: row.kind,
-            summary: row.summary,
-            payload: row.payload,
-            turnId: row.turnId,
-            ...(row.sequence !== null ? { sequence: row.sequence } : {}),
-            ...(row.itemId !== null ? { itemId: row.itemId } : {}),
-            ...(row.parentItemId !== null ? { parentItemId: row.parentItemId } : {}),
-            ...(row.iteration !== null ? { iteration: row.iteration } : {}),
-            createdAt: row.createdAt,
-          };
-          return activity;
-        }),
+        activities: activityRows.map(mapActivityRow),
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,
           checkpointTurnCount: row.checkpointTurnCount,
@@ -2115,22 +2107,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ),
       );
     });
-
-  const mapActivityRow = (
-    row: Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>,
-  ): OrchestrationThreadActivity => ({
-    id: row.activityId,
-    tone: row.tone,
-    kind: row.kind,
-    summary: row.summary,
-    payload: row.payload,
-    turnId: row.turnId,
-    ...(row.sequence !== null ? { sequence: row.sequence } : {}),
-    ...(row.itemId !== null ? { itemId: row.itemId } : {}),
-    ...(row.parentItemId !== null ? { parentItemId: row.parentItemId } : {}),
-    ...(row.iteration !== null ? { iteration: row.iteration } : {}),
-    createdAt: row.createdAt,
-  });
 
   const listSubagentChildActivityRows: ProjectionSnapshotQueryShape["listSubagentChildActivityRows"] =
     ({ threadId, parentItemId }) =>

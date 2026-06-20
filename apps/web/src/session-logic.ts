@@ -78,6 +78,16 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  /**
+   * Set on child entries (nested subagent items). The value is the parent Task
+   * tool-use item ID — matches the parent entry's `toolItemId`.
+   */
+  parentItemId?: string;
+  /**
+   * Set on parent "Subagent task" entries. The value is the tool-use item ID
+   * of this entry's runtime item — matches child entries' `parentItemId`.
+   */
+  toolItemId?: string;
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -631,8 +641,25 @@ export function deriveWorkLogEntries(
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
-    if (activity.kind === "tool.started") continue;
-    if (activity.kind === "task.started") continue;
+    if (
+      activity.kind === "tool.started" &&
+      !(
+        activity.payload &&
+        typeof activity.payload === "object" &&
+        "parentItemId" in activity.payload &&
+        (activity.payload as Record<string, unknown>).parentItemId
+      )
+    )
+      continue;
+    // Subagent Task lifecycle (started/progress/completed) is tracked by the task
+    // pane and the subagent card, so drop all of it from the inline work log — these
+    // rows are redundant and the failed/stopped completions render as alarming errors.
+    if (
+      activity.kind === "task.started" ||
+      activity.kind === "task.progress" ||
+      activity.kind === "task.completed"
+    )
+      continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
@@ -705,11 +732,23 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       : null
     : extractToolDetail(payload, title ?? activity.summary);
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
+  // For a subagent child tool.started, the generic activity.summary is "Command run started"
+  // (or similar) and the actual invocation ("Bash: cd … && mix test") lives in payload.detail.
+  // handleSubagentMessage emits only item.started + item.completed for children (never
+  // item.updated), so a started→updated→completed chain cannot occur for subagents.
+  const isChildToolStarted =
+    activity.kind === "tool.started" &&
+    typeof payload?.parentItemId === "string" &&
+    payload.parentItemId.length > 0;
+  const childStartedInvocationLabel =
+    isChildToolStarted && typeof payload?.detail === "string" && payload.detail.length > 0
+      ? payload.detail
+      : null;
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
     turnId: activity.turnId,
-    label: taskLabel || activity.summary,
+    label: taskLabel || childStartedInvocationLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
         ? "thinking"
@@ -757,9 +796,17 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (toolLifecycleStatus) {
     entry.toolLifecycleStatus = toolLifecycleStatus;
   }
+  const parentItemId = asTrimmedString((payload as Record<string, unknown> | null)?.parentItemId);
+  if (parentItemId) {
+    entry.parentItemId = parentItemId;
+  }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {
     entry.collapseKey = collapseKey;
+  }
+  const toolItemId = asTrimmedString((payload as Record<string, unknown> | null)?.itemId);
+  if (toolItemId) {
+    entry.toolItemId = toolItemId;
   }
   return entry;
 }
@@ -783,6 +830,17 @@ function shouldCollapseToolLifecycleEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
+  // Allow a subagent child tool.started to collapse into its following tool.updated/tool.completed
+  // when they share the same collapse key (keyed on toolCallId + parentItemId).
+  if (
+    previous.activityKind === "tool.started" &&
+    previous.parentItemId !== undefined &&
+    (next.activityKind === "tool.updated" || next.activityKind === "tool.completed") &&
+    previous.collapseKey !== undefined &&
+    previous.collapseKey === next.collapseKey
+  ) {
+    return true;
+  }
   if (previous.activityKind !== "tool.updated" && previous.activityKind !== "tool.completed") {
     return false;
   }
@@ -819,9 +877,13 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus;
   const toolData = next.toolData ?? previous.toolData;
+  // When collapsing a subagent child started→completed pair, preserve the invocation label
+  // (e.g. "Bash: mix test") from the started entry rather than using the generic completed label.
+  const label = previous.activityKind === "tool.started" ? previous.label : next.label;
   return {
     ...previous,
     ...next,
+    label,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
@@ -848,7 +910,11 @@ function mergeChangedFiles(
 }
 
 function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined {
-  if (entry.activityKind !== "tool.updated" && entry.activityKind !== "tool.completed") {
+  if (
+    entry.activityKind !== "tool.updated" &&
+    entry.activityKind !== "tool.completed" &&
+    !(entry.activityKind === "tool.started" && entry.parentItemId)
+  ) {
     return undefined;
   }
   if (entry.toolCallId) {

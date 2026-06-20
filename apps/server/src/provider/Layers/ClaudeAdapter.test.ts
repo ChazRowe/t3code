@@ -33,7 +33,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
-import { ServerConfig } from "../../config.ts";
+import { ServerConfig, type ServerConfigShape } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
@@ -156,6 +156,7 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly serverConfigOverrides?: Partial<ServerConfigShape>;
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -183,6 +184,23 @@ function makeHarness(config?: {
       : {}),
   };
 
+  const serverConfigOverrides = config?.serverConfigOverrides;
+  const baseServerConfigLayer = ServerConfig.layerTest(
+    config?.cwd ?? "/tmp/claude-adapter-test",
+    config?.baseDir ?? "/tmp",
+  );
+  const serverConfigLayer =
+    serverConfigOverrides !== undefined
+      ? baseServerConfigLayer.pipe(
+          Layer.flatMap((ctx) =>
+            Layer.succeed(ServerConfig, {
+              ...Context.get(ctx, ServerConfig),
+              ...serverConfigOverrides,
+            }),
+          ),
+        )
+      : baseServerConfigLayer;
+
   return {
     layer: Layer.effect(
       ClaudeAdapter,
@@ -191,12 +209,7 @@ function makeHarness(config?: {
         return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
       }),
     ).pipe(
-      Layer.provideMerge(
-        ServerConfig.layerTest(
-          config?.cwd ?? "/tmp/claude-adapter-test",
-          config?.baseDir ?? "/tmp",
-        ),
-      ),
+      Layer.provideMerge(serverConfigLayer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     ),
@@ -1296,6 +1309,89 @@ describe("ClaudeAdapterLive", () => {
       if (toolStarted?.type === "item.started") {
         assert.equal(toolStarted.payload.itemType, "collab_agent_tool_call");
         assert.equal(toolStarted.payload.title, "Subagent task");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("drops subagent partial stream text instead of leaking it into the main assistant message", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "delegate this",
+        attachments: [],
+      });
+
+      // A subagent streams partial assistant text (parent_tool_use_id set). This
+      // must NOT become a top-level assistant content delta — it would render as a
+      // message bubble outside the subagent card and get overwritten by the parent.
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-subagent",
+        uuid: "stream-subagent-1",
+        parent_tool_use_id: "tool-parent-1",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: {
+            type: "text_delta",
+            text: "SUBAGENT-LEAK-TEXT",
+          },
+        },
+      } as unknown as SDKMessage);
+
+      // The parent agent streams its own text (parent_tool_use_id null) — this is
+      // the only legitimate top-level content delta.
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-subagent",
+        uuid: "stream-main-1",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: {
+            type: "text_delta",
+            text: "MAIN-TEXT",
+          },
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-subagent",
+        uuid: "result-subagent",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const contentDeltas = runtimeEvents.filter((event) => event.type === "content.delta");
+      assert.equal(
+        contentDeltas.length,
+        1,
+        "subagent partial stream text must not leak as a second top-level content delta",
+      );
+      const [delta] = contentDeltas;
+      if (delta?.type === "content.delta") {
+        assert.equal(delta.payload.delta, "MAIN-TEXT");
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -3790,6 +3886,293 @@ describe("ClaudeAdapterLive", () => {
         nativeThreadIds.every((threadId) => threadId === String(THREAD_ID)),
         true,
       );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("passes forwardSubagentText to query when the flag is enabled", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.forwardSubagentText, true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("omits forwardSubagentText when the flag is disabled", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: false } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.forwardSubagentText, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("emits nested work-log items for forwarded subagent tool calls", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // Collect events until we see the inner item.started for "inner-bash-1".
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "item.started" && String(event.itemId) === "inner-bash-1",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "go",
+        attachments: [],
+      });
+
+      // Parent Task tool call (main loop) — registers itemId "task-parent".
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "s",
+        uuid: "p0",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "task-parent",
+            name: "Agent",
+            input: { subagent_type: "general-purpose", description: "do work" },
+          },
+        },
+      } as unknown as SDKMessage);
+
+      // Forwarded subagent assistant message carrying an inner tool_use.
+      harness.query.emit({
+        type: "assistant",
+        session_id: "s",
+        uuid: "sa1",
+        parent_tool_use_id: "task-parent",
+        message: {
+          id: "msg-sa1",
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "inner-bash-1", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const started = runtimeEvents.filter(
+        (e) => e.type === "item.started" && String(e.itemId) === "inner-bash-1",
+      );
+      assert.equal(started.length, 1);
+      const startedEvent = started[0];
+      if (startedEvent?.type === "item.started") {
+        assert.equal(startedEvent.payload.itemType, "command_execution");
+        assert.equal(String(startedEvent.payload.parentItemId), "task-parent");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("caps nested subagent items per parent at MAX_SUBAGENT_ITEMS_PER_PARENT", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "go",
+        attachments: [],
+      });
+
+      // Emit 250 subagent messages for the same parent — only 200 should produce item.started.
+      for (let i = 0; i < 250; i++) {
+        harness.query.emit({
+          type: "assistant",
+          session_id: "s",
+          uuid: `sa-${i}`,
+          parent_tool_use_id: "task-parent",
+          message: {
+            id: `m-${i}`,
+            role: "assistant",
+            content: [{ type: "tool_use", id: `inner-${i}`, name: "Bash", input: { command: "ls" } }],
+          },
+        } as unknown as SDKMessage);
+      }
+
+      // A DIFFERENT parent gets its own fresh budget.
+      harness.query.emit({
+        type: "assistant",
+        session_id: "s",
+        uuid: "sa-other",
+        parent_tool_use_id: "task-other",
+        message: {
+          id: "m-other",
+          role: "assistant",
+          content: [{ type: "tool_use", id: "inner-other", name: "Bash", input: { command: "pwd" } }],
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "s",
+        uuid: "result-cap",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      // Exactly 200 nested item.started events for task-parent (capped).
+      const startedForParent = runtimeEvents.filter(
+        (e) =>
+          e.type === "item.started" &&
+          e.payload.parentItemId !== undefined &&
+          String(e.payload.parentItemId) === "task-parent",
+      );
+      assert.equal(startedForParent.length, 200);
+
+      // The different parent still gets its own budget (1 message → 1 item.started).
+      const startedForOther = runtimeEvents.filter(
+        (e) =>
+          e.type === "item.started" &&
+          e.payload.parentItemId !== undefined &&
+          String(e.payload.parentItemId) === "task-other",
+      );
+      assert.equal(startedForOther.length, 1);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("does not push subagent messages into the main turn or emit token-usage events", () => {
+    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // Collect events until we see the result (turn completed).
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "go",
+        attachments: [],
+      });
+
+      // Forwarded subagent assistant message with text only — no tool_use.
+      harness.query.emit({
+        type: "assistant",
+        session_id: "s",
+        uuid: "sa2",
+        parent_tool_use_id: "task-parent",
+        message: {
+          id: "msg-sa2",
+          role: "assistant",
+          content: [{ type: "text", text: "subagent thinking out loud" }],
+        },
+      } as unknown as SDKMessage);
+
+      // End the turn so the fiber can complete.
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "s",
+        uuid: "result-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      // The subagent text message must NOT emit thread.token-usage.updated.
+      const tokenUsageEvents = runtimeEvents.filter(
+        (e) => e.type === "thread.token-usage.updated",
+      );
+      assert.equal(tokenUsageEvents.length, 0);
+
+      // The subagent text message must NOT produce item.started events
+      // (text blocks do not create started items — only tool_use does).
+      const itemStartedFromSubagent = runtimeEvents.filter(
+        (e) => e.type === "item.started" && e.itemId !== undefined,
+      );
+      assert.equal(itemStartedFromSubagent.length, 0);
+
+      // Guard: the subagent message must NOT pollute the main turn's item list.
+      //
+      // If routing were broken and the message fell through to handleAssistantMessage,
+      // it would (a) push to turnState.items and (b) call backfillAssistantTextBlocksFromSnapshot,
+      // which emits content.delta + item.completed("assistant_message") WITHOUT a parentItemId.
+      //
+      // The correct path through handleSubagentMessage also emits item.completed("assistant_message")
+      // but always carries a parentItemId in the payload, so main-turn pollution is detectable.
+      //
+      // Assert:
+      //   1. No content.delta events (handleSubagentMessage never emits those).
+      //   2. Any item.completed("assistant_message") events carry parentItemId (nested, not main-turn).
+      const contentDeltaEvents = runtimeEvents.filter((e) => e.type === "content.delta");
+      assert.equal(
+        contentDeltaEvents.length,
+        0,
+        "Subagent text must not produce content.delta on the main turn",
+      );
+      const assistantItemCompleted = runtimeEvents.filter(
+        (e) => e.type === "item.completed" && e.payload.itemType === "assistant_message",
+      );
+      for (const event of assistantItemCompleted) {
+        assert.notEqual(
+          event.type === "item.completed" ? event.payload.parentItemId : undefined,
+          undefined,
+          "item.completed(assistant_message) from subagent must carry parentItemId (not a main-turn item)",
+        );
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

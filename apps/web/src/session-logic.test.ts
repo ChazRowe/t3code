@@ -711,7 +711,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
-  it("omits task.started but shows task.progress and task.completed", () => {
+  it("omits every task.* lifecycle activity from the inline log (the task pane tracks them)", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "task-start",
@@ -737,26 +737,13 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
+    expect(entries).toEqual([]);
   });
 
-  it("uses payload summary as label for task entries when available", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "task-progress-with-summary",
-        createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "task.progress",
-        summary: "Reasoning update",
-        tone: "info",
-        payload: { summary: "Searching for API endpoints" },
-      }),
-    ];
-
-    const entries = deriveWorkLogEntries(activities);
-    expect(entries[0]?.label).toBe("Searching for API endpoints");
-  });
-
-  it("uses payload detail as label for task.completed and preserves error tone", () => {
+  it("omits a failed task.completed so it never shows as an inline error row", () => {
+    // Subagent Task tools occasionally report status "failed"/"stopped" to the SDK.
+    // That outcome is already conveyed by the subagent card and the task sidebar, so
+    // the standalone task.completed activity must not surface as an inline error row.
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "task-completed-failed",
@@ -769,8 +756,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries[0]?.label).toBe("Failed to deploy changes");
-    expect(entries[0]?.tone).toBe("error");
+    expect(entries).toEqual([]);
   });
 
   it("keeps tool entries from every turn and tags each with its turn id", () => {
@@ -795,6 +781,30 @@ describe("deriveWorkLogEntries", () => {
       TurnId.make("turn-1"),
       TurnId.make("turn-2"),
     ]);
+  });
+
+  it("keeps a subagent text child entry nested under its parent via parentItemId", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "subagent-text",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Subagent message",
+        tone: "info",
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+          detail: "I'll review this change rigorously.",
+          parentItemId: "tool-use-parent",
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.id).toBe("subagent-text");
+    expect(entry?.label).toBe("Subagent message");
+    expect(entry?.parentItemId).toBe("tool-use-parent");
+    expect(entry?.detail).toBe("I'll review this change rigorously.");
   });
 
   it("omits checkpoint captured info entries", () => {
@@ -1597,6 +1607,154 @@ describe("deriveWorkLogEntries context window handling", () => {
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
+  });
+});
+
+describe("deriveWorkLogEntries subagent nesting", () => {
+  it("surfaces parentItemId from the activity payload onto the derived entry", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        id: "child-act-1",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.completed",
+        summary: "Command run completed",
+        tone: "tool",
+        payload: { itemType: "command_execution", parentItemId: "task-parent" },
+      }),
+    ]);
+    expect(entry?.parentItemId).toBe("task-parent");
+  });
+
+  it("surfaces toolItemId from the activity payload itemId onto the parent derived entry", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        id: "parent-act-1",
+        createdAt: "2026-06-19T00:00:00.000Z",
+        kind: "tool.completed",
+        summary: "Subagent task",
+        tone: "tool",
+        payload: { itemType: "collab_agent_tool_call", itemId: "tool-use-abc123" },
+      }),
+    ]);
+    expect(entry?.toolItemId).toBe("tool-use-abc123");
+  });
+
+  it("does not set parentItemId when payload has none", () => {
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        id: "no-parent-act",
+        createdAt: "2026-06-19T00:00:00.000Z",
+        kind: "tool.completed",
+        summary: "Standalone tool",
+        tone: "tool",
+        payload: { itemType: "command_execution" },
+      }),
+    ]);
+    expect(entry?.parentItemId).toBeUndefined();
+    expect(entry?.toolItemId).toBeUndefined();
+  });
+
+  it("collapses a subagent child started+completed into one row with invocation label and result detail (realistic data)", () => {
+    // REAL server data shape:
+    //   tool.started: summary="Command run started", payload.itemType="command_execution",
+    //                 payload.detail="Bash: cd /x && mix test"
+    //   tool.completed: summary="Subagent tool result", payload.itemType="dynamic_tool_call",
+    //                   payload.detail="<result output>"
+    // The invocation ("Bash: cd /x && mix test") must be the row's visible heading/label,
+    // NOT the generic "Command run started". The result must remain accessible (detail).
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "child-bash-started",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Command run started",
+        tone: "tool",
+        payload: {
+          itemType: "command_execution",
+          detail: "Bash: cd /x && mix test",
+          parentItemId: "task-parent-item",
+          data: { toolCallId: "call-child-1" },
+        },
+      }),
+      makeActivity({
+        id: "child-bash-completed",
+        createdAt: "2026-06-19T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Subagent tool result",
+        tone: "tool",
+        payload: {
+          itemType: "dynamic_tool_call",
+          detail: "3 tests passed",
+          parentItemId: "task-parent-item",
+          data: { toolCallId: "call-child-1" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    // The invocation command must be the visible label — not the generic "Command run started".
+    expect(entries[0]?.label).toBe("Bash: cd /x && mix test");
+    // The result must be reachable in detail (for the expandable body).
+    expect(entries[0]?.detail).toBe("3 tests passed");
+    expect(entries[0]?.parentItemId).toBe("task-parent-item");
+  });
+
+  it("shows an in-progress subagent child (started only) as a single row with the invocation label", () => {
+    // tool.started with real data: summary is generic, invocation is in payload.detail
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "child-read-started",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Command run started",
+        tone: "tool",
+        payload: {
+          itemType: "command_execution",
+          detail: "Read: /tmp/app.ts",
+          parentItemId: "task-parent-item",
+          data: { toolCallId: "call-child-2" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    // In-progress child must show the invocation, not the generic "Command run started".
+    expect(entries[0]?.label).toBe("Read: /tmp/app.ts");
+    expect(entries[0]?.parentItemId).toBe("task-parent-item");
+  });
+
+  it("does not add a duplicate started row for main-thread tool calls (regression)", () => {
+    // A main-thread tool call (no parentItemId) must produce exactly one row
+    // via the completed entry, just like before.
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "main-tool-started",
+        createdAt: "2026-06-19T00:00:01.000Z",
+        kind: "tool.started",
+        summary: "Bash: ls",
+        tone: "tool",
+        payload: {
+          data: { toolCallId: "call-main-1" },
+        },
+      }),
+      makeActivity({
+        id: "main-tool-completed",
+        createdAt: "2026-06-19T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Command run completed",
+        tone: "tool",
+        payload: {
+          detail: "apps  packages",
+          data: { toolCallId: "call-main-1" },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.id).toBe("main-tool-completed");
   });
 });
 

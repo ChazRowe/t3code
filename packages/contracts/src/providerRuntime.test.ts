@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import { ProviderRuntimeEvent } from "./providerRuntime.ts";
+import { ItemLifecyclePayload, ProviderRuntimeEvent } from "./providerRuntime.ts";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
@@ -180,5 +180,22 @@ describe("ProviderRuntimeEvent", () => {
     }
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
+  });
+});
+
+describe("ItemLifecyclePayload", () => {
+  it("carries an optional parentItemId", () => {
+    const decoded = Schema.decodeUnknownSync(ItemLifecyclePayload)({
+      itemType: "command_execution",
+      status: "inProgress",
+      title: "Command run",
+      parentItemId: "tool-parent-123",
+    });
+    expect(decoded.parentItemId).toBe("tool-parent-123");
+
+    const withoutParent = Schema.decodeUnknownSync(ItemLifecyclePayload)({
+      itemType: "command_execution",
+    });
+    expect(withoutParent.parentItemId).toBeUndefined();
   });
 });

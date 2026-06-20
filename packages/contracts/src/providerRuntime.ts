@@ -407,6 +407,7 @@ export const ItemLifecyclePayload = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyStringSchema),
   detail: Schema.optional(TrimmedNonEmptyStringSchema),
   data: Schema.optional(Schema.Unknown),
+  parentItemId: Schema.optional(RuntimeItemId),
 });
 export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type;
 

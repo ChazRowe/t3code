@@ -358,4 +358,322 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("lucide-x");
     expect(markup).toContain('aria-label="Tool call failed"');
   });
+
+  it("renders child entries indented under their parent via parentItemId/toolItemId", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Subagent task",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-abc123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+          {
+            id: "entry-child",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            entry: {
+              id: "work-child",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Subagent command",
+              tone: "tool",
+              itemType: "command_execution",
+              parentItemId: "tool-use-abc123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // Parent label and child both render inside the card
+    expect(markup).toContain("Subagent task");
+    expect(markup).toContain("Subagent command");
+    // Card container uses border-border (replaces the old ml-4/border-l indent)
+    expect(markup).toContain("border-border");
+  });
+
+  it("renders in-progress subagent parent and nests live children under it", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Subagent task",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-live123",
+              // inProgress — parent is still running while children arrive
+              toolLifecycleStatus: "inProgress",
+            },
+          },
+          {
+            id: "entry-child",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            entry: {
+              id: "work-child",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Live subagent command",
+              tone: "tool",
+              itemType: "command_execution",
+              parentItemId: "tool-use-live123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // In-progress parent must render (not be filtered out)
+    expect(markup).toContain("Subagent task");
+    // Child must also render (nested inside the card)
+    expect(markup).toContain("Live subagent command");
+    // Card container uses border-border (children are contained, not indented)
+    expect(markup).toContain("border-border");
+  });
+
+  it("renders a subagent parent with children inside a bordered card with a Subagent: header", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "general-purpose: Execute floor-rekey cut #3",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-card123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+          {
+            id: "entry-child",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            entry: {
+              id: "work-child",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Bash",
+              tone: "tool",
+              itemType: "command_execution",
+              parentItemId: "tool-use-card123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // Card header shows "Subagent:" prefix and the subagent type
+    expect(markup).toContain("Subagent:");
+    expect(markup).toContain("general-purpose");
+    // Children still render
+    expect(markup).toContain("Bash");
+    // Card has a border (bordered container)
+    expect(markup).toContain("border-border");
+  });
+
+  it("renders the subagent child rows inside a bounded scroll viewport that keeps every child", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const childEntries = Array.from({ length: 12 }, (_, i) => ({
+      id: `entry-child-${i}`,
+      kind: "work" as const,
+      createdAt: "2026-03-17T19:12:29.000Z",
+      entry: {
+        id: `work-child-${i}`,
+        createdAt: "2026-03-17T19:12:29.000Z",
+        label: `Bash`,
+        detail: `child-command-${i}`,
+        tone: "tool" as const,
+        itemType: "command_execution" as const,
+        parentItemId: "tool-use-scroll123",
+        toolLifecycleStatus: "completed" as const,
+      },
+    }));
+
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "general-purpose: Long-running task",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-scroll123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+          ...childEntries,
+        ]}
+      />,
+    );
+
+    // Child rows live in a bounded scroll viewport (max-height + vertical scroll).
+    expect(markup).toContain("overflow-y-auto");
+    expect(markup).toContain("max-h-[8rem]");
+    // Every child still renders — scrolling up reveals history, nothing is sliced away.
+    expect(markup).toContain("child-command-0");
+    expect(markup).toContain("child-command-11");
+  });
+
+  it("renders a subagent text child (assistant_message) inside the card, not at top level", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "code-reviewer: Review the change",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-text123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+          {
+            id: "entry-text-child",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:29.000Z",
+            // Shape produced by deriveWorkLogEntries for a subagent assistant_message
+            // child: no itemType (non-tool-lifecycle), tone "info", text in detail.
+            entry: {
+              id: "work-text-child",
+              createdAt: "2026-03-17T19:12:29.000Z",
+              label: "Subagent message",
+              tone: "info",
+              detail: "I'll review this change rigorously.",
+              parentItemId: "tool-use-text123",
+              sourceActivityKind: "tool.completed",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Subagent:");
+    expect(markup).toContain("code-reviewer");
+    // The subagent's text must be present (nested inside the card).
+    expect(markup).toContain("I&#x27;ll review this change rigorously.");
+    // It must render within the bordered card, after the "Subagent:" header — i.e.
+    // the text appears after the header in document order, not as a sibling above it.
+    expect(markup.indexOf("Subagent:")).toBeLessThan(
+      markup.indexOf("I&#x27;ll review this change rigorously."),
+    );
+  });
+
+  it("shows running indicator in card header when subagent parent is in-progress", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "general-purpose: Do something",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-running123",
+              toolLifecycleStatus: "inProgress",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // Running indicator text should be present
+    expect(markup).toContain("running");
+    // Animated dots (animate-pulse) should be present for the spinner
+    expect(markup).toContain("animate-pulse");
+  });
+
+  it("does not truncate entries when an in-progress subagent parent is present", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    // Build more than MAX_VISIBLE entries (default is 8) with an in-progress subagent
+    const manyEntries = Array.from({ length: 10 }, (_, i) => ({
+      id: `entry-${i}`,
+      kind: "work" as const,
+      createdAt: "2026-03-17T19:12:28.000Z",
+      entry: {
+        id: `work-${i}`,
+        createdAt: "2026-03-17T19:12:28.000Z",
+        label: `Tool call ${i}`,
+        tone: "tool" as const,
+        itemType: "command_execution" as const,
+        toolLifecycleStatus: "completed" as const,
+      },
+    }));
+
+    // Replace the first entry with an in-progress subagent parent
+    const entriesWithActiveSubagent = [
+      {
+        id: "entry-subagent",
+        kind: "work" as const,
+        createdAt: "2026-03-17T19:12:27.000Z",
+        entry: {
+          id: "work-subagent",
+          createdAt: "2026-03-17T19:12:27.000Z",
+          label: "general-purpose: Active task",
+          tone: "tool" as const,
+          itemType: "collab_agent_tool_call" as const,
+          toolItemId: "tool-use-active",
+          toolLifecycleStatus: "inProgress" as const,
+        },
+      },
+      ...manyEntries,
+    ];
+
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={entriesWithActiveSubagent}
+      />,
+    );
+
+    // All tool calls should be visible (no "Show more" truncation)
+    expect(markup).not.toContain("previous tool call");
+    // Last entry should be visible
+    expect(markup).toContain("Tool call 9");
+  });
 });

@@ -10,12 +10,15 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationEvent,
+  type OrchestrationShellStreamEvent,
+  type UnattendedRunState,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
+  applyShellEvent,
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
@@ -1081,5 +1084,93 @@ describe("incremental orchestration updates", () => {
       state: "running",
     });
     expect(threadsOf(next)[0]?.latestTurn?.sourceProposedPlan).toBeUndefined();
+  });
+});
+
+describe("unattendedRun preservation across live shell upserts", () => {
+  const activeUnattendedRun: UnattendedRunState = {
+    status: "running",
+    totalIterations: 5,
+    currentIteration: 1,
+    pauseReason: null,
+    startedAt: "2026-06-19T00:00:00.000Z",
+    updatedAt: "2026-06-19T00:00:00.000Z",
+  };
+
+  function makeThreadUpsertedShellEvent(
+    thread: Thread,
+    sequence = 1,
+  ): OrchestrationShellStreamEvent {
+    return {
+      kind: "thread-upserted",
+      sequence,
+      thread: {
+        id: thread.id,
+        projectId: thread.projectId,
+        title: thread.title,
+        modelSelection: thread.modelSelection,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        latestTurn: thread.latestTurn,
+        createdAt: thread.createdAt,
+        updatedAt: thread.updatedAt ?? thread.createdAt,
+        archivedAt: thread.archivedAt,
+        session: null,
+        latestUserMessageAt: null,
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        hasActionableProposedPlan: false,
+      },
+    };
+  }
+
+  it("preserves stored unattendedRun when a live thread-upserted shell event arrives", () => {
+    const thread = makeThread({ unattendedRun: activeUnattendedRun });
+    const initialState = makeState(thread);
+
+    // Confirm the initial state has the active run
+    const envBefore = localEnvironmentStateOf(initialState);
+    expect(envBefore.threadShellById[thread.id]?.unattendedRun).toEqual(activeUnattendedRun);
+
+    // Apply a live shell upsert (which carries no unattendedRun)
+    const shellEvent = makeThreadUpsertedShellEvent(thread);
+    const nextState = applyShellEvent(initialState, shellEvent, localEnvironmentId);
+
+    const envAfter = localEnvironmentStateOf(nextState);
+    // The stored unattendedRun must NOT be clobbered by the null from the shell wire format
+    expect(envAfter.threadShellById[thread.id]?.unattendedRun).toEqual(activeUnattendedRun);
+  });
+
+  it("allows a genuine unattended-run event to update/clear unattendedRun even after shell upserts", () => {
+    const thread = makeThread({ unattendedRun: activeUnattendedRun });
+    let state = makeState(thread);
+
+    // Apply a shell upsert first (simulating live activity)
+    const shellEvent = makeThreadUpsertedShellEvent(thread);
+    state = applyShellEvent(state, shellEvent, localEnvironmentId);
+
+    // Confirm preserved
+    expect(
+      localEnvironmentStateOf(state).threadShellById[thread.id]?.unattendedRun?.status,
+    ).toBe("running");
+
+    // Now apply a genuine unattended-run-finished event
+    state = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.unattended-run-finished", {
+        threadId: thread.id,
+        outcome: "completed",
+        iteration: 1,
+        updatedAt: "2026-06-19T00:01:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    // The unattendedRun should now reflect the finished state (not frozen at "running")
+    const finalUnattendedRun =
+      localEnvironmentStateOf(state).threadShellById[thread.id]?.unattendedRun;
+    expect(finalUnattendedRun?.status).toBe("completed");
   });
 });

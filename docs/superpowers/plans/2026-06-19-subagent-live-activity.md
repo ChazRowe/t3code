@@ -13,7 +13,7 @@
 - SDK is `@anthropic-ai/claude-agent-sdk@0.3.170`; the `Options` type (imported as `ClaudeQueryOptions`) already declares `forwardSubagentText?: boolean`. Do not bump the SDK.
 - The forwarded subagent content arrives as **complete `assistant` / `user` SDK messages with `parent_tool_use_id` set to the parent Task tool-use id** — NOT as `stream_event` partial deltas. Rendering is therefore step-by-step (per message), not token-by-token. Do not promise token streaming.
 - `parent_tool_use_id` currently appears in three places in `apps/server/src/provider/Layers/ClaudeAdapter.ts`: the noise-key set (`SDK_MESSAGE_NOISE_KEYS`, ~line 1296), the `message_delta` token gate (~line 2102), and a hardcoded `null` (~line 938). Only the routing behavior changes; the token gate at 2102 MUST keep ignoring subagent `message_delta` (subagent token usage stays off the main-thread gauge — see commit `11739cd7`).
-- Default the feature **OFF**. It is opt-in via env `T3_FORWARD_SUBAGENT_ACTIVITY=1`. Unattended runs must not forward (they have no live viewer and the volume is large — fugue runs produced ~7,000 subagent lines).
+- Default the feature **OFF**. It is opt-in via env `T3CODE_FORWARD_SUBAGENT_ACTIVITY=1`. Unattended runs must not forward (they have no live viewer and the volume is large — fugue runs produced ~7,000 subagent lines).
 - Effect Schema idiom: optional fields use `Schema.optional(...)`; emit fields conditionally with `...(x ? { key: x } : {})` to match the existing codebase style.
 - Run server tests with `pnpm --filter @t3tools/server test` (or the repo's `vp run --filter t3 test` equivalent the implementer confirms); web tests with `pnpm --filter @t3tools/web test`; typecheck with the repo's `pnpm typecheck`. Confirm the exact script names from `package.json` before first run.
 - Frequent commits: one per task. TDD: failing test first, minimal implementation, green, commit.
@@ -31,7 +31,7 @@ Gate the SDK option behind an env-derived `ServerConfig` boolean and pass it int
 
 **Interfaces:**
 - Consumes: `ServerConfig` service (already injected in the adapter as `serverConfig`).
-- Produces: `ServerConfig.forwardSubagentActivity: boolean`, derived from `process.env.T3_FORWARD_SUBAGENT_ACTIVITY === "1"`, default `false`.
+- Produces: `ServerConfig.forwardSubagentActivity: boolean`, derived from `process.env.T3CODE_FORWARD_SUBAGENT_ACTIVITY === "1"`, default `false`.
 
 - [ ] **Step 1: Find how existing boolean flags are parsed from env**
 
@@ -77,7 +77,7 @@ In `apps/server/src/config.ts`, add to the `ServerConfig` interface (near the ot
 And where the config object is constructed from env, add (mirroring the sibling-flag pattern found in Step 1):
 
 ```typescript
-  forwardSubagentActivity: process.env.T3_FORWARD_SUBAGENT_ACTIVITY === "1",
+  forwardSubagentActivity: process.env.T3CODE_FORWARD_SUBAGENT_ACTIVITY === "1",
 ```
 
 - [ ] **Step 5: Wire it into queryOptions**
@@ -103,7 +103,7 @@ Expected: no errors. (If `layerTest`/config fixtures elsewhere construct `Server
 
 ```bash
 git add apps/server/src/config.ts apps/server/src/provider/Layers/ClaudeAdapter.ts apps/server/src/provider/Layers/ClaudeAdapter.test.ts
-git commit -m "feat(provider): gate forwardSubagentText behind T3_FORWARD_SUBAGENT_ACTIVITY"
+git commit -m "feat(provider): gate forwardSubagentText behind T3CODE_FORWARD_SUBAGENT_ACTIVITY"
 ```
 
 ---
@@ -720,7 +720,7 @@ git commit -m "feat(provider): cap nested subagent items per parent with overflo
 - [ ] Full server suite green: `pnpm --filter @t3tools/server test` (was 1252 passing on this branch).
 - [ ] Full web suite green: `pnpm --filter @t3tools/web test` (was 1212 passing).
 - [ ] `pnpm typecheck` + lint clean.
-- [ ] Live: `T3_FORWARD_SUBAGENT_ACTIVITY=1 pnpm daemon:deploy` (note: env must reach the systemd unit — add it to the unit's `Environment=` or the deploy env, NOT just the shell), trigger a prompt that dispatches a subagent (e.g. ask T3code to "dispatch a general-purpose subagent to list files"), and confirm the subagent's inner tool calls appear indented under the "Subagent task" row, updating step-by-step as the subagent works.
+- [ ] Live: `T3CODE_FORWARD_SUBAGENT_ACTIVITY=1 pnpm daemon:deploy` (note: env must reach the systemd unit — add it to the unit's `Environment=` or the deploy env, NOT just the shell), trigger a prompt that dispatches a subagent (e.g. ask T3code to "dispatch a general-purpose subagent to list files"), and confirm the subagent's inner tool calls appear indented under the "Subagent task" row, updating step-by-step as the subagent works.
 - [ ] Toggle off (unset the env, redeploy) and confirm the old opaque-spinner behavior returns and no `parentItemId` rows appear — proving the gate.
 
 ## Notes / out of scope

@@ -1769,8 +1769,20 @@ function applyEnvironmentShellEvent(
         projectIds: removeId(state.projectIds, event.projectId),
       };
     }
-    case "thread-upserted":
-      return writeThreadShellState(state, mapThreadShell(event.thread, environmentId));
+    case "thread-upserted": {
+      const mapped = mapThreadShell(event.thread, environmentId);
+      // The live shell wire format (OrchestrationThreadShell) does not carry
+      // unattendedRun, so mapThreadShell hardcodes null.  Preserve whatever the
+      // store already holds so that the unattended-run banner is not cleared by
+      // incidental thread activity.  Authoritative updates still arrive through
+      // applyUnattendedRunEvent (writeThreadState / toThreadShell path), which
+      // writes directly into threadShellById and therefore always wins.
+      const previousUnattendedRun = state.threadShellById[event.thread.id]?.unattendedRun ?? null;
+      return writeThreadShellState(state, {
+        ...mapped,
+        shell: { ...mapped.shell, unattendedRun: previousUnattendedRun },
+      });
+    }
     case "thread-removed":
       return removeThreadState(state, event.threadId);
   }

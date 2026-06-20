@@ -182,6 +182,14 @@ export interface ProjectionSnapshotQueryShape {
   readonly getSubagentTree: (input: {
     readonly threadId: ThreadId;
   }) => Effect.Effect<ReadonlyArray<OrchestrationSubagentRef>, ProjectionRepositoryError>;
+
+  /**
+   * Read a single subagent's direct child activities (one level), ordered chronologically.
+   */
+  readonly getSubagentActivities: (input: {
+    readonly threadId: ThreadId;
+    readonly rootItemId: RuntimeItemId;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationThreadActivity>, ProjectionRepositoryError>;
 }
 
 /**

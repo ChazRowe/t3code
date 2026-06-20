@@ -1669,6 +1669,86 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.strictEqual(rootB?.childSubagentCount, 0);
     }),
   );
+
+  it.effect("getSubagentActivities returns only the direct children of a subagent root", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json,
+          scripts_json, created_at, updated_at, deleted_at
+        ) VALUES (
+          'project-1', 'Project 1', '/tmp/project-1',
+          '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode,
+          interaction_mode, branch, worktree_path, latest_turn_id,
+          latest_user_message_at, pending_approval_count, pending_user_input_count,
+          has_actionable_proposed_plan, created_at, updated_at, deleted_at
+        ) VALUES (
+          'thread-1', 'project-1', 'Thread 1',
+          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+          NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+
+      // Direct child of item-root-a (kept).
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-direct-1', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+          'Read file', '{"itemType":"command_execution","itemId":"item-direct-1"}',
+          '2026-06-20T00:00:02.000Z', 'item-direct-1', 'item-root-a', 1
+        )
+      `;
+      // Second direct child of item-root-a (kept).
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-direct-2', 'thread-1', 'turn-1', 'info', 'assistant.message',
+          'Found it', '{"itemType":"assistant_message","itemId":"item-direct-2"}',
+          '2026-06-20T00:00:03.000Z', 'item-direct-2', 'item-root-a', 1
+        )
+      `;
+      // Grandchild (parent_item_id = item-direct-2) → excluded.
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-grandchild', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+          'Deep tool', '{"itemType":"command_execution","itemId":"item-deep"}',
+          '2026-06-20T00:00:04.000Z', 'item-deep', 'item-direct-2', 1
+        )
+      `;
+
+      const activities = yield* snapshotQuery.getSubagentActivities({
+        threadId: ThreadId.make("thread-1"),
+        rootItemId: RuntimeItemId.make("item-root-a"),
+      });
+
+      assert.deepStrictEqual(
+        activities.map((a) => a.id),
+        ["act-direct-1", "act-direct-2"],
+      );
+      assert.strictEqual(activities[0]?.summary, "Read file");
+    }),
+  );
 });
 
 it.effect(

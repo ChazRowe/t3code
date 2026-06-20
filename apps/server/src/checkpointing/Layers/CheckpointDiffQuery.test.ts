@@ -111,6 +111,7 @@ describe("CheckpointDiffQueryLive", () => {
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
           getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
         }),
       ),
     );
@@ -206,6 +207,7 @@ describe("CheckpointDiffQueryLive", () => {
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
           getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
         }),
       ),
     );
@@ -291,6 +293,7 @@ describe("CheckpointDiffQueryLive", () => {
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
           getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
         }),
       ),
     );
@@ -361,6 +364,7 @@ describe("CheckpointDiffQueryLive", () => {
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
           getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
         }),
       ),
     );
@@ -416,6 +420,7 @@ describe("CheckpointDiffQueryLive", () => {
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
           getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
         }),
       ),
     );

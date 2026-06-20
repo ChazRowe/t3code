@@ -2201,6 +2201,20 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       Effect.map((rows) => rows.map(mapActivityRow)),
     );
 
+  const getSubagentActivities: ProjectionSnapshotQueryShape["getSubagentActivities"] = ({
+    threadId,
+    rootItemId,
+  }) =>
+    listSubagentChildActivityRowsByParent({ threadId, parentItemId: rootItemId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getSubagentActivities:listChildren:query",
+          "ProjectionSnapshotQuery.getSubagentActivities:listChildren:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => rows.map(mapActivityRow)),
+    );
+
   const getSubagentTree: ProjectionSnapshotQueryShape["getSubagentTree"] = ({ threadId }) =>
     Effect.gen(function* () {
       const refRows = yield* listSubagentRefRowsByThread({ threadId }).pipe(
@@ -2294,6 +2308,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     listSubagentChildActivityRows,
     listSubagentRootRefRows,
     getSubagentTree,
+    getSubagentActivities,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

@@ -204,6 +204,7 @@ describe("OrchestrationEngine", () => {
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
           getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
         }),
       ),
       Layer.provide(

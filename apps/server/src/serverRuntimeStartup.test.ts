@@ -106,6 +106,7 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
           getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
         }),
         Effect.provideService(AnalyticsService, {
           record: () => Effect.void,
@@ -171,6 +172,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
         listSubagentChildActivityRows: () => Effect.die("unused"),
         listSubagentRootRefRows: () => Effect.die("unused"),
         getSubagentTree: () => Effect.die("unused"),
+        getSubagentActivities: () => Effect.die("unused"),
       }),
       Effect.provideService(OrchestrationEngineService, {
         readEvents: () => Stream.empty,
@@ -216,6 +218,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
         listSubagentChildActivityRows: () => Effect.die("unused"),
         listSubagentRootRefRows: () => Effect.die("unused"),
         getSubagentTree: () => Effect.die("unused"),
+        getSubagentActivities: () => Effect.die("unused"),
       }),
       Effect.provideService(OrchestrationEngineService, {
         readEvents: () => Stream.empty,
@@ -267,6 +270,7 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
         listSubagentChildActivityRows: () => Effect.die("unused"),
         listSubagentRootRefRows: () => Effect.die("unused"),
         getSubagentTree: () => Effect.die("unused"),
+        getSubagentActivities: () => Effect.die("unused"),
       }),
       Effect.provideService(OrchestrationEngineService, {
         readEvents: () => Stream.empty,

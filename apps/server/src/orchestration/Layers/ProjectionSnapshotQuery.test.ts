@@ -3,6 +3,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  RuntimeItemId,
   ThreadId,
   TurnId,
   ProviderInstanceId,
@@ -1435,6 +1436,127 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.equal(shellSnapshot.projects.length, 0);
       assert.equal(shellSnapshot.threads.length, 0);
+    }),
+  );
+
+  it.effect("excludes subagent-child activities from the thread-detail snapshot", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-1',
+          'Project 1',
+          '/tmp/project-1',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-06-20T00:00:00.000Z',
+          '2026-06-20T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          has_subagents,
+          live_subagent_count,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'thread-1',
+          'project-1',
+          'Thread 1',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          'full-access',
+          'default',
+          NULL,
+          NULL,
+          NULL,
+          NULL,
+          0,
+          0,
+          0,
+          0,
+          0,
+          '2026-06-20T00:00:02.000Z',
+          '2026-06-20T00:00:03.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary,
+          payload_json, sequence, item_id, parent_item_id, iteration, created_at
+        ) VALUES (
+          'activity-root-ref', 'thread-1', 'turn-1', 'tool', 'tool.started',
+          'Task started',
+          '{"itemType":"collab_agent_tool_call","itemId":"item-root-1"}',
+          1, 'item-root-1', NULL, NULL, '2026-06-20T00:00:01.000Z'
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary,
+          payload_json, sequence, item_id, parent_item_id, iteration, created_at
+        ) VALUES (
+          'activity-subagent-child', 'thread-1', 'turn-1', 'info', 'tool.completed',
+          'Subagent message',
+          '{"itemType":"assistant_message","status":"completed","parentItemId":"item-root-1","itemId":"item-child-1"}',
+          2, 'item-child-1', 'item-root-1', 1, '2026-06-20T00:00:02.000Z'
+        )
+      `;
+
+      const detail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
+      assert.strictEqual(detail._tag, "Some");
+      const ids = detail._tag === "Some" ? detail.value.activities.map((a) => a.id) : [];
+      assert.ok(ids.includes(asEventId("activity-root-ref")), "root-ref activity should be present");
+      assert.ok(!ids.includes(asEventId("activity-subagent-child")), "child activity should be excluded");
+
+      const children = yield* snapshotQuery.listSubagentChildActivityRows({
+        threadId: ThreadId.make("thread-1"),
+        parentItemId: RuntimeItemId.make("item-root-1"),
+      });
+      assert.strictEqual(children.length, 1);
+      assert.strictEqual(children[0]?.id, "activity-subagent-child");
+
+      const roots = yield* snapshotQuery.listSubagentRootRefRows({
+        threadId: ThreadId.make("thread-1"),
+      });
+      assert.strictEqual(roots.length, 1);
+      assert.strictEqual(roots[0]?.id, "activity-root-ref");
     }),
   );
 });

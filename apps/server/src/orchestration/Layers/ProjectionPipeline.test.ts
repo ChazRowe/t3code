@@ -2509,6 +2509,137 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         assert.strictEqual(childRow?.iteration, 2);
       }),
   );
+
+  it.effect(
+    "maintains has_subagents and live_subagent_count via refreshThreadShellSummary",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+        const threadId = ThreadId.make("thread-subagent-counts");
+
+        yield* appendAndProject({
+          type: "thread.created",
+          eventId: EventId.make("evt-subagent-counts-1"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-20T00:00:00.000Z",
+          commandId: CommandId.make("cmd-subagent-counts-1"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-subagent-counts-1"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-subagent-counts"),
+            title: "Subagent Counts Thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-06-20T00:00:00.000Z",
+            updatedAt: "2026-06-20T00:00:00.000Z",
+          },
+        });
+
+        // Append a root-ref tool.started — this is the "subagent launched" signal
+        yield* appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-subagent-counts-2"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-20T00:00:01.000Z",
+          commandId: CommandId.make("cmd-subagent-counts-2"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-subagent-counts-2"),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make("activity-subagent-counts-root-start"),
+              tone: "tool",
+              kind: "tool.started",
+              summary: "Subagent launched",
+              payload: {
+                itemType: "collab_agent_tool_call",
+                itemId: "item-root-1",
+              },
+              turnId: null,
+              itemId: RuntimeItemId.make("item-root-1"),
+              createdAt: "2026-06-20T00:00:01.000Z",
+            },
+          },
+        });
+
+        // After tool.started, hasSubagents should be 1 and liveSubagentCount should be 1
+        const rowsAfterStart = yield* sql<{
+          readonly hasSubagents: number;
+          readonly liveSubagentCount: number;
+        }>`
+          SELECT
+            has_subagents AS "hasSubagents",
+            live_subagent_count AS "liveSubagentCount"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+        assert.strictEqual(rowsAfterStart.length, 1);
+        assert.strictEqual(rowsAfterStart[0]?.hasSubagents, 1);
+        assert.strictEqual(rowsAfterStart[0]?.liveSubagentCount, 1);
+
+        // Append a root-ref tool.completed — the subagent is done
+        yield* appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-subagent-counts-3"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-20T00:00:02.000Z",
+          commandId: CommandId.make("cmd-subagent-counts-3"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-subagent-counts-3"),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make("activity-subagent-counts-root-done"),
+              tone: "tool",
+              kind: "tool.completed",
+              summary: "Subagent finished",
+              payload: {
+                itemType: "collab_agent_tool_call",
+                itemId: "item-root-1",
+              },
+              turnId: null,
+              itemId: RuntimeItemId.make("item-root-1"),
+              createdAt: "2026-06-20T00:00:02.000Z",
+            },
+          },
+        });
+
+        // After tool.completed, liveSubagentCount should drop to 0 but hasSubagents stays 1 (sticky)
+        const rowsAfterDone = yield* sql<{
+          readonly hasSubagents: number;
+          readonly liveSubagentCount: number;
+        }>`
+          SELECT
+            has_subagents AS "hasSubagents",
+            live_subagent_count AS "liveSubagentCount"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+        assert.strictEqual(rowsAfterDone.length, 1);
+        assert.strictEqual(rowsAfterDone[0]?.hasSubagents, 1, "hasSubagents should be sticky");
+        assert.strictEqual(rowsAfterDone[0]?.liveSubagentCount, 0, "liveSubagentCount should decrement to 0");
+      }),
+  );
 });
 
 it.effect("restores pending turn-start metadata across projection pipeline restart", () =>

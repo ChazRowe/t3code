@@ -5,6 +5,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  RuntimeItemId,
   ThreadId,
   TurnId,
   ProviderInstanceId,
@@ -2398,6 +2399,115 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         },
       ]);
     }),
+  );
+
+  it.effect(
+    "regression: activity classification fields (itemId, parentItemId, iteration) are persisted through the projection upsert",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+        yield* appendAndProject({
+          type: "project.created",
+          eventId: EventId.make("evt-classification-1"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make("project-classification"),
+          occurredAt: "2026-06-01T10:00:00.000Z",
+          commandId: CommandId.make("cmd-classification-1"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-classification-1"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make("project-classification"),
+            title: "Classification Project",
+            workspaceRoot: "/tmp/project-classification",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: "2026-06-01T10:00:00.000Z",
+            updatedAt: "2026-06-01T10:00:00.000Z",
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.created",
+          eventId: EventId.make("evt-classification-2"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-classification"),
+          occurredAt: "2026-06-01T10:00:01.000Z",
+          commandId: CommandId.make("cmd-classification-2"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-classification-2"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-classification"),
+            projectId: ProjectId.make("project-classification"),
+            title: "Classification Thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-06-01T10:00:01.000Z",
+            updatedAt: "2026-06-01T10:00:01.000Z",
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-classification-3"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-classification"),
+          occurredAt: "2026-06-01T10:00:02.000Z",
+          commandId: CommandId.make("cmd-classification-3"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-classification-3"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-classification"),
+            activity: {
+              id: EventId.make("activity-classification-child"),
+              tone: "info",
+              kind: "task.started",
+              summary: "Child task started",
+              payload: { detail: "running subtask" },
+              turnId: null,
+              itemId: RuntimeItemId.make("item-child-1"),
+              parentItemId: RuntimeItemId.make("item-root-1"),
+              iteration: 2,
+              createdAt: "2026-06-01T10:00:02.000Z",
+            },
+          },
+        });
+
+        const rows = yield* sql<{
+          readonly activityId: string;
+          readonly itemId: string | null;
+          readonly parentItemId: string | null;
+          readonly iteration: number | null;
+        }>`
+          SELECT
+            activity_id AS "activityId",
+            item_id AS "itemId",
+            parent_item_id AS "parentItemId",
+            iteration
+          FROM projection_thread_activities
+          WHERE thread_id = 'thread-classification'
+        `;
+
+        const childRow = rows.find((r) => r.activityId === "activity-classification-child");
+        assert.strictEqual(childRow?.parentItemId, "item-root-1");
+        assert.strictEqual(childRow?.itemId, "item-child-1");
+        assert.strictEqual(childRow?.iteration, 2);
+      }),
   );
 });
 

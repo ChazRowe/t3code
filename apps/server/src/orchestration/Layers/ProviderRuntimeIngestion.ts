@@ -1697,6 +1697,8 @@ const make = Effect.gen(function* () {
       }
 
       const currentIteration = thread.unattendedRun?.currentIteration;
+      // runtimeEventToActivities places itemId/parentItemId only inside payload; lift them
+      // to the activity's top-level fields so the projection can classify subagent rows.
       const activities = runtimeEventToActivities(event).map((activity) => {
         const payload =
           typeof activity.payload === "object" && activity.payload !== null
@@ -1712,6 +1714,8 @@ const make = Effect.gen(function* () {
           ...activity,
           ...(payloadItemId !== undefined ? { itemId: payloadItemId } : {}),
           ...(payloadParentItemId !== undefined ? { parentItemId: payloadParentItemId } : {}),
+          // iteration is recorded only on subagent-child activities (parentItemId marks them);
+          // it captures the unattended-run iteration active when the subagent ran.
           ...(payloadParentItemId !== undefined && currentIteration !== undefined
             ? { iteration: currentIteration }
             : {}),

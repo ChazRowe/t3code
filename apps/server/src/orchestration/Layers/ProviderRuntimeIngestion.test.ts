@@ -3334,5 +3334,6 @@ describe("ProviderRuntimeIngestion", () => {
 
     expect(activity?.parentItemId).toBe("item-root-1");
     expect(activity?.itemId).toBe("item-child-1");
+    expect(activity?.iteration).toBeUndefined();
   });
 });

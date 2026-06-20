@@ -9,7 +9,9 @@ import {
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  PositiveInt,
   ProjectScript,
+  RuntimeItemId,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -85,6 +87,9 @@ const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
     sequence: Schema.NullOr(NonNegativeInt),
+    itemId: Schema.NullOr(RuntimeItemId),
+    parentItemId: Schema.NullOr(RuntimeItemId),
+    iteration: Schema.NullOr(PositiveInt),
   }),
 );
 const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
@@ -117,6 +122,10 @@ const ProjectIdLookupInput = Schema.Struct({
 });
 const ThreadIdLookupInput = Schema.Struct({
   threadId: ThreadId,
+});
+const ThreadParentItemLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  parentItemId: RuntimeItemId,
 });
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
@@ -461,6 +470,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           summary,
           payload_json AS "payload",
           sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
           created_at AS "createdAt"
         FROM projection_thread_activities
         ORDER BY
@@ -827,9 +839,70 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           summary,
           payload_json AS "payload",
           sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
           created_at AS "createdAt"
         FROM projection_thread_activities
         WHERE thread_id = ${threadId}
+          AND parent_item_id IS NULL
+        ORDER BY
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  const listSubagentChildActivityRowsByParent = SqlSchema.findAll({
+    Request: ThreadParentItemLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, parentItemId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND parent_item_id = ${parentItemId}
+        ORDER BY
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  const listSubagentRootRefRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND parent_item_id IS NULL
+          AND json_extract(payload_json, '$.itemType') = 'collab_agent_tool_call'
         ORDER BY
           sequence ASC,
           created_at ASC,
@@ -2013,11 +2086,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             summary: row.summary,
             payload: row.payload,
             turnId: row.turnId,
+            ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+            ...(row.itemId !== null ? { itemId: row.itemId } : {}),
+            ...(row.parentItemId !== null ? { parentItemId: row.parentItemId } : {}),
+            ...(row.iteration !== null ? { iteration: row.iteration } : {}),
             createdAt: row.createdAt,
           };
-          if (row.sequence !== null) {
-            return Object.assign(activity, { sequence: row.sequence });
-          }
           return activity;
         }),
         checkpoints: checkpointRows.map((row) => ({
@@ -2042,6 +2116,46 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       );
     });
 
+  const mapActivityRow = (
+    row: Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>,
+  ): OrchestrationThreadActivity => ({
+    id: row.activityId,
+    tone: row.tone,
+    kind: row.kind,
+    summary: row.summary,
+    payload: row.payload,
+    turnId: row.turnId,
+    ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+    ...(row.itemId !== null ? { itemId: row.itemId } : {}),
+    ...(row.parentItemId !== null ? { parentItemId: row.parentItemId } : {}),
+    ...(row.iteration !== null ? { iteration: row.iteration } : {}),
+    createdAt: row.createdAt,
+  });
+
+  const listSubagentChildActivityRows: ProjectionSnapshotQueryShape["listSubagentChildActivityRows"] =
+    ({ threadId, parentItemId }) =>
+      listSubagentChildActivityRowsByParent({ threadId, parentItemId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.listSubagentChildActivityRows:query",
+            "ProjectionSnapshotQuery.listSubagentChildActivityRows:decodeRows",
+          ),
+        ),
+        Effect.map((rows) => rows.map(mapActivityRow)),
+      );
+
+  const listSubagentRootRefRows: ProjectionSnapshotQueryShape["listSubagentRootRefRows"] =
+    ({ threadId }) =>
+      listSubagentRootRefRowsByThread({ threadId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.listSubagentRootRefRows:query",
+            "ProjectionSnapshotQuery.listSubagentRootRefRows:decodeRows",
+          ),
+        ),
+        Effect.map((rows) => rows.map(mapActivityRow)),
+      );
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -2056,6 +2170,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getFullThreadDiffContext,
     getThreadShellById,
     getThreadDetailById,
+    listSubagentChildActivityRows,
+    listSubagentRootRefRows,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

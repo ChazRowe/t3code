@@ -14,8 +14,10 @@ import type {
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  OrchestrationThreadActivity,
   OrchestrationThreadShell,
   ProjectId,
+  RuntimeItemId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -157,6 +159,21 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadDetailById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+
+  /**
+   * Read the direct-child activities of a subagent parent item in a thread.
+   */
+  readonly listSubagentChildActivityRows: (input: {
+    readonly threadId: ThreadId;
+    readonly parentItemId: RuntimeItemId;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * Read the top-level subagent root ref activities (collab_agent_tool_call) in a thread.
+   */
+  readonly listSubagentRootRefRows: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationThreadActivity>, ProjectionRepositoryError>;
 }
 
 /**

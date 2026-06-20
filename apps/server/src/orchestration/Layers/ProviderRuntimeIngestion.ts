@@ -8,6 +8,7 @@ import {
   type OrchestrationProposedPlanId,
   CheckpointRef,
   isToolLifecycleItemType,
+  RuntimeItemId,
   ThreadId,
   type ThreadTokenUsageSnapshot,
   TurnId,
@@ -1695,7 +1696,27 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const activities = runtimeEventToActivities(event);
+      const currentIteration = thread.unattendedRun?.currentIteration;
+      const activities = runtimeEventToActivities(event).map((activity) => {
+        const payload =
+          typeof activity.payload === "object" && activity.payload !== null
+            ? (activity.payload as Record<string, unknown>)
+            : null;
+        const payloadItemId =
+          typeof payload?.itemId === "string" ? RuntimeItemId.make(payload.itemId) : undefined;
+        const payloadParentItemId =
+          typeof payload?.parentItemId === "string"
+            ? RuntimeItemId.make(payload.parentItemId)
+            : undefined;
+        return {
+          ...activity,
+          ...(payloadItemId !== undefined ? { itemId: payloadItemId } : {}),
+          ...(payloadParentItemId !== undefined ? { parentItemId: payloadParentItemId } : {}),
+          ...(payloadParentItemId !== undefined && currentIteration !== undefined
+            ? { iteration: currentIteration }
+            : {}),
+        };
+      });
       yield* Effect.forEach(activities, (activity) =>
         providerCommandId(event, "thread-activity-append").pipe(
           Effect.flatMap((commandId) =>

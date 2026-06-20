@@ -975,6 +975,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.activity.sequence !== undefined
               ? { sequence: event.payload.activity.sequence }
               : {}),
+            ...(event.payload.activity.itemId !== undefined
+              ? { itemId: event.payload.activity.itemId }
+              : {}),
+            ...(event.payload.activity.parentItemId !== undefined
+              ? { parentItemId: event.payload.activity.parentItemId }
+              : {}),
+            ...(event.payload.activity.iteration !== undefined
+              ? { iteration: event.payload.activity.iteration }
+              : {}),
             createdAt: event.payload.activity.createdAt,
           });
           return;

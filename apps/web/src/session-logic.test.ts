@@ -711,7 +711,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
-  it("omits task.started but shows task.progress and task.completed", () => {
+  it("omits task.started and task.completed but shows task.progress", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "task-start",
@@ -737,7 +737,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
   });
 
   it("uses payload summary as label for task entries when available", () => {
@@ -756,7 +756,10 @@ describe("deriveWorkLogEntries", () => {
     expect(entries[0]?.label).toBe("Searching for API endpoints");
   });
 
-  it("uses payload detail as label for task.completed and preserves error tone", () => {
+  it("omits a failed task.completed so it never shows as an inline error row", () => {
+    // Subagent Task tools occasionally report status "failed"/"stopped" to the SDK.
+    // That outcome is already conveyed by the subagent card and the task sidebar, so
+    // the standalone task.completed activity must not surface as an inline error row.
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "task-completed-failed",
@@ -769,8 +772,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries[0]?.label).toBe("Failed to deploy changes");
-    expect(entries[0]?.tone).toBe("error");
+    expect(entries).toEqual([]);
   });
 
   it("keeps tool entries from every turn and tags each with its turn id", () => {

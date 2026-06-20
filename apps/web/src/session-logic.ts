@@ -652,6 +652,10 @@ export function deriveWorkLogEntries(
     )
       continue;
     if (activity.kind === "task.started") continue;
+    // Subagent Task lifecycle is conveyed by the subagent card and the task sidebar.
+    // The standalone task.completed activity is redundant inline and, when the SDK
+    // reports status "failed"/"stopped", surfaces as an alarming error row — drop it.
+    if (activity.kind === "task.completed") continue;
     if (activity.kind === "context-window.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;

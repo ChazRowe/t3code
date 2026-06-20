@@ -2099,13 +2099,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
+    // Subagent partial stream events (parent_tool_use_id set) must never touch the
+    // main thread: their text deltas would surface as a top-level assistant message
+    // bubble (outside the subagent card, later overwritten by the parent's text),
+    // and their tool blocks would register as top-level tool rows. Subagent activity
+    // is fully represented by handleSubagentMessage on the complete assistant/user
+    // messages (nested under the parent via parentItemId), so drop the partials here.
+    if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined) {
+      return;
+    }
+
     const { event } = message;
 
     if (event.type === "message_delta") {
-      if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined) {
-        return;
-      }
-
       const snapshot = normalizeClaudeActiveTokenUsage(
         event.usage,
         context.lastKnownContextWindow,

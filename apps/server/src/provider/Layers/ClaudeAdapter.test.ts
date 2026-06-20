@@ -1316,6 +1316,89 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("drops subagent partial stream text instead of leaking it into the main assistant message", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "delegate this",
+        attachments: [],
+      });
+
+      // A subagent streams partial assistant text (parent_tool_use_id set). This
+      // must NOT become a top-level assistant content delta — it would render as a
+      // message bubble outside the subagent card and get overwritten by the parent.
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-subagent",
+        uuid: "stream-subagent-1",
+        parent_tool_use_id: "tool-parent-1",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: {
+            type: "text_delta",
+            text: "SUBAGENT-LEAK-TEXT",
+          },
+        },
+      } as unknown as SDKMessage);
+
+      // The parent agent streams its own text (parent_tool_use_id null) — this is
+      // the only legitimate top-level content delta.
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-subagent",
+        uuid: "stream-main-1",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: {
+            type: "text_delta",
+            text: "MAIN-TEXT",
+          },
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-subagent",
+        uuid: "result-subagent",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const contentDeltas = runtimeEvents.filter((event) => event.type === "content.delta");
+      assert.equal(
+        contentDeltas.length,
+        1,
+        "subagent partial stream text must not leak as a second top-level content delta",
+      );
+      const [delta] = contentDeltas;
+      if (delta?.type === "content.delta") {
+        assert.equal(delta.payload.delta, "MAIN-TEXT");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("treats user-aborted Claude results as interrupted without a runtime error", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

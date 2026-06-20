@@ -3323,8 +3323,7 @@ describe("ProviderRuntimeIngestion", () => {
 
     const thread = await waitForThread(harness.readModel, (entry) =>
       entry.activities.some(
-        (activity: ProviderRuntimeTestActivity) =>
-          activity.id === "evt-subagent-toplevel-fields",
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-subagent-toplevel-fields",
       ),
     );
 

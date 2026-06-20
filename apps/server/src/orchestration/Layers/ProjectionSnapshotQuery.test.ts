@@ -1542,8 +1542,14 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const detail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
       assert.strictEqual(detail._tag, "Some");
       const ids = detail._tag === "Some" ? detail.value.activities.map((a) => a.id) : [];
-      assert.ok(ids.includes(asEventId("activity-root-ref")), "root-ref activity should be present");
-      assert.ok(!ids.includes(asEventId("activity-subagent-child")), "child activity should be excluded");
+      assert.ok(
+        ids.includes(asEventId("activity-root-ref")),
+        "root-ref activity should be present",
+      );
+      assert.ok(
+        !ids.includes(asEventId("activity-subagent-child")),
+        "child activity should be excluded",
+      );
 
       const children = yield* snapshotQuery.listSubagentChildActivityRows({
         threadId: ThreadId.make("thread-1"),

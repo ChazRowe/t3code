@@ -632,7 +632,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         pendingApprovalCount,
         pendingUserInputCount,
         hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
-        hasSubagents: (existingRow.value.hasSubagents > 0 || subagentCounts.hasSubagents) ? 1 : 0,
+        hasSubagents: existingRow.value.hasSubagents > 0 || subagentCounts.hasSubagents ? 1 : 0,
         liveSubagentCount: subagentCounts.liveSubagentCount,
       });
     });

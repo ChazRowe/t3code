@@ -2137,17 +2137,18 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         Effect.map((rows) => rows.map(mapActivityRow)),
       );
 
-  const listSubagentRootRefRows: ProjectionSnapshotQueryShape["listSubagentRootRefRows"] =
-    ({ threadId }) =>
-      listSubagentRootRefRowsByThread({ threadId }).pipe(
-        Effect.mapError(
-          toPersistenceSqlOrDecodeError(
-            "ProjectionSnapshotQuery.listSubagentRootRefRows:query",
-            "ProjectionSnapshotQuery.listSubagentRootRefRows:decodeRows",
-          ),
+  const listSubagentRootRefRows: ProjectionSnapshotQueryShape["listSubagentRootRefRows"] = ({
+    threadId,
+  }) =>
+    listSubagentRootRefRowsByThread({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listSubagentRootRefRows:query",
+          "ProjectionSnapshotQuery.listSubagentRootRefRows:decodeRows",
         ),
-        Effect.map((rows) => rows.map(mapActivityRow)),
-      );
+      ),
+      Effect.map((rows) => rows.map(mapActivityRow)),
+    );
 
   return {
     getCommandReadModel,

@@ -588,8 +588,7 @@ function runtimeEventToActivities(
         // (that routing lives in processRuntimeEvent and is gated on the same parentItemId).
         if (
           event.payload.parentItemId &&
-          (event.payload.itemType === "assistant_message" ||
-            event.payload.itemType === "reasoning")
+          (event.payload.itemType === "assistant_message" || event.payload.itemType === "reasoning")
         ) {
           const isReasoning = event.payload.itemType === "reasoning";
           return [

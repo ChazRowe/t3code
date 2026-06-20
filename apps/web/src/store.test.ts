@@ -1155,9 +1155,9 @@ describe("unattendedRun preservation across live shell upserts", () => {
     state = applyShellEvent(state, shellEvent, localEnvironmentId);
 
     // Confirm preserved
-    expect(
-      localEnvironmentStateOf(state).threadShellById[thread.id]?.unattendedRun?.status,
-    ).toBe("running");
+    expect(localEnvironmentStateOf(state).threadShellById[thread.id]?.unattendedRun?.status).toBe(
+      "running",
+    );
 
     // Now apply a genuine unattended-run-finished event
     state = applyOrchestrationEvent(

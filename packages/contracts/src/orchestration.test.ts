@@ -884,10 +884,7 @@ it("registers both subagent methods in ORCHESTRATION_WS_METHODS and Orchestratio
     ORCHESTRATION_WS_METHODS.subscribeSubagentTree,
     "orchestration.subscribeSubagentTree",
   );
-  assert.strictEqual(
-    ORCHESTRATION_WS_METHODS.subscribeSubagent,
-    "orchestration.subscribeSubagent",
-  );
+  assert.strictEqual(ORCHESTRATION_WS_METHODS.subscribeSubagent, "orchestration.subscribeSubagent");
   assert.strictEqual("subscribeSubagentTree" in OrchestrationRpcSchemas, true);
   assert.strictEqual("subscribeSubagent" in OrchestrationRpcSchemas, true);
 });

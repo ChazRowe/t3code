@@ -1080,10 +1080,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 Stream.filter(
                   (
                     event,
-                  ): event is Extract<
-                    OrchestrationEvent,
-                    { type: "thread.activity-appended" }
-                  > =>
+                  ): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> =>
                     event.aggregateKind === "thread" &&
                     event.aggregateId === input.threadId &&
                     isSubagentRefEvent(event),

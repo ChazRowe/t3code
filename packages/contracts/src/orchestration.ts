@@ -1343,15 +1343,13 @@ export const OrchestrationSubagentTreeStreamItem = Schema.Union([
     rootItemId: RuntimeItemId,
   }),
 ]);
-export type OrchestrationSubagentTreeStreamItem =
-  typeof OrchestrationSubagentTreeStreamItem.Type;
+export type OrchestrationSubagentTreeStreamItem = typeof OrchestrationSubagentTreeStreamItem.Type;
 
 export const OrchestrationSubscribeSubagentInput = Schema.Struct({
   threadId: ThreadId,
   rootItemId: RuntimeItemId,
 });
-export type OrchestrationSubscribeSubagentInput =
-  typeof OrchestrationSubscribeSubagentInput.Type;
+export type OrchestrationSubscribeSubagentInput = typeof OrchestrationSubscribeSubagentInput.Type;
 
 export const OrchestrationSubagentActivitiesSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,

@@ -759,6 +759,25 @@ function SubagentCard({
   const isRunning = isInProgressSubagentParent(parent);
   const { type: subagentType, description } = parseSubagentLabel(parent.label);
 
+  // The child rows live in a bounded scroll viewport (~5 rows tall). All children
+  // always render — scrolling up reveals history, nothing is sliced away — and the
+  // viewport auto-sticks to the newest row unless the user has scrolled up.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < 8;
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [childEntries.length]);
+
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 overflow-hidden">
       {/* Card header */}
@@ -781,9 +800,13 @@ function SubagentCard({
           </span>
         ) : null}
       </div>
-      {/* Child rows inside the card */}
+      {/* Child rows inside the card — bounded, auto-tailing scroll viewport (~5 rows) */}
       {childEntries.length > 0 && (
-        <div className="space-y-px px-1 py-0.5">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="max-h-[8rem] space-y-px overflow-y-auto px-1 py-0.5"
+        >
           {childEntries.map((child) => (
             <SimpleWorkEntryRow
               key={child.id}

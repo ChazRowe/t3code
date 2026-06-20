@@ -498,6 +498,55 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("border-border");
   });
 
+  it("renders the subagent child rows inside a bounded scroll viewport that keeps every child", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const childEntries = Array.from({ length: 12 }, (_, i) => ({
+      id: `entry-child-${i}`,
+      kind: "work" as const,
+      createdAt: "2026-03-17T19:12:29.000Z",
+      entry: {
+        id: `work-child-${i}`,
+        createdAt: "2026-03-17T19:12:29.000Z",
+        label: `Bash`,
+        detail: `child-command-${i}`,
+        tone: "tool" as const,
+        itemType: "command_execution" as const,
+        parentItemId: "tool-use-scroll123",
+        toolLifecycleStatus: "completed" as const,
+      },
+    }));
+
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-parent",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-parent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "general-purpose: Long-running task",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-scroll123",
+              toolLifecycleStatus: "completed",
+            },
+          },
+          ...childEntries,
+        ]}
+      />,
+    );
+
+    // Child rows live in a bounded scroll viewport (max-height + vertical scroll).
+    expect(markup).toContain("overflow-y-auto");
+    expect(markup).toContain("max-h-[8rem]");
+    // Every child still renders — scrolling up reveals history, nothing is sliced away.
+    expect(markup).toContain("child-command-0");
+    expect(markup).toContain("child-command-11");
+  });
+
   it("renders a subagent text child (assistant_message) inside the card, not at top level", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

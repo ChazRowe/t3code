@@ -1079,5 +1079,6 @@ describe("orchestration projector", () => {
     const ids = thread?.activities.map((activity) => activity.id) ?? [];
     expect(ids).toContain("activity-normal");
     expect(ids).not.toContain("activity-subagent-child");
+    expect(thread?.updatedAt).toBe("2026-06-20T00:00:02.000Z");
   });
 });

@@ -1122,6 +1122,9 @@ describe("unattendedRun preservation across live shell upserts", () => {
         hasPendingApprovals: false,
         hasPendingUserInput: false,
         hasActionableProposedPlan: false,
+        unattendedRun: null,
+        hasSubagents: false,
+        liveSubagentCount: 0,
       },
     };
   }

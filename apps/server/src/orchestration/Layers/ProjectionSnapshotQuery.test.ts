@@ -1749,6 +1749,111 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.strictEqual(activities[0]?.summary, "Read file");
     }),
   );
+
+  it.effect("deep 2-level subagent structure: correct depths and direct-children isolation", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json,
+          scripts_json, created_at, updated_at, deleted_at
+        ) VALUES (
+          'project-1', 'Project 1', '/tmp/project-1',
+          '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode,
+          interaction_mode, branch, worktree_path, latest_turn_id,
+          latest_user_message_at, pending_approval_count, pending_user_input_count,
+          has_actionable_proposed_plan, created_at, updated_at, deleted_at
+        ) VALUES (
+          'thread-1', 'project-1', 'Thread 1',
+          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+          NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+
+      // Level-0 root.
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-L0', 'thread-1', 'turn-1', 'tool', 'tool.started',
+          'Explore: top level',
+          '{"itemType":"collab_agent_tool_call","itemId":"item-L0"}',
+          '2026-06-20T00:00:01.000Z', 'item-L0', NULL, 1
+        )
+      `;
+      // Level-1 root (child subagent of L0).
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-L1', 'thread-1', 'turn-1', 'tool', 'tool.started',
+          'Plan: nested level',
+          '{"itemType":"collab_agent_tool_call","itemId":"item-L1"}',
+          '2026-06-20T00:00:02.000Z', 'item-L1', 'item-L0', 1
+        )
+      `;
+      // A direct child activity of the level-1 root.
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-L1-child', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+          'Read file in nested',
+          '{"itemType":"command_execution","itemId":"item-L1-child"}',
+          '2026-06-20T00:00:03.000Z', 'item-L1-child', 'item-L1', 1
+        )
+      `;
+      // A direct child activity of the level-0 root (must NOT show under L1).
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-L0-child', 'thread-1', 'turn-1', 'info', 'assistant.message',
+          'Top-level note', '{"itemType":"assistant_message","itemId":"item-L0-child"}',
+          '2026-06-20T00:00:04.000Z', 'item-L0-child', 'item-L0', 1
+        )
+      `;
+
+      const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+      const byItem = new Map(refs.map((r) => [r.rootItemId, r]));
+      assert.strictEqual(refs.length, 2);
+      assert.strictEqual(byItem.get(RuntimeItemId.make("item-L0"))?.depth, 0);
+      assert.strictEqual(byItem.get(RuntimeItemId.make("item-L0"))?.childSubagentCount, 1);
+      assert.strictEqual(byItem.get(RuntimeItemId.make("item-L1"))?.depth, 1);
+      assert.strictEqual(byItem.get(RuntimeItemId.make("item-L1"))?.parentItemId, "item-L0");
+      assert.strictEqual(byItem.get(RuntimeItemId.make("item-L1"))?.childSubagentCount, 0);
+
+      const l1Activities = yield* snapshotQuery.getSubagentActivities({
+        threadId: ThreadId.make("thread-1"),
+        rootItemId: RuntimeItemId.make("item-L1"),
+      });
+      assert.strictEqual(
+        l1Activities.some((a) => a.id === "act-L1-child"),
+        true,
+      );
+      assert.strictEqual(
+        l1Activities.some((a) => a.id === "act-L0-child"),
+        false,
+      );
+    }),
+  );
 });
 
 it.effect(

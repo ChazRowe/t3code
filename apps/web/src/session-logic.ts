@@ -724,11 +724,23 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       : null
     : extractToolDetail(payload, title ?? activity.summary);
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
+  // For a subagent child tool.started, the generic activity.summary is "Command run started"
+  // (or similar) and the actual invocation ("Bash: cd … && mix test") lives in payload.detail.
+  // handleSubagentMessage emits only item.started + item.completed for children (never
+  // item.updated), so a started→updated→completed chain cannot occur for subagents.
+  const isChildToolStarted =
+    activity.kind === "tool.started" &&
+    typeof payload?.parentItemId === "string" &&
+    payload.parentItemId.length > 0;
+  const childStartedInvocationLabel =
+    isChildToolStarted && typeof payload?.detail === "string" && payload.detail.length > 0
+      ? payload.detail
+      : null;
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
     turnId: activity.turnId,
-    label: taskLabel || activity.summary,
+    label: taskLabel || childStartedInvocationLabel || activity.summary,
     tone:
       activity.kind === "task.progress"
         ? "thinking"

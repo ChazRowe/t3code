@@ -1644,15 +1644,24 @@ describe("deriveWorkLogEntries subagent nesting", () => {
     expect(entry?.toolItemId).toBeUndefined();
   });
 
-  it("collapses a subagent child started+completed into one row with invocation label and result detail", () => {
+  it("collapses a subagent child started+completed into one row with invocation label and result detail (realistic data)", () => {
+    // REAL server data shape:
+    //   tool.started: summary="Command run started", payload.itemType="command_execution",
+    //                 payload.detail="Bash: cd /x && mix test"
+    //   tool.completed: summary="Subagent tool result", payload.itemType="dynamic_tool_call",
+    //                   payload.detail="<result output>"
+    // The invocation ("Bash: cd /x && mix test") must be the row's visible heading/label,
+    // NOT the generic "Command run started". The result must remain accessible (detail).
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "child-bash-started",
         createdAt: "2026-06-19T00:00:01.000Z",
         kind: "tool.started",
-        summary: "Bash: mix test",
+        summary: "Command run started",
         tone: "tool",
         payload: {
+          itemType: "command_execution",
+          detail: "Bash: cd /x && mix test",
           parentItemId: "task-parent-item",
           data: { toolCallId: "call-child-1" },
         },
@@ -1661,11 +1670,12 @@ describe("deriveWorkLogEntries subagent nesting", () => {
         id: "child-bash-completed",
         createdAt: "2026-06-19T00:00:02.000Z",
         kind: "tool.completed",
-        summary: "Command run completed",
+        summary: "Subagent tool result",
         tone: "tool",
         payload: {
+          itemType: "dynamic_tool_call",
+          detail: "3 tests passed",
           parentItemId: "task-parent-item",
-          detail: "Exit 0",
           data: { toolCallId: "call-child-1" },
         },
       }),
@@ -1673,22 +1683,25 @@ describe("deriveWorkLogEntries subagent nesting", () => {
 
     const entries = deriveWorkLogEntries(activities);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      label: "Bash: mix test",
-      detail: "Exit 0",
-      parentItemId: "task-parent-item",
-    });
+    // The invocation command must be the visible label — not the generic "Command run started".
+    expect(entries[0]?.label).toBe("Bash: cd /x && mix test");
+    // The result must be reachable in detail (for the expandable body).
+    expect(entries[0]?.detail).toBe("3 tests passed");
+    expect(entries[0]?.parentItemId).toBe("task-parent-item");
   });
 
   it("shows an in-progress subagent child (started only) as a single row with the invocation label", () => {
+    // tool.started with real data: summary is generic, invocation is in payload.detail
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "child-read-started",
         createdAt: "2026-06-19T00:00:01.000Z",
         kind: "tool.started",
-        summary: "Read: /tmp/app.ts",
+        summary: "Command run started",
         tone: "tool",
         payload: {
+          itemType: "command_execution",
+          detail: "Read: /tmp/app.ts",
           parentItemId: "task-parent-item",
           data: { toolCallId: "call-child-2" },
         },
@@ -1697,10 +1710,9 @@ describe("deriveWorkLogEntries subagent nesting", () => {
 
     const entries = deriveWorkLogEntries(activities);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      label: "Read: /tmp/app.ts",
-      parentItemId: "task-parent-item",
-    });
+    // In-progress child must show the invocation, not the generic "Command run started".
+    expect(entries[0]?.label).toBe("Read: /tmp/app.ts");
+    expect(entries[0]?.parentItemId).toBe("task-parent-item");
   });
 
   it("does not add a duplicate started row for main-thread tool calls (regression)", () => {

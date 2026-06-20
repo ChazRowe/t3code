@@ -8,10 +8,13 @@ import {
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
+  OrchestrationSubagentRef,
+  OrchestrationSubagentStatus,
   OrchestrationThread,
   PositiveInt,
   ProjectScript,
   RuntimeItemId,
+  TrimmedNonEmptyString,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -270,6 +273,26 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
       ? toPersistenceDecodeError(decodeOperation)(cause)
       : toPersistenceSqlError(sqlOperation)(cause);
 }
+
+const parseSubagentLabel = (
+  label: string,
+): { readonly type: string; readonly description: string | null } => {
+  const colonIdx = label.indexOf(": ");
+  if (colonIdx > 0) {
+    return {
+      type: label.slice(0, colonIdx).trim(),
+      description: label.slice(colonIdx + 2).trim() || null,
+    };
+  }
+  return { type: label.trim(), description: null };
+};
+
+const subagentStatusFromKind = (kind: string): OrchestrationSubagentStatus => {
+  if (kind === "tool.completed") return "completed";
+  if (kind === "tool.failed" || kind === "tool.errored") return "failed";
+  if (kind === "tool.denied") return "declined";
+  return "inProgress";
+};
 
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -910,6 +933,34 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_thread_activities
         WHERE thread_id = ${threadId}
           AND parent_item_id IS NULL
+          AND json_extract(payload_json, '$.itemType') = 'collab_agent_tool_call'
+        ORDER BY
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  const listSubagentRefRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
           AND json_extract(payload_json, '$.itemType') = 'collab_agent_tool_call'
         ORDER BY
           sequence ASC,
@@ -2150,6 +2201,96 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       Effect.map((rows) => rows.map(mapActivityRow)),
     );
 
+  const getSubagentActivities: ProjectionSnapshotQueryShape["getSubagentActivities"] = ({
+    threadId,
+    rootItemId,
+  }) =>
+    listSubagentChildActivityRowsByParent({ threadId, parentItemId: rootItemId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.getSubagentActivities:listChildren:query",
+          "ProjectionSnapshotQuery.getSubagentActivities:listChildren:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => rows.map(mapActivityRow)),
+    );
+
+  const getSubagentTree: ProjectionSnapshotQueryShape["getSubagentTree"] = ({ threadId }) =>
+    Effect.gen(function* () {
+      const refRows = yield* listSubagentRefRowsByThread({ threadId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getSubagentTree:listRefs:query",
+            "ProjectionSnapshotQuery.getSubagentTree:listRefs:decodeRows",
+          ),
+        ),
+      );
+
+      type RefRow = Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>;
+      const firstByItem = new Map<string, RefRow>();
+      const latestByItem = new Map<string, RefRow>();
+      const order: Array<string> = [];
+      for (const row of refRows) {
+        if (row.itemId === null) {
+          continue; // cannot form a ref without a root item id
+        }
+        if (!firstByItem.has(row.itemId)) {
+          firstByItem.set(row.itemId, row);
+          order.push(row.itemId);
+        }
+        latestByItem.set(row.itemId, row);
+      }
+
+      // childSubagentCount: refs whose parentItemId === this ref's itemId.
+      const childCountByItem = new Map<string, number>();
+      for (const itemId of order) {
+        const parentItemId = latestByItem.get(itemId)?.parentItemId ?? null;
+        if (parentItemId !== null) {
+          childCountByItem.set(parentItemId, (childCountByItem.get(parentItemId) ?? 0) + 1);
+        }
+      }
+
+      // depth: walk the parentItemId chain among the known refs.
+      const itemIds = new Set(order);
+      const depthOf = (itemId: string): number => {
+        let depth = 0;
+        let current = latestByItem.get(itemId)?.parentItemId ?? null;
+        const seen = new Set<string>([itemId]);
+        while (current !== null && itemIds.has(current) && !seen.has(current)) {
+          depth += 1;
+          seen.add(current);
+          current = latestByItem.get(current)?.parentItemId ?? null;
+        }
+        return depth;
+      };
+
+      const refs: Array<OrchestrationSubagentRef> = [];
+      for (const itemId of order) {
+        const first = firstByItem.get(itemId);
+        const latest = latestByItem.get(itemId);
+        if (first === undefined || latest === undefined) {
+          continue;
+        }
+        const { type, description } = parseSubagentLabel(latest.summary);
+        refs.push({
+          threadId,
+          rootItemId: RuntimeItemId.make(itemId),
+          parentItemId: latest.parentItemId,
+          label: latest.summary,
+          subagentType: TrimmedNonEmptyString.make(type),
+          description: description === null ? null : TrimmedNonEmptyString.make(description),
+          status: subagentStatusFromKind(latest.kind),
+          iteration: latest.iteration,
+          turnId: latest.turnId,
+          depth: NonNegativeInt.make(depthOf(itemId)),
+          childSubagentCount: NonNegativeInt.make(childCountByItem.get(itemId) ?? 0),
+          createdAt: first.createdAt,
+          updatedAt: latest.createdAt,
+        });
+      }
+      return refs;
+    });
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -2166,6 +2307,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadDetailById,
     listSubagentChildActivityRows,
     listSubagentRootRefRows,
+    getSubagentTree,
+    getSubagentActivities,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

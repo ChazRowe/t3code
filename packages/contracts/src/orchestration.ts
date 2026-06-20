@@ -32,6 +32,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeSubagentTree: "orchestration.subscribeSubagentTree",
+  subscribeSubagent: "orchestration.subscribeSubagent",
 } as const;
 
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -1288,6 +1290,89 @@ export const OrchestrationThreadStreamItem = Schema.Union([
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
 
+export const OrchestrationSubagentStatus = Schema.Literals([
+  "inProgress",
+  "completed",
+  "failed",
+  "declined",
+]);
+export type OrchestrationSubagentStatus = typeof OrchestrationSubagentStatus.Type;
+
+export const OrchestrationSubagentRef = Schema.Struct({
+  threadId: ThreadId,
+  rootItemId: RuntimeItemId,
+  parentItemId: Schema.NullOr(RuntimeItemId),
+  label: TrimmedNonEmptyString,
+  subagentType: TrimmedNonEmptyString,
+  description: Schema.NullOr(TrimmedNonEmptyString),
+  status: OrchestrationSubagentStatus,
+  iteration: Schema.NullOr(PositiveInt),
+  turnId: Schema.NullOr(TurnId),
+  depth: NonNegativeInt,
+  childSubagentCount: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationSubagentRef = typeof OrchestrationSubagentRef.Type;
+
+export const OrchestrationSubscribeSubagentTreeInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationSubscribeSubagentTreeInput =
+  typeof OrchestrationSubscribeSubagentTreeInput.Type;
+
+export const OrchestrationSubagentTreeSnapshot = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  threadId: ThreadId,
+  refs: Schema.Array(OrchestrationSubagentRef),
+});
+export type OrchestrationSubagentTreeSnapshot = typeof OrchestrationSubagentTreeSnapshot.Type;
+
+export const OrchestrationSubagentTreeStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: OrchestrationSubagentTreeSnapshot,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("ref-changed"),
+    ref: OrchestrationSubagentRef,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("ref-removed"),
+    threadId: ThreadId,
+    rootItemId: RuntimeItemId,
+  }),
+]);
+export type OrchestrationSubagentTreeStreamItem = typeof OrchestrationSubagentTreeStreamItem.Type;
+
+export const OrchestrationSubscribeSubagentInput = Schema.Struct({
+  threadId: ThreadId,
+  rootItemId: RuntimeItemId,
+});
+export type OrchestrationSubscribeSubagentInput = typeof OrchestrationSubscribeSubagentInput.Type;
+
+export const OrchestrationSubagentActivitiesSnapshot = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  threadId: ThreadId,
+  rootItemId: RuntimeItemId,
+  activities: Schema.Array(OrchestrationThreadActivity),
+});
+export type OrchestrationSubagentActivitiesSnapshot =
+  typeof OrchestrationSubagentActivitiesSnapshot.Type;
+
+export const OrchestrationSubagentActivitiesStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: OrchestrationSubagentActivitiesSnapshot,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("event"),
+    event: OrchestrationEvent,
+  }),
+]);
+export type OrchestrationSubagentActivitiesStreamItem =
+  typeof OrchestrationSubagentActivitiesStreamItem.Type;
+
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
 
@@ -1410,6 +1495,14 @@ export const OrchestrationRpcSchemas = {
   subscribeShell: {
     input: Schema.Struct({}),
     output: OrchestrationShellStreamItem,
+  },
+  subscribeSubagentTree: {
+    input: OrchestrationSubscribeSubagentTreeInput,
+    output: OrchestrationSubagentTreeStreamItem,
+  },
+  subscribeSubagent: {
+    input: OrchestrationSubscribeSubagentInput,
+    output: OrchestrationSubagentActivitiesStreamItem,
   },
 } as const;
 

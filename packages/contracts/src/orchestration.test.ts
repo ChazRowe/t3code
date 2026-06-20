@@ -6,11 +6,16 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
+  ORCHESTRATION_WS_METHODS,
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationRpcSchemas,
+  OrchestrationSubagentActivitiesStreamItem,
+  OrchestrationSubagentRef,
+  OrchestrationSubagentTreeStreamItem,
   OrchestrationThreadActivity,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
@@ -787,3 +792,99 @@ it.effect("decodes a thread activity that omits the optional subagent fields", (
     assert.strictEqual(decoded.iteration, undefined);
   }),
 );
+
+const decodeSubagentRef = Schema.decodeUnknownEffect(OrchestrationSubagentRef);
+const decodeSubagentTreeStreamItem = Schema.decodeUnknownEffect(
+  OrchestrationSubagentTreeStreamItem,
+);
+const decodeSubagentActivitiesStreamItem = Schema.decodeUnknownEffect(
+  OrchestrationSubagentActivitiesStreamItem,
+);
+
+it.effect("decodes an OrchestrationSubagentRef round-trip", () =>
+  Effect.gen(function* () {
+    const ref = yield* decodeSubagentRef({
+      threadId: "thread-1",
+      rootItemId: "item-root",
+      parentItemId: null,
+      label: "Explore: find the bug",
+      subagentType: "Explore",
+      description: "find the bug",
+      status: "inProgress",
+      iteration: null,
+      turnId: "turn-1",
+      depth: 0,
+      childSubagentCount: 1,
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T00:00:01.000Z",
+    });
+    assert.strictEqual(ref.rootItemId, "item-root");
+    assert.strictEqual(ref.status, "inProgress");
+    assert.strictEqual(ref.depth, 0);
+    assert.strictEqual(ref.childSubagentCount, 1);
+  }),
+);
+
+it.effect("decodes each OrchestrationSubagentTreeStreamItem arm", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* decodeSubagentTreeStreamItem({
+      kind: "snapshot",
+      snapshot: { snapshotSequence: 3, threadId: "thread-1", refs: [] },
+    });
+    assert.strictEqual(snapshot.kind, "snapshot");
+    const changed = yield* decodeSubagentTreeStreamItem({
+      kind: "ref-changed",
+      ref: {
+        threadId: "thread-1",
+        rootItemId: "item-root",
+        parentItemId: null,
+        label: "Explore: find the bug",
+        subagentType: "Explore",
+        description: "find the bug",
+        status: "completed",
+        iteration: null,
+        turnId: null,
+        depth: 0,
+        childSubagentCount: 0,
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:01.000Z",
+      },
+    });
+    assert.strictEqual(changed.kind, "ref-changed");
+    if (changed.kind === "ref-changed") {
+      assert.strictEqual(changed.ref.rootItemId, "item-root");
+      assert.strictEqual(changed.ref.status, "completed");
+    }
+    const removed = yield* decodeSubagentTreeStreamItem({
+      kind: "ref-removed",
+      threadId: "thread-1",
+      rootItemId: "item-root",
+    });
+    assert.strictEqual(removed.kind, "ref-removed");
+  }),
+);
+
+it.effect("decodes OrchestrationSubagentActivitiesStreamItem snapshot arm", () =>
+  Effect.gen(function* () {
+    const item = yield* decodeSubagentActivitiesStreamItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 2,
+        threadId: "thread-1",
+        rootItemId: "item-root",
+        activities: [],
+      },
+    });
+    assert.strictEqual(item.kind, "snapshot");
+  }),
+);
+
+it("registers both subagent methods in ORCHESTRATION_WS_METHODS and OrchestrationRpcSchemas", () => {
+  assert.strictEqual(
+    ORCHESTRATION_WS_METHODS.subscribeSubagentTree,
+    "orchestration.subscribeSubagentTree",
+  );
+  assert.strictEqual(ORCHESTRATION_WS_METHODS.subscribeSubagent, "orchestration.subscribeSubagent");
+  assert.strictEqual("subscribeSubagentTree" in OrchestrationRpcSchemas, true);
+  assert.strictEqual("subscribeSubagent" in OrchestrationRpcSchemas, true);
+});

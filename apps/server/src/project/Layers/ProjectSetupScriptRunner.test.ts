@@ -41,6 +41,8 @@ const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
     getThreadDetailById: () => Effect.die("unused"),
     listSubagentChildActivityRows: () => Effect.die("unused"),
     listSubagentRootRefRows: () => Effect.die("unused"),
+    getSubagentTree: () => Effect.die("unused"),
+    getSubagentActivities: () => Effect.die("unused"),
   });
 
 describe("ProjectSetupScriptRunner", () => {

@@ -711,7 +711,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
-  it("omits task.started and task.completed but shows task.progress", () => {
+  it("omits every task.* lifecycle activity from the inline log (the task pane tracks them)", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "task-start",
@@ -737,23 +737,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
-  });
-
-  it("uses payload summary as label for task entries when available", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "task-progress-with-summary",
-        createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "task.progress",
-        summary: "Reasoning update",
-        tone: "info",
-        payload: { summary: "Searching for API endpoints" },
-      }),
-    ];
-
-    const entries = deriveWorkLogEntries(activities);
-    expect(entries[0]?.label).toBe("Searching for API endpoints");
+    expect(entries).toEqual([]);
   });
 
   it("omits a failed task.completed so it never shows as an inline error row", () => {

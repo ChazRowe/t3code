@@ -17,6 +17,7 @@ import {
   PositiveInt,
   ProjectId,
   ProviderItemId,
+  RuntimeItemId,
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
@@ -350,6 +351,9 @@ export const OrchestrationThreadActivity = Schema.Struct({
   payload: Schema.Unknown,
   turnId: Schema.NullOr(TurnId),
   sequence: Schema.optional(NonNegativeInt),
+  itemId: Schema.optional(RuntimeItemId),
+  parentItemId: Schema.optional(RuntimeItemId),
+  iteration: Schema.optional(PositiveInt),
   createdAt: IsoDateTime,
 });
 export type OrchestrationThreadActivity = typeof OrchestrationThreadActivity.Type;

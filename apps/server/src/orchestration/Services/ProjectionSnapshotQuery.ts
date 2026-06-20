@@ -13,6 +13,7 @@ import type {
   OrchestrationProjectShell,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
+  OrchestrationSubagentRef,
   OrchestrationThread,
   OrchestrationThreadActivity,
   OrchestrationThreadShell,
@@ -174,6 +175,13 @@ export interface ProjectionSnapshotQueryShape {
   readonly listSubagentRootRefRows: (input: {
     readonly threadId: ThreadId;
   }) => Effect.Effect<ReadonlyArray<OrchestrationThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * Read the full subagent ref tree for a thread (all depths, refs only — no transcripts).
+   */
+  readonly getSubagentTree: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationSubagentRef>, ProjectionRepositoryError>;
 }
 
 /**

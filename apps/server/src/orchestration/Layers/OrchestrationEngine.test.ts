@@ -203,6 +203,7 @@ describe("OrchestrationEngine", () => {
           getThreadDetailById: () => Effect.succeed(Option.none()),
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
+          getSubagentTree: () => Effect.die("unused"),
         }),
       ),
       Layer.provide(

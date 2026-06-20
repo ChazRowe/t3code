@@ -1565,6 +1565,110 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.strictEqual(roots[0]?.id, "activity-root-ref");
     }),
   );
+
+  it.effect("getSubagentTree builds refs with depth, child counts, and status", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json,
+          scripts_json, created_at, updated_at, deleted_at
+        ) VALUES (
+          'project-1', 'Project 1', '/tmp/project-1',
+          '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode,
+          interaction_mode, branch, worktree_path, latest_turn_id,
+          latest_user_message_at, pending_approval_count, pending_user_input_count,
+          has_actionable_proposed_plan, created_at, updated_at, deleted_at
+        ) VALUES (
+          'thread-1', 'project-1', 'Thread 1',
+          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+          NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+
+      // Root subagent (depth 0): two lifecycle rows, same item_id, parent_item_id NULL.
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-root-a', 'thread-1', 'turn-1', 'tool', 'tool.started',
+          'Explore: find the bug',
+          '{"itemType":"collab_agent_tool_call","itemId":"item-root-a","label":"Explore: find the bug"}',
+          '2026-06-20T00:00:01.000Z', 'item-root-a', NULL, 1
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-root-a-done', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+          'Explore: find the bug',
+          '{"itemType":"collab_agent_tool_call","itemId":"item-root-a","label":"Explore: find the bug"}',
+          '2026-06-20T00:00:05.000Z', 'item-root-a', NULL, 1
+        )
+      `;
+      // A direct (non-subagent) child of root A — must NOT become a ref.
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-child-1', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+          'Read file', '{"itemType":"command_execution","itemId":"item-child-1"}',
+          '2026-06-20T00:00:02.000Z', 'item-child-1', 'item-root-a', 1
+        )
+      `;
+      // Nested subagent (depth 1): collab_agent_tool_call with parent_item_id = item-root-a.
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+          created_at, item_id, parent_item_id, iteration
+        ) VALUES (
+          'act-root-b', 'thread-1', 'turn-1', 'tool', 'tool.started',
+          'Plan: design the fix',
+          '{"itemType":"collab_agent_tool_call","itemId":"item-root-b","label":"Plan: design the fix"}',
+          '2026-06-20T00:00:03.000Z', 'item-root-b', 'item-root-a', 1
+        )
+      `;
+
+      const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+
+      const byItem = new Map(refs.map((r) => [r.rootItemId, r]));
+      assert.strictEqual(refs.length, 2);
+
+      const rootA = byItem.get(RuntimeItemId.make("item-root-a"));
+      assert.strictEqual(rootA?.depth, 0);
+      assert.strictEqual(rootA?.parentItemId, null);
+      assert.strictEqual(rootA?.subagentType, "Explore");
+      assert.strictEqual(rootA?.description, "find the bug");
+      assert.strictEqual(rootA?.status, "completed");
+      assert.strictEqual(rootA?.iteration, 1);
+      assert.strictEqual(rootA?.childSubagentCount, 1);
+
+      const rootB = byItem.get(RuntimeItemId.make("item-root-b"));
+      assert.strictEqual(rootB?.depth, 1);
+      assert.strictEqual(rootB?.parentItemId, "item-root-a");
+      assert.strictEqual(rootB?.subagentType, "Plan");
+      assert.strictEqual(rootB?.description, "design the fix");
+      assert.strictEqual(rootB?.status, "inProgress");
+      assert.strictEqual(rootB?.childSubagentCount, 0);
+    }),
+  );
 });
 
 it.effect(

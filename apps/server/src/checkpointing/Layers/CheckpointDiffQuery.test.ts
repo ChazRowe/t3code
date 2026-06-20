@@ -110,6 +110,7 @@ describe("CheckpointDiffQueryLive", () => {
           getThreadDetailById: () => Effect.succeed(Option.none()),
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
+          getSubagentTree: () => Effect.die("unused"),
         }),
       ),
     );
@@ -204,6 +205,7 @@ describe("CheckpointDiffQueryLive", () => {
           getThreadDetailById: () => Effect.succeed(Option.none()),
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
+          getSubagentTree: () => Effect.die("unused"),
         }),
       ),
     );
@@ -288,6 +290,7 @@ describe("CheckpointDiffQueryLive", () => {
           getThreadDetailById: () => Effect.succeed(Option.none()),
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
+          getSubagentTree: () => Effect.die("unused"),
         }),
       ),
     );
@@ -357,6 +360,7 @@ describe("CheckpointDiffQueryLive", () => {
           getThreadDetailById: () => Effect.succeed(Option.none()),
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
+          getSubagentTree: () => Effect.die("unused"),
         }),
       ),
     );
@@ -411,6 +415,7 @@ describe("CheckpointDiffQueryLive", () => {
           getThreadDetailById: () => Effect.succeed(Option.none()),
           listSubagentChildActivityRows: () => Effect.die("unused"),
           listSubagentRootRefRows: () => Effect.die("unused"),
+          getSubagentTree: () => Effect.die("unused"),
         }),
       ),
     );

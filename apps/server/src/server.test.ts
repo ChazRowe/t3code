@@ -227,6 +227,8 @@ const makeDefaultOrchestrationThreadShell = (
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
     unattendedRun: null,
+    hasSubagents: false,
+    liveSubagentCount: 0,
     ...overrides,
   };
 };

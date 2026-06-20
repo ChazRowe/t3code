@@ -41,6 +41,8 @@ export const ProjectionThread = Schema.Struct({
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,
   hasActionableProposedPlan: NonNegativeInt,
+  hasSubagents: NonNegativeInt,
+  liveSubagentCount: NonNegativeInt,
   deletedAt: Schema.NullOr(IsoDateTime),
   unattendedRun: Schema.NullOr(UnattendedRunState),
 });

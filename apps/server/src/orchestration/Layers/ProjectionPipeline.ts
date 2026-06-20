@@ -204,6 +204,48 @@ function deriveHasActionableProposedPlan(input: {
   return latestPlan !== null && latestPlan.implementedAt === null;
 }
 
+function deriveSubagentCounts(activities: ReadonlyArray<ProjectionThreadActivity>): {
+  readonly hasSubagents: boolean;
+  readonly liveSubagentCount: number;
+} {
+  const runningRootItemIds = new Set<string>();
+  let sawAnyRoot = false;
+
+  const ordered = [...activities].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.activityId.localeCompare(right.activityId),
+  );
+
+  for (const activity of ordered) {
+    if (activity.parentItemId !== undefined) {
+      continue;
+    }
+    const payload =
+      typeof activity.payload === "object" && activity.payload !== null
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    if (payload?.itemType !== "collab_agent_tool_call") {
+      continue;
+    }
+    const rootItemId = activity.itemId;
+    if (rootItemId === undefined) {
+      continue;
+    }
+    sawAnyRoot = true;
+    if (activity.kind === "tool.completed") {
+      runningRootItemIds.delete(rootItemId);
+    } else {
+      runningRootItemIds.add(rootItemId);
+    }
+  }
+
+  return {
+    hasSubagents: sawAnyRoot,
+    liveSubagentCount: runningRootItemIds.size,
+  };
+}
+
 function retainProjectionMessagesAfterRevert(
   messages: ReadonlyArray<ProjectionThreadMessage>,
   turns: ReadonlyArray<ProjectionTurn>,
@@ -580,6 +622,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         latestTurnId: existingRow.value.latestTurnId,
         proposedPlans,
       });
+      const subagentCounts = deriveSubagentCounts(activities);
 
       yield* projectionThreadRepository.upsert({
         ...existingRow.value,
@@ -587,6 +630,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         pendingApprovalCount,
         pendingUserInputCount,
         hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
+        hasSubagents: existingRow.value.hasSubagents > 0 || subagentCounts.hasSubagents ? 1 : 0,
+        liveSubagentCount: subagentCounts.liveSubagentCount,
       });
     });
 
@@ -612,6 +657,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
+            hasSubagents: 0,
+            liveSubagentCount: 0,
             deletedAt: null,
             unattendedRun: null,
           });

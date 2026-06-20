@@ -106,6 +106,8 @@ function makeReadModel(
       hasPendingUserInput: false,
       hasActionableProposedPlan: false,
       unattendedRun: null,
+      hasSubagents: false,
+      liveSubagentCount: 0,
       latestTurn: null,
       messages: [],
       session: thread.session,

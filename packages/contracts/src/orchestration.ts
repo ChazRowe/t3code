@@ -449,6 +449,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   unattendedRun: Schema.NullOr(UnattendedRunState).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  hasSubagents: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  liveSubagentCount: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 

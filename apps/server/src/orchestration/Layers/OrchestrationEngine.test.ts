@@ -201,6 +201,8 @@ describe("OrchestrationEngine", () => {
           getFullThreadDiffContext: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
+          listSubagentChildActivityRows: () => Effect.die("unused"),
+          listSubagentRootRefRows: () => Effect.die("unused"),
         }),
       ),
       Layer.provide(

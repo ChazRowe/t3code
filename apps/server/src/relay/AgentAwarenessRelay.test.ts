@@ -279,6 +279,9 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
       hasPendingApprovals: false,
       hasPendingUserInput: false,
       hasActionableProposedPlan: false,
+      unattendedRun: null,
+      hasSubagents: false,
+      liveSubagentCount: 0,
     } satisfies Omit<OrchestrationThreadShell, "id">;
 
     expect(
@@ -433,6 +436,9 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           hasPendingApprovals: false,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          unattendedRun: null,
+          hasSubagents: false,
+          liveSubagentCount: 0,
         } satisfies OrchestrationThreadShell;
 
         const orchestrationEngine = {
@@ -588,6 +594,9 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           hasPendingApprovals: false,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          unattendedRun: null,
+          hasSubagents: false,
+          liveSubagentCount: 0,
         } satisfies OrchestrationThreadShell;
 
         const descriptor = {

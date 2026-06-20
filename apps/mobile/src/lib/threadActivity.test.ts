@@ -44,6 +44,7 @@ function makeThread(
     activities: [],
     checkpoints: [],
     session: null,
+    unattendedRun: null,
     ...input,
   };
 }

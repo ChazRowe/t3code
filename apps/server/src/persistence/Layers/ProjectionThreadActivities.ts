@@ -1,6 +1,6 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { NonNegativeInt } from "@t3tools/contracts";
+import { NonNegativeInt, PositiveInt, RuntimeItemId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -20,6 +20,9 @@ const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
     sequence: Schema.NullOr(NonNegativeInt),
+    itemId: Schema.NullOr(RuntimeItemId),
+    parentItemId: Schema.NullOr(RuntimeItemId),
+    iteration: Schema.NullOr(PositiveInt),
   }),
 );
 
@@ -46,6 +49,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
               summary,
               payload_json,
               sequence,
+              item_id,
+              parent_item_id,
+              iteration,
               created_at
             )
             VALUES (
@@ -57,6 +63,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
               ${row.summary},
               ${JSON.stringify(row.payload)},
               ${row.sequence ?? null},
+              ${row.itemId ?? null},
+              ${row.parentItemId ?? null},
+              ${row.iteration ?? null},
               ${row.createdAt}
             )
             ON CONFLICT (activity_id)
@@ -68,6 +77,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
               summary = excluded.summary,
               payload_json = excluded.payload_json,
               sequence = excluded.sequence,
+              item_id = excluded.item_id,
+              parent_item_id = excluded.parent_item_id,
+              iteration = excluded.iteration,
               created_at = excluded.created_at
           `,
   });
@@ -86,6 +98,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
           summary,
           payload_json AS "payload",
           sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
           created_at AS "createdAt"
         FROM projection_thread_activities
         WHERE thread_id = ${threadId}
@@ -134,6 +149,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
           summary: row.summary,
           payload: row.payload,
           ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+          ...(row.itemId !== null ? { itemId: row.itemId } : {}),
+          ...(row.parentItemId !== null ? { parentItemId: row.parentItemId } : {}),
+          ...(row.iteration !== null ? { iteration: row.iteration } : {}),
           createdAt: row.createdAt,
         })),
       ),

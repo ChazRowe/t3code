@@ -678,6 +678,18 @@ export function projectEvent(
             return nextBase;
           }
 
+          // Subagent-child activities (parentItemId set) are persisted in the DB but kept out
+          // of the in-memory 500-cap slice so the cap holds real top-level messages; only
+          // advance updatedAt.
+          if (payload.activity.parentItemId !== undefined) {
+            return {
+              ...nextBase,
+              threads: updateThread(nextBase.threads, payload.threadId, {
+                updatedAt: event.occurredAt,
+              }),
+            };
+          }
+
           const activities = [
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,

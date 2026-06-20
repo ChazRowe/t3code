@@ -250,6 +250,9 @@ function makeThreadShellSnapshot(params: {
         hasPendingApprovals: params.hasPendingApprovals ?? false,
         hasPendingUserInput: params.hasPendingUserInput ?? false,
         hasActionableProposedPlan: params.hasActionableProposedPlan ?? false,
+        unattendedRun: null,
+        hasSubagents: false,
+        liveSubagentCount: 0,
       },
     ],
   };

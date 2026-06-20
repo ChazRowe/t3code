@@ -95,6 +95,8 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         pendingApprovalCount: 0,
         pendingUserInputCount: 0,
         hasActionableProposedPlan: 0,
+        hasSubagents: 0,
+        liveSubagentCount: 0,
         deletedAt: null,
         unattendedRun: null,
       });

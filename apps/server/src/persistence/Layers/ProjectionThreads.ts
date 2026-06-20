@@ -48,6 +48,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count,
           pending_user_input_count,
           has_actionable_proposed_plan,
+          has_subagents,
+          live_subagent_count,
           deleted_at,
           unattended_run
         )
@@ -68,6 +70,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.pendingApprovalCount},
           ${row.pendingUserInputCount},
           ${row.hasActionableProposedPlan},
+          ${row.hasSubagents},
+          ${row.liveSubagentCount},
           ${row.deletedAt},
           ${row.unattendedRun === null ? null : JSON.stringify(row.unattendedRun)}
         )
@@ -88,6 +92,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count = excluded.pending_approval_count,
           pending_user_input_count = excluded.pending_user_input_count,
           has_actionable_proposed_plan = excluded.has_actionable_proposed_plan,
+          has_subagents = excluded.has_subagents,
+          live_subagent_count = excluded.live_subagent_count,
           deleted_at = excluded.deleted_at,
           unattended_run = excluded.unattended_run
       `,
@@ -115,6 +121,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          has_subagents AS "hasSubagents",
+          live_subagent_count AS "liveSubagentCount",
           deleted_at AS "deletedAt",
           unattended_run AS "unattendedRun"
         FROM projection_threads
@@ -144,6 +152,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          has_subagents AS "hasSubagents",
+          live_subagent_count AS "liveSubagentCount",
           deleted_at AS "deletedAt",
           unattended_run AS "unattendedRun"
         FROM projection_threads

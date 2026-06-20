@@ -204,6 +204,50 @@ function deriveHasActionableProposedPlan(input: {
   return latestPlan !== null && latestPlan.implementedAt === null;
 }
 
+function deriveSubagentCounts(activities: ReadonlyArray<ProjectionThreadActivity>): {
+  readonly hasSubagents: boolean;
+  readonly liveSubagentCount: number;
+} {
+  const runningRootItemIds = new Set<string>();
+  let sawAnyRoot = false;
+
+  const ordered = [...activities].toSorted(
+    (left, right) =>
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.activityId.localeCompare(right.activityId),
+  );
+
+  for (const activity of ordered) {
+    if (activity.parentItemId !== undefined) {
+      continue;
+    }
+    const payload =
+      typeof activity.payload === "object" && activity.payload !== null
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    if (payload?.itemType !== "collab_agent_tool_call") {
+      continue;
+    }
+    const rootItemId = activity.itemId;
+    if (rootItemId === undefined) {
+      continue;
+    }
+    sawAnyRoot = true;
+    // A root collab_agent_tool_call is "running" until its terminal tool.completed event;
+    // add on start/update, remove on completion, so the set size = currently-running subagents.
+    if (activity.kind === "tool.completed") {
+      runningRootItemIds.delete(rootItemId);
+    } else {
+      runningRootItemIds.add(rootItemId);
+    }
+  }
+
+  return {
+    hasSubagents: sawAnyRoot,
+    liveSubagentCount: runningRootItemIds.size,
+  };
+}
+
 function retainProjectionMessagesAfterRevert(
   messages: ReadonlyArray<ProjectionThreadMessage>,
   turns: ReadonlyArray<ProjectionTurn>,
@@ -580,6 +624,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         latestTurnId: existingRow.value.latestTurnId,
         proposedPlans,
       });
+      const subagentCounts = deriveSubagentCounts(activities);
 
       yield* projectionThreadRepository.upsert({
         ...existingRow.value,
@@ -587,6 +632,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         pendingApprovalCount,
         pendingUserInputCount,
         hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
+        hasSubagents: existingRow.value.hasSubagents > 0 || subagentCounts.hasSubagents ? 1 : 0,
+        liveSubagentCount: subagentCounts.liveSubagentCount,
       });
     });
 
@@ -612,6 +659,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
+            hasSubagents: 0,
+            liveSubagentCount: 0,
             deletedAt: null,
             unattendedRun: null,
           });
@@ -974,6 +1023,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             payload: event.payload.activity.payload,
             ...(event.payload.activity.sequence !== undefined
               ? { sequence: event.payload.activity.sequence }
+              : {}),
+            ...(event.payload.activity.itemId !== undefined
+              ? { itemId: event.payload.activity.itemId }
+              : {}),
+            ...(event.payload.activity.parentItemId !== undefined
+              ? { parentItemId: event.payload.activity.parentItemId }
+              : {}),
+            ...(event.payload.activity.iteration !== undefined
+              ? { iteration: event.payload.activity.iteration }
               : {}),
             createdAt: event.payload.activity.createdAt,
           });

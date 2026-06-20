@@ -8,6 +8,7 @@ import {
   type OrchestrationProposedPlanId,
   CheckpointRef,
   isToolLifecycleItemType,
+  RuntimeItemId,
   ThreadId,
   type ThreadTokenUsageSnapshot,
   TurnId,
@@ -587,8 +588,7 @@ function runtimeEventToActivities(
         // (that routing lives in processRuntimeEvent and is gated on the same parentItemId).
         if (
           event.payload.parentItemId &&
-          (event.payload.itemType === "assistant_message" ||
-            event.payload.itemType === "reasoning")
+          (event.payload.itemType === "assistant_message" || event.payload.itemType === "reasoning")
         ) {
           const isReasoning = event.payload.itemType === "reasoning";
           return [
@@ -1695,7 +1695,31 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const activities = runtimeEventToActivities(event);
+      const currentIteration = thread.unattendedRun?.currentIteration;
+      // runtimeEventToActivities places itemId/parentItemId only inside payload; lift them
+      // to the activity's top-level fields so the projection can classify subagent rows.
+      const activities = runtimeEventToActivities(event).map((activity) => {
+        const payload =
+          typeof activity.payload === "object" && activity.payload !== null
+            ? (activity.payload as Record<string, unknown>)
+            : null;
+        const payloadItemId =
+          typeof payload?.itemId === "string" ? RuntimeItemId.make(payload.itemId) : undefined;
+        const payloadParentItemId =
+          typeof payload?.parentItemId === "string"
+            ? RuntimeItemId.make(payload.parentItemId)
+            : undefined;
+        return {
+          ...activity,
+          ...(payloadItemId !== undefined ? { itemId: payloadItemId } : {}),
+          ...(payloadParentItemId !== undefined ? { parentItemId: payloadParentItemId } : {}),
+          // iteration is recorded only on subagent-child activities (parentItemId marks them);
+          // it captures the unattended-run iteration active when the subagent ran.
+          ...(payloadParentItemId !== undefined && currentIteration !== undefined
+            ? { iteration: currentIteration }
+            : {}),
+        };
+      });
       yield* Effect.forEach(activities, (activity) =>
         providerCommandId(event, "thread-activity-append").pipe(
           Effect.flatMap((commandId) =>

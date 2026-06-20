@@ -17,6 +17,7 @@ import {
   PositiveInt,
   ProjectId,
   ProviderItemId,
+  RuntimeItemId,
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
@@ -350,6 +351,9 @@ export const OrchestrationThreadActivity = Schema.Struct({
   payload: Schema.Unknown,
   turnId: Schema.NullOr(TurnId),
   sequence: Schema.optional(NonNegativeInt),
+  itemId: Schema.optional(RuntimeItemId),
+  parentItemId: Schema.optional(RuntimeItemId),
+  iteration: Schema.optional(PositiveInt),
   createdAt: IsoDateTime,
 });
 export type OrchestrationThreadActivity = typeof OrchestrationThreadActivity.Type;
@@ -442,6 +446,11 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  unattendedRun: Schema.NullOr(UnattendedRunState).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  hasSubagents: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  liveSubagentCount: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 

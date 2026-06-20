@@ -6,6 +6,7 @@ import {
   ThreadId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
+import { it as itEffect } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -957,33 +958,162 @@ describe("orchestration projector", () => {
   it("projects an unattended run lifecycle onto the thread", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     let model = await Effect.runPromise(
-      projectEvent(createEmptyReadModel(now), makeEvent({
-        sequence: 1, type: "thread.created", aggregateKind: "thread", aggregateId: "thread-1",
-        occurredAt: now, commandId: "cmd-create",
-        payload: { threadId: "thread-1", projectId: "project-1", title: "demo",
-          modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
-          runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null,
-          createdAt: now, updatedAt: now } }),
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
       ),
     );
     expect(model.threads[0]?.unattendedRun).toBe(null);
 
     model = await Effect.runPromise(
-      projectEvent(model, makeEvent({
-        sequence: 2, type: "thread.unattended-run-started", aggregateKind: "thread",
-        aggregateId: "thread-1", occurredAt: now, commandId: null,
-        payload: { threadId: "thread-1", totalIterations: 4, startedAt: now, updatedAt: now } }),
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: "thread.unattended-run-started",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: null,
+          payload: { threadId: "thread-1", totalIterations: 4, startedAt: now, updatedAt: now },
+        }),
       ),
     );
-    expect(model.threads[0]?.unattendedRun).toMatchObject({ status: "running", totalIterations: 4, currentIteration: 1 });
+    expect(model.threads[0]?.unattendedRun).toMatchObject({
+      status: "running",
+      totalIterations: 4,
+      currentIteration: 1,
+    });
 
     model = await Effect.runPromise(
-      projectEvent(model, makeEvent({
-        sequence: 3, type: "thread.unattended-run-paused", aggregateKind: "thread",
-        aggregateId: "thread-1", occurredAt: now, commandId: null,
-        payload: { threadId: "thread-1", reason: "no-sentinel", updatedAt: now } }),
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 3,
+          type: "thread.unattended-run-paused",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: null,
+          payload: { threadId: "thread-1", reason: "no-sentinel", updatedAt: now },
+        }),
       ),
     );
-    expect(model.threads[0]?.unattendedRun).toMatchObject({ status: "paused", pauseReason: "no-sentinel" });
+    expect(model.threads[0]?.unattendedRun).toMatchObject({
+      status: "paused",
+      pauseReason: "no-sentinel",
+    });
   });
+
+  itEffect.effect(
+    "excludes subagent-child activities (parentItemId set) from thread.activities",
+    () =>
+      Effect.gen(function* () {
+        const now = "2026-06-20T00:00:00.000Z";
+        let model = createEmptyReadModel(now);
+
+        model = yield* projectEvent(
+          model,
+          makeEvent({
+            sequence: 1,
+            type: "thread.created",
+            aggregateKind: "thread",
+            aggregateId: "thread-1",
+            occurredAt: now,
+            commandId: "cmd-thread-create",
+            payload: {
+              threadId: "thread-1",
+              projectId: "project-1",
+              title: "demo",
+              modelSelection: {
+                provider: ProviderDriverKind.make("codex"),
+                model: "gpt-5-codex",
+              },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          }),
+        );
+
+        model = yield* projectEvent(
+          model,
+          makeEvent({
+            sequence: 2,
+            type: "thread.activity-appended",
+            aggregateKind: "thread",
+            aggregateId: "thread-1",
+            occurredAt: "2026-06-20T00:00:01.000Z",
+            commandId: "cmd-activity-normal",
+            payload: {
+              threadId: "thread-1",
+              activity: {
+                id: "activity-normal",
+                tone: "tool",
+                kind: "tool.started",
+                summary: "Edit file started",
+                payload: { toolKind: "command" },
+                turnId: "turn-1",
+                createdAt: "2026-06-20T00:00:01.000Z",
+              },
+            },
+          }),
+        );
+
+        model = yield* projectEvent(
+          model,
+          makeEvent({
+            sequence: 3,
+            type: "thread.activity-appended",
+            aggregateKind: "thread",
+            aggregateId: "thread-1",
+            occurredAt: "2026-06-20T00:00:02.000Z",
+            commandId: "cmd-activity-subagent",
+            payload: {
+              threadId: "thread-1",
+              activity: {
+                id: "activity-subagent-child",
+                tone: "info",
+                kind: "tool.completed",
+                summary: "Subagent message",
+                payload: { toolKind: "command" },
+                turnId: "turn-1",
+                itemId: "item-child-1",
+                parentItemId: "item-root-1",
+                iteration: 1,
+                createdAt: "2026-06-20T00:00:02.000Z",
+              },
+            },
+          }),
+        );
+
+        const thread = model.threads[0];
+        const ids = thread?.activities.map((activity) => activity.id) ?? [];
+        expect(ids).toContain("activity-normal");
+        expect(ids).not.toContain("activity-subagent-child");
+        expect(thread?.updatedAt).toBe("2026-06-20T00:00:02.000Z");
+      }),
+  );
 });

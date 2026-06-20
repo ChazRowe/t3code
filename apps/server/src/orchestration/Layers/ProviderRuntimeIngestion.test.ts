@@ -3300,4 +3300,39 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(activity).toBeUndefined();
   });
+
+  it("stamps top-level itemId and parentItemId on subagent-child activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-subagent-toplevel-fields"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-subagent-toplevel"),
+      itemId: asItemId("item-child-1"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Child command",
+        parentItemId: "item-root-1",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.id === "evt-subagent-toplevel-fields",
+      ),
+    );
+
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-subagent-toplevel-fields",
+    );
+
+    expect(activity?.parentItemId).toBe("item-root-1");
+    expect(activity?.itemId).toBe("item-child-1");
+    expect(activity?.iteration).toBeUndefined();
+  });
 });

@@ -11,6 +11,7 @@ import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationThreadActivity,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
@@ -739,5 +740,50 @@ it.effect("ModelSelection rejects malformed instance ids", () =>
       }),
     );
     assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+const decodeOrchestrationThreadActivity = Schema.decodeUnknownEffect(OrchestrationThreadActivity);
+const encodeOrchestrationThreadActivity = Schema.encodeUnknownEffect(OrchestrationThreadActivity);
+
+it.effect("round-trips a thread activity carrying itemId/parentItemId/iteration", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeOrchestrationThreadActivity({
+      id: "activity-sub-1",
+      tone: "info",
+      kind: "tool.completed",
+      summary: "Subagent message",
+      payload: { itemType: "assistant_message", status: "completed" },
+      turnId: "turn-1",
+      itemId: "item-child-1",
+      parentItemId: "item-root-1",
+      iteration: 2,
+      createdAt: "2026-06-20T00:00:00.000Z",
+    });
+    assert.strictEqual(decoded.itemId, "item-child-1");
+    assert.strictEqual(decoded.parentItemId, "item-root-1");
+    assert.strictEqual(decoded.iteration, 2);
+
+    const encoded = yield* encodeOrchestrationThreadActivity(decoded);
+    assert.strictEqual(encoded.itemId, "item-child-1");
+    assert.strictEqual(encoded.parentItemId, "item-root-1");
+    assert.strictEqual(encoded.iteration, 2);
+  }),
+);
+
+it.effect("decodes a thread activity that omits the optional subagent fields", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeOrchestrationThreadActivity({
+      id: "activity-plain-1",
+      tone: "tool",
+      kind: "tool.started",
+      summary: "Edit file started",
+      payload: { itemType: "command" },
+      turnId: "turn-1",
+      createdAt: "2026-06-20T00:00:00.000Z",
+    });
+    assert.strictEqual(decoded.itemId, undefined);
+    assert.strictEqual(decoded.parentItemId, undefined);
+    assert.strictEqual(decoded.iteration, undefined);
   }),
 );

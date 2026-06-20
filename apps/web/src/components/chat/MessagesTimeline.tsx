@@ -730,6 +730,73 @@ function isInProgressSubagentParent(entry: WorkLogEntry): boolean {
   );
 }
 
+/**
+ * Derives the subagent type/description from a collab_agent_tool_call label.
+ * Labels are typically "<subagent-type>: <description>" — we show the type
+ * and, if present, the description as a secondary detail.
+ */
+function parseSubagentLabel(label: string): { type: string; description: string | null } {
+  const colonIdx = label.indexOf(": ");
+  if (colonIdx > 0) {
+    return { type: label.slice(0, colonIdx).trim(), description: label.slice(colonIdx + 2).trim() || null };
+  }
+  return { type: label.trim(), description: null };
+}
+
+/**
+ * Renders a subagent parent entry and its children as a contained card with a
+ * header showing the subagent type and a running indicator while in progress.
+ */
+function SubagentCard({
+  parent,
+  childEntries,
+  workspaceRoot,
+}: {
+  parent: TimelineWorkEntry;
+  childEntries: TimelineWorkEntry[];
+  workspaceRoot: string | undefined;
+}) {
+  const isRunning = isInProgressSubagentParent(parent);
+  const { type: subagentType, description } = parseSubagentLabel(parent.label);
+
+  return (
+    <div className="rounded-md border border-border/60 bg-muted/20 overflow-hidden">
+      {/* Card header */}
+      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border/40">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px]">
+          <span className="font-semibold text-foreground/70">Subagent:</span>
+          <span className="font-medium text-foreground/82 truncate">{subagentType}</span>
+          {description && (
+            <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{description}</span>
+          )}
+        </span>
+        {isRunning ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground/70">
+            <span className="inline-flex items-center gap-[3px]">
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
+              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
+            </span>
+            <span>running...</span>
+          </span>
+        ) : null}
+      </div>
+      {/* Child rows inside the card */}
+      {childEntries.length > 0 && (
+        <div className="space-y-px px-1 py-0.5">
+          {childEntries.map((child) => (
+            <SimpleWorkEntryRow
+              key={child.id}
+              workEntry={child}
+              workspaceRoot={workspaceRoot}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Collapsed state shows the earliest chunk so "Show more" only appends rows downward. */
 const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries,
@@ -770,8 +837,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
     [nonEmptyEntries],
   );
   const hasOverflow = allTopLevelEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
+  // Never auto-collapse when an active subagent is streaming — its stream must stay visible.
+  const hasActiveSubagent = allTopLevelEntries.some(isInProgressSubagentParent);
   const topLevelEntries =
-    hasOverflow && !isExpanded
+    hasOverflow && !isExpanded && !hasActiveSubagent
       ? allTopLevelEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
       : allTopLevelEntries;
   const hiddenCount = allTopLevelEntries.length - topLevelEntries.length;
@@ -824,21 +893,35 @@ const WorkGroupSection = memo(function WorkGroupSection({
         </p>
       )}
       <div className="space-y-px">
-        {topLevelEntries.map((workEntry) => (
-          <Fragment key={workEntry.id}>
-            <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
-            {(allChildrenByParent.get(workEntry.toolItemId ?? "") ?? []).map((child) => (
-              <SimpleWorkEntryRow
-                key={child.id}
-                workEntry={child}
+        {topLevelEntries.map((workEntry) => {
+          const isSubagentParent = workEntry.itemType === "collab_agent_tool_call";
+          const children = allChildrenByParent.get(workEntry.toolItemId ?? "") ?? [];
+          if (isSubagentParent) {
+            return (
+              <SubagentCard
+                key={workEntry.id}
+                parent={workEntry}
+                childEntries={children}
                 workspaceRoot={workspaceRoot}
-                indented
               />
-            ))}
-          </Fragment>
-        ))}
+            );
+          }
+          return (
+            <Fragment key={workEntry.id}>
+              <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
+              {children.map((child) => (
+                <SimpleWorkEntryRow
+                  key={child.id}
+                  workEntry={child}
+                  workspaceRoot={workspaceRoot}
+                  indented
+                />
+              ))}
+            </Fragment>
+          );
+        })}
       </div>
-      {hasOverflow && (
+      {hasOverflow && !hasActiveSubagent && (
         <button
           type="button"
           className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"

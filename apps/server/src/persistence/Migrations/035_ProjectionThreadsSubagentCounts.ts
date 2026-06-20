@@ -21,6 +21,9 @@ export default Effect.gen(function* () {
     `;
   }
 
+  // Backfill has_subagents (sticky) from existing root refs. live_subagent_count is left at its
+  // default 0: no subagents are running right after a restart/migration, and it self-heals on the
+  // next refreshThreadShellSummary.
   yield* sql`
     UPDATE projection_threads
     SET has_subagents = 1

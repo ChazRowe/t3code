@@ -233,6 +233,8 @@ function deriveSubagentCounts(activities: ReadonlyArray<ProjectionThreadActivity
       continue;
     }
     sawAnyRoot = true;
+    // A root collab_agent_tool_call is "running" until its terminal tool.completed event;
+    // add on start/update, remove on completion, so the set size = currently-running subagents.
     if (activity.kind === "tool.completed") {
       runningRootItemIds.delete(rootItemId);
     } else {
@@ -630,7 +632,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         pendingApprovalCount,
         pendingUserInputCount,
         hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
-        hasSubagents: existingRow.value.hasSubagents > 0 || subagentCounts.hasSubagents ? 1 : 0,
+        hasSubagents: (existingRow.value.hasSubagents > 0 || subagentCounts.hasSubagents) ? 1 : 0,
         liveSubagentCount: subagentCounts.liveSubagentCount,
       });
     });

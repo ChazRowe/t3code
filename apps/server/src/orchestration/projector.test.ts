@@ -986,4 +986,98 @@ describe("orchestration projector", () => {
     );
     expect(model.threads[0]?.unattendedRun).toMatchObject({ status: "paused", pauseReason: "no-sentinel" });
   });
+
+  it("excludes subagent-child activities (parentItemId set) from thread.activities", async () => {
+    const now = "2026-06-20T00:00:00.000Z";
+    let model = createEmptyReadModel(now);
+
+    model = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    model = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: "thread.activity-appended",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: "2026-06-20T00:00:01.000Z",
+          commandId: "cmd-activity-normal",
+          payload: {
+            threadId: "thread-1",
+            activity: {
+              id: "activity-normal",
+              tone: "tool",
+              kind: "tool.started",
+              summary: "Edit file started",
+              payload: { toolKind: "command" },
+              turnId: "turn-1",
+              createdAt: "2026-06-20T00:00:01.000Z",
+            },
+          },
+        }),
+      ),
+    );
+
+    model = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 3,
+          type: "thread.activity-appended",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: "2026-06-20T00:00:02.000Z",
+          commandId: "cmd-activity-subagent",
+          payload: {
+            threadId: "thread-1",
+            activity: {
+              id: "activity-subagent-child",
+              tone: "info",
+              kind: "tool.completed",
+              summary: "Subagent message",
+              payload: { toolKind: "command" },
+              turnId: "turn-1",
+              itemId: "item-child-1",
+              parentItemId: "item-root-1",
+              iteration: 1,
+              createdAt: "2026-06-20T00:00:02.000Z",
+            },
+          },
+        }),
+      ),
+    );
+
+    const thread = model.threads[0];
+    const ids = thread?.activities.map((activity) => activity.id) ?? [];
+    expect(ids).toContain("activity-normal");
+    expect(ids).not.toContain("activity-subagent-child");
+  });
 });

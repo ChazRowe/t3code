@@ -678,6 +678,15 @@ export function projectEvent(
             return nextBase;
           }
 
+          if (payload.activity.parentItemId !== undefined) {
+            return {
+              ...nextBase,
+              threads: updateThread(nextBase.threads, payload.threadId, {
+                updatedAt: event.occurredAt,
+              }),
+            };
+          }
+
           const activities = [
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,

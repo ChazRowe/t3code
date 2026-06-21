@@ -185,6 +185,11 @@ interface ClaudeSessionContext {
   readonly basePermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
   resumeSessionId: string | undefined;
+  // Rolling tail of the Claude subprocess's stderr, captured via the SDK `stderr`
+  // option. The SDK reports a non-zero exit only as "Claude Code process exited with
+  // code 1"; this preserves the real reason (e.g. "No conversation found with session
+  // ID") so it can be surfaced in the failure message instead of being discarded.
+  readonly claudeStderr: { value: string };
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{
@@ -260,6 +265,23 @@ function toMessage(cause: unknown, fallback: string): string {
     return cause.message;
   }
   return fallback;
+}
+
+// The Claude SDK surfaces a non-zero subprocess exit only as the opaque "Claude Code
+// process exited with code 1". The real reason is on the subprocess's stderr, which we
+// capture into `context.claudeStderr`. Append a trimmed tail so failures are diagnosable.
+const MAX_CLAUDE_STDERR_CHARS = 2_000;
+
+function appendClaudeStderrChunk(buffer: { value: string }, chunk: unknown): void {
+  const text = typeof chunk === "string" ? chunk : String(chunk);
+  const next = buffer.value + text;
+  buffer.value =
+    next.length > MAX_CLAUDE_STDERR_CHARS ? next.slice(-MAX_CLAUDE_STDERR_CHARS) : next;
+}
+
+function withClaudeStderr(message: string, stderr: { value: string }): string {
+  const tail = stderr.value.trim();
+  return tail.length > 0 ? `${message} — claude stderr: ${tail}` : message;
 }
 
 function toProcessError(
@@ -3144,7 +3166,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           );
         }
       } else {
-        const message = messageFromClaudeStreamCause(exit.cause, "Claude runtime stream failed.");
+        const message = withClaudeStderr(
+          messageFromClaudeStreamCause(exit.cause, "Claude runtime stream failed."),
+          context.claudeStderr,
+        );
         yield* emitRuntimeError(context, message, Cause.pretty(exit.cause));
         yield* completeTurn(context, "failed", message);
       }
@@ -3655,10 +3680,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(ultracode ? { ultracode: true } : {}),
       };
       const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+      const claudeStderr = { value: "" };
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
+        stderr: (chunk) => appendClaudeStderrChunk(claudeStderr, chunk),
         systemPrompt: { type: "preset", preset: "claude_code" },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
@@ -3749,7 +3776,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(threadId ? { threadId } : {}),
         resumeCursor: {
           ...(threadId ? { threadId } : {}),
-          ...(sessionId ? { resume: sessionId } : {}),
+          // Only carry forward a resume id Claude has already confirmed exists (an
+          // existing session being resumed). A freshly generated session id is handed
+          // to Claude via `options.sessionId`, but it does not exist on disk until
+          // Claude's init message confirms it — persisting it here would leave a phantom
+          // resume cursor that bricks the thread ("No conversation found") if this turn
+          // is interrupted before init. `updateResumeCursor` records the real id on init.
+          ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
           turnCount: resumeState?.turnCount ?? 0,
         },
@@ -3766,6 +3799,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
         resumeSessionId: sessionId,
+        claudeStderr,
         pendingApprovals,
         pendingUserInputs,
         turns: [],

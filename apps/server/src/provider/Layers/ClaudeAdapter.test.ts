@@ -1558,6 +1558,48 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "surfaces Claude's stderr in the failure message when the process exits non-zero",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 6).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "hello", attachments: [] });
+
+        // Claude writes its real reason to stderr, then exits non-zero. Without capture,
+        // the adapter would surface only the opaque "exited with code 1".
+        const createInput = harness.getLastCreateQueryInput();
+        createInput?.options.stderr?.("No conversation found with session ID: deadbeef");
+        harness.query.fail(new Error("Claude Code process exited with code 1"));
+
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        const turnCompleted = runtimeEvents.find((event) => event.type === "turn.completed");
+        assert.equal(turnCompleted?.type, "turn.completed");
+        if (turnCompleted?.type === "turn.completed") {
+          assert.equal(turnCompleted.payload.state, "failed");
+          const errorMessage = String(turnCompleted.payload.errorMessage);
+          assert.match(errorMessage, /exited with code 1/);
+          assert.match(errorMessage, /No conversation found with session ID: deadbeef/);
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("closes the session when the Claude stream aborts after a turn starts", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -3130,14 +3172,18 @@ describe("ClaudeAdapterLive", () => {
         turnCount?: number;
       };
       assert.equal(sessionResumeCursor.threadId, THREAD_ID);
-      assert.equal(typeof sessionResumeCursor.resume, "string");
+      // Claude is told to create the fresh id via options.sessionId, but the resume
+      // cursor must NOT carry it yet: the session does not exist until Claude's init
+      // message confirms it. Persisting it here would leave a phantom resume id that
+      // bricks the thread ("No conversation found") if the first turn is interrupted
+      // before init. The cursor gains `resume` only once init confirms the session.
+      assert.equal(sessionResumeCursor.resume, undefined);
       assert.equal(sessionResumeCursor.turnCount, 0);
+      assert.equal(createInput?.options.resume, undefined);
       assert.match(
-        sessionResumeCursor.resume ?? "",
+        createInput?.options.sessionId ?? "",
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
-      assert.equal(createInput?.options.resume, undefined);
-      assert.equal(createInput?.options.sessionId, sessionResumeCursor.resume);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

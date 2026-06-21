@@ -1870,7 +1870,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           assert.strictEqual(status.auth.status, "unknown");
           assert.strictEqual(
             status.message,
-            "Could not verify Claude authentication status from initialization result.",
+            "Claude is installed and responding, but T3 Code couldn't read your account details from the startup probe (it may have timed out). Your sign-in is most likely still valid.",
           );
         }).pipe(
           Effect.provide(

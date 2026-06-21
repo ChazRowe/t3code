@@ -447,7 +447,14 @@ function claudeAuthMetadata(input: {
 
 // ── SDK capability probe ────────────────────────────────────────────
 
-const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
+// The probe spawns a Claude Agent SDK session and waits for its initialization
+// IPC (account info + slash commands). Cold starts — e.g. right after a daemon
+// restart while the host is still busy, with SessionStart hooks running — can
+// exceed a tight budget, which previously surfaced as a misleading "could not
+// verify authentication" warning even though auth was fine. Give it real
+// headroom; `claude --version` (DEFAULT_TIMEOUT_MS) has already proven the CLI
+// is installed and reachable before we get here.
+const CAPABILITIES_PROBE_TIMEOUT_MS = 15_000;
 
 function nonEmptyProbeString(value: string): string | undefined {
   const candidate = value.trim();
@@ -748,7 +755,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: parsedVersion,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Could not verify Claude authentication status from initialization result.",
+        // `claude --version` already succeeded above, so the CLI is installed and
+        // reachable — only the account-details probe was inconclusive (usually a
+        // cold-start timeout). Don't frame this as an authentication failure.
+        message:
+          "Claude is installed and responding, but T3 Code couldn't read your account details from the startup probe (it may have timed out). Your sign-in is most likely still valid.",
       },
     });
   }

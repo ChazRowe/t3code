@@ -155,7 +155,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       const checkProvider = checkClaudeProviderStatus(
         effectiveConfig,
-        () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
+        // Don't let a failed probe (undefined) stay cached for the full TTL — that
+        // delays recovery after the underlying cause (e.g. a corrected `claude`
+        // binary on PATH) is gone. Invalidate on failure so the next status check
+        // re-probes; only successful probes stay cached for CAPABILITIES_PROBE_TTL.
+        () =>
+          Cache.get(capabilitiesProbeCache, capabilitiesCacheKey).pipe(
+            Effect.tap((capabilities) =>
+              capabilities === undefined
+                ? Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey)
+                : Effect.void,
+            ),
+          ),
         processEnv,
       ).pipe(
         Effect.map(stampIdentity),

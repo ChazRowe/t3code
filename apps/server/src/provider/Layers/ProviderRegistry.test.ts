@@ -31,7 +31,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
-import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { checkClaudeProviderStatus, describeClaudeProbeFailure } from "./ClaudeProvider.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
@@ -1891,3 +1891,29 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
     });
   },
 );
+
+describe("describeClaudeProbeFailure", () => {
+  it("appends the captured stderr so the real failure reason is visible", () => {
+    const reason = describeClaudeProbeFailure(
+      new Error("Claude Code process exited with code 1"),
+      "error: unknown option '--setting-sources=user,project,local'\n",
+    );
+    assert.isTrue(reason.includes("exited with code 1"));
+    assert.isTrue(reason.includes("unknown option '--setting-sources"));
+  });
+
+  it("falls back to the error message when there is no stderr", () => {
+    const reason = describeClaudeProbeFailure(
+      new Error("Claude capability probe timed out."),
+      "   ",
+    );
+    assert.strictEqual(reason, "Claude capability probe timed out.");
+  });
+
+  it("uses a generic message when there is neither an error nor stderr", () => {
+    assert.strictEqual(
+      describeClaudeProbeFailure(undefined, ""),
+      "Claude capability probe failed.",
+    );
+  });
+});

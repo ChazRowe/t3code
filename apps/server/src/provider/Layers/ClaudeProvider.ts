@@ -541,6 +541,23 @@ function waitForAbortSignal(signal: AbortSignal): Promise<void> {
 }
 
 /**
+ * Format a capability-probe failure so the real reason is diagnosable. The SDK
+ * surfaces only "Claude Code process exited with code 1"; the actual cause
+ * (e.g. an outdated `claude` that rejects `--setting-sources`) is on the
+ * subprocess stderr, which we capture and append here.
+ */
+export function describeClaudeProbeFailure(error: unknown, stderr: string): string {
+  const message =
+    error instanceof Error && error.message.trim().length > 0
+      ? error.message.trim()
+      : typeof error === "string" && error.trim().length > 0
+        ? error.trim()
+        : "Claude capability probe failed.";
+  const tail = stderr.trim();
+  return tail.length > 0 ? `${message} — claude stderr: ${tail}` : message;
+}
+
+/**
  * Probe account information by spawning a lightweight Claude Agent SDK
  * session and reading the initialization result.
  *
@@ -558,6 +575,7 @@ const probeClaudeCapabilities = (
   environment?: NodeJS.ProcessEnv,
 ) => {
   const abort = new AbortController();
+  const stderrBuffer = { value: "" };
   return Effect.gen(function* () {
     const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
     return yield* Effect.tryPromise(async () => {
@@ -575,7 +593,12 @@ const probeClaudeCapabilities = (
           settingSources: ["user", "project", "local"],
           allowedTools: [],
           env: claudeEnvironment,
-          stderr: () => {},
+          // Capture the subprocess stderr so a probe failure is diagnosable. The
+          // SDK only reports "process exited with code 1"; the real reason (e.g.
+          // an old `claude` rejecting `--setting-sources`) lands here.
+          stderr: (chunk: string) => {
+            stderrBuffer.value += chunk;
+          },
         },
       });
       const init = await q.initializationResult();
@@ -601,6 +624,29 @@ const probeClaudeCapabilities = (
     ),
     Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
     Effect.result,
+    // Never let a probe failure stay silent — it cost a whole debugging session
+    // once. Log the real reason (with captured stderr) before collapsing to the
+    // undefined "capabilities unavailable" signal the caller expects.
+    Effect.tap((result) => {
+      if (Result.isFailure(result)) {
+        const underlying =
+          result.failure && typeof result.failure === "object" && "error" in result.failure
+            ? (result.failure as { error: unknown }).error
+            : result.failure;
+        return Effect.logWarning(
+          `Claude capability probe failed: ${describeClaudeProbeFailure(underlying, stderrBuffer.value)}`,
+        );
+      }
+      if (Option.isNone(result.success)) {
+        return Effect.logWarning(
+          `Claude capability probe failed: ${describeClaudeProbeFailure(
+            new Error(`probe timed out after ${CAPABILITIES_PROBE_TIMEOUT_MS}ms`),
+            stderrBuffer.value,
+          )}`,
+        );
+      }
+      return Effect.void;
+    }),
     Effect.map((result) => {
       if (Result.isFailure(result)) return undefined;
       return Option.isSome(result.success) ? result.success.value : undefined;

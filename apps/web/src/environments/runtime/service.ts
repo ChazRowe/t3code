@@ -8,6 +8,7 @@ import {
   type OrchestrationShellStreamEvent,
   type ServerConfig,
   EnvironmentAuthInvalidError,
+  RuntimeItemId,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -114,6 +115,23 @@ type ThreadDetailSubscriptionEntry = {
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
 };
 
+type SubagentTreeSubscriptionEntry = {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  unsubscribe: () => void;
+  unsubscribeConnectionListener: (() => void) | null;
+  refCount: number;
+};
+
+type SubagentActivitiesSubscriptionEntry = {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly rootItemId: RuntimeItemId;
+  unsubscribe: () => void;
+  unsubscribeConnectionListener: (() => void) | null;
+  refCount: number;
+};
+
 const environmentConnections = new Map<EnvironmentId, EnvironmentConnection>();
 const isEnvironmentAuthInvalidError = Schema.is(EnvironmentAuthInvalidError);
 
@@ -136,6 +154,8 @@ const pendingSavedEnvironmentConnections = new Map<
 const environmentConnectionListeners = new Set<() => void>();
 const providerInvalidationListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
+const subagentTreeSubscriptions = new Map<string, SubagentTreeSubscriptionEntry>();
+const subagentActivitiesSubscriptions = new Map<string, SubagentActivitiesSubscriptionEntry>();
 const lastAppliedProjectionVersionByEnvironment = new Map<
   EnvironmentId,
   {
@@ -617,6 +637,208 @@ export function retainThreadDetailSubscription(
     if (entry.refCount === 0) {
       reconcileThreadDetailSubscriptionEvictionState(entry);
       evictIdleThreadDetailSubscriptionsToCapacity();
+    }
+  };
+}
+
+// Same key format as thread-detail; indexes a separate Map, so no collision.
+function getSubagentTreeSubscriptionKey(environmentId: EnvironmentId, threadId: ThreadId): string {
+  return scopedThreadKey(scopeThreadRef(environmentId, threadId));
+}
+
+function attachSubagentTreeSubscription(entry: SubagentTreeSubscriptionEntry): boolean {
+  if (entry.unsubscribeConnectionListener !== null) {
+    entry.unsubscribeConnectionListener();
+    entry.unsubscribeConnectionListener = null;
+  }
+  if (entry.unsubscribe !== NOOP) {
+    return true;
+  }
+  const connection = readEnvironmentConnection(entry.environmentId);
+  if (!connection) {
+    return false;
+  }
+  entry.unsubscribe = connection.client.orchestration.subscribeSubagentTree(
+    { threadId: entry.threadId },
+    (item) => {
+      if (item.kind === "snapshot") {
+        useStore
+          .getState()
+          .syncSubagentTreeSnapshot(entry.environmentId, entry.threadId, item.snapshot.refs);
+        return;
+      }
+      useStore.getState().applySubagentTreeDelta(entry.environmentId, item);
+    },
+  );
+  return true;
+}
+
+function watchSubagentTreeSubscriptionConnection(entry: SubagentTreeSubscriptionEntry): void {
+  if (entry.unsubscribeConnectionListener !== null) {
+    return;
+  }
+  entry.unsubscribeConnectionListener = subscribeEnvironmentConnections(() => {
+    // return value unused: no idle-TTL/lastAccessedAt to update here
+    attachSubagentTreeSubscription(entry);
+  });
+  attachSubagentTreeSubscription(entry);
+}
+
+function disposeSubagentTreeSubscriptionByKey(key: string): void {
+  const entry = subagentTreeSubscriptions.get(key);
+  if (!entry) {
+    return;
+  }
+  entry.unsubscribeConnectionListener?.();
+  entry.unsubscribeConnectionListener = null;
+  subagentTreeSubscriptions.delete(key);
+  entry.unsubscribe();
+  entry.unsubscribe = NOOP;
+}
+
+export function retainSubagentTreeSubscription(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): () => void {
+  const key = getSubagentTreeSubscriptionKey(environmentId, threadId);
+  const existing = subagentTreeSubscriptions.get(key);
+  const entry =
+    existing ??
+    ({
+      environmentId,
+      threadId,
+      unsubscribe: NOOP,
+      unsubscribeConnectionListener: null,
+      refCount: 0,
+    } satisfies SubagentTreeSubscriptionEntry);
+  if (!existing) {
+    subagentTreeSubscriptions.set(key, entry);
+  }
+  entry.refCount += 1;
+  if (!attachSubagentTreeSubscription(entry)) {
+    watchSubagentTreeSubscriptionConnection(entry);
+  }
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    if (entry.refCount === 0) {
+      disposeSubagentTreeSubscriptionByKey(key);
+    }
+  };
+}
+
+function getSubagentActivitiesSubscriptionKey(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  rootItemId: string,
+): string {
+  return `${scopedThreadKey(scopeThreadRef(environmentId, threadId))}::${rootItemId}`;
+}
+
+function attachSubagentActivitiesSubscription(entry: SubagentActivitiesSubscriptionEntry): boolean {
+  if (entry.unsubscribeConnectionListener !== null) {
+    entry.unsubscribeConnectionListener();
+    entry.unsubscribeConnectionListener = null;
+  }
+  if (entry.unsubscribe !== NOOP) {
+    return true;
+  }
+  const connection = readEnvironmentConnection(entry.environmentId);
+  if (!connection) {
+    return false;
+  }
+  entry.unsubscribe = connection.client.orchestration.subscribeSubagent(
+    { threadId: entry.threadId, rootItemId: entry.rootItemId },
+    (item) => {
+      if (item.kind === "snapshot") {
+        useStore
+          .getState()
+          .syncSubagentActivitiesSnapshot(
+            entry.environmentId,
+            entry.threadId,
+            entry.rootItemId,
+            item.snapshot.activities,
+          );
+        return;
+      }
+      if (item.event.type !== "thread.activity-appended") {
+        return;
+      }
+      useStore
+        .getState()
+        .appendSubagentActivity(
+          entry.environmentId,
+          entry.threadId,
+          entry.rootItemId,
+          item.event.payload.activity,
+        );
+    },
+  );
+  return true;
+}
+
+function watchSubagentActivitiesSubscriptionConnection(
+  entry: SubagentActivitiesSubscriptionEntry,
+): void {
+  if (entry.unsubscribeConnectionListener !== null) {
+    return;
+  }
+  entry.unsubscribeConnectionListener = subscribeEnvironmentConnections(() => {
+    // return value unused: no idle-TTL/lastAccessedAt to update here
+    attachSubagentActivitiesSubscription(entry);
+  });
+  attachSubagentActivitiesSubscription(entry);
+}
+
+function disposeSubagentActivitiesSubscriptionByKey(key: string): void {
+  const entry = subagentActivitiesSubscriptions.get(key);
+  if (!entry) {
+    return;
+  }
+  entry.unsubscribeConnectionListener?.();
+  entry.unsubscribeConnectionListener = null;
+  subagentActivitiesSubscriptions.delete(key);
+  entry.unsubscribe();
+  entry.unsubscribe = NOOP;
+}
+
+export function retainSubagentActivitiesSubscription(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  rootItemId: RuntimeItemId,
+): () => void {
+  const key = getSubagentActivitiesSubscriptionKey(environmentId, threadId, rootItemId);
+  const existing = subagentActivitiesSubscriptions.get(key);
+  const entry =
+    existing ??
+    ({
+      environmentId,
+      threadId,
+      rootItemId,
+      unsubscribe: NOOP,
+      unsubscribeConnectionListener: null,
+      refCount: 0,
+    } satisfies SubagentActivitiesSubscriptionEntry);
+  if (!existing) {
+    subagentActivitiesSubscriptions.set(key, entry);
+  }
+  entry.refCount += 1;
+  if (!attachSubagentActivitiesSubscription(entry)) {
+    watchSubagentActivitiesSubscriptionConnection(entry);
+  }
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    if (entry.refCount === 0) {
+      disposeSubagentActivitiesSubscriptionByKey(key);
     }
   };
 }
@@ -1427,6 +1649,16 @@ function registerConnection(connection: EnvironmentConnection): EnvironmentConne
     }),
   );
   attachThreadDetailSubscriptionsForEnvironment(connection.environmentId);
+  for (const entry of subagentTreeSubscriptions.values()) {
+    if (entry.environmentId === connection.environmentId) {
+      attachSubagentTreeSubscription(entry);
+    }
+  }
+  for (const entry of subagentActivitiesSubscriptions.values()) {
+    if (entry.environmentId === connection.environmentId) {
+      attachSubagentActivitiesSubscription(entry);
+    }
+  }
   emitEnvironmentConnectionRegistryChange();
   return connection;
 }
@@ -1447,6 +1679,18 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
   terminalSessionManager.invalidateEnvironment(environmentId);
   emitEnvironmentConnectionRegistryChange();
   detachThreadDetailSubscriptionsForEnvironment(environmentId);
+  for (const entry of subagentTreeSubscriptions.values()) {
+    if (entry.environmentId !== environmentId) continue;
+    entry.unsubscribe();
+    entry.unsubscribe = NOOP;
+    watchSubagentTreeSubscriptionConnection(entry);
+  }
+  for (const entry of subagentActivitiesSubscriptions.values()) {
+    if (entry.environmentId !== environmentId) continue;
+    entry.unsubscribe();
+    entry.unsubscribe = NOOP;
+    watchSubagentActivitiesSubscriptionConnection(entry);
+  }
   await connection.dispose();
   return true;
 }
@@ -2086,6 +2330,12 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   savedEnvironmentConnectionAttempts.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);
+  }
+  for (const key of Array.from(subagentTreeSubscriptions.keys())) {
+    disposeSubagentTreeSubscriptionByKey(key);
+  }
+  for (const key of Array.from(subagentActivitiesSubscriptions.keys())) {
+    disposeSubagentActivitiesSubscriptionByKey(key);
   }
   for (const unsubscribe of terminalMetadataSubscriptions.values()) {
     unsubscribe();

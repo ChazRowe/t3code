@@ -307,6 +307,8 @@ function mapThreadShell(
     hasPendingApprovals: thread.hasPendingApprovals,
     hasPendingUserInput: thread.hasPendingUserInput,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
+    hasSubagents: thread.hasSubagents,
+    liveSubagentCount: thread.liveSubagentCount,
   };
   return {
     shell,
@@ -408,7 +410,9 @@ function sidebarThreadSummariesEqual(
     left.latestUserMessageAt === right.latestUserMessageAt &&
     left.hasPendingApprovals === right.hasPendingApprovals &&
     left.hasPendingUserInput === right.hasPendingUserInput &&
-    left.hasActionableProposedPlan === right.hasActionableProposedPlan
+    left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
+    left.hasSubagents === right.hasSubagents &&
+    left.liveSubagentCount === right.liveSubagentCount
   );
 }
 

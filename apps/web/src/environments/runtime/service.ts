@@ -2104,6 +2104,16 @@ export async function reconnectSavedEnvironment(environmentId: EnvironmentId): P
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
   await disconnectSavedEnvironment(environmentId);
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
+  for (const [key, entry] of subagentTreeSubscriptions) {
+    if (entry.environmentId === environmentId) {
+      disposeSubagentTreeSubscriptionByKey(key);
+    }
+  }
+  for (const [key, entry] of subagentActivitiesSubscriptions) {
+    if (entry.environmentId === environmentId) {
+      disposeSubagentActivitiesSubscriptionByKey(key);
+    }
+  }
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);

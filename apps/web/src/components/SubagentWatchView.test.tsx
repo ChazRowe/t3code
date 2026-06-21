@@ -55,6 +55,7 @@ vi.mock("@pierre/diffs/react", () => {
 
 vi.mock("../environments/runtime/service", () => ({
   retainSubagentActivitiesSubscription: vi.fn(() => () => undefined),
+  retainSubagentTreeSubscription: vi.fn(() => () => undefined),
 }));
 
 // ---------------------------------------------------------------------------

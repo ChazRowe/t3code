@@ -7,7 +7,10 @@ import {
 } from "@t3tools/contracts";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { LegendListRef } from "@legendapp/list/react";
-import { retainSubagentActivitiesSubscription } from "../environments/runtime/service";
+import {
+  retainSubagentActivitiesSubscription,
+  retainSubagentTreeSubscription,
+} from "../environments/runtime/service";
 import { createSubagentActivitiesSelector, createSubagentRefsSelector } from "../storeSelectors";
 import { useStore } from "../store";
 import { deriveTimelineEntries, deriveWorkLogEntries } from "../session-logic";
@@ -33,6 +36,10 @@ export function SubagentWatchView({
   threadId,
   subagentRootItemId,
 }: SubagentWatchViewProps) {
+  useEffect(() => {
+    return retainSubagentTreeSubscription(environmentId, threadId);
+  }, [environmentId, threadId]);
+
   useEffect(() => {
     return retainSubagentActivitiesSubscription(
       environmentId,

@@ -287,10 +287,84 @@ const parseSubagentLabel = (
   return { type: label.trim(), description: null };
 };
 
-const subagentStatusFromKind = (kind: string): OrchestrationSubagentStatus => {
+// Resolve a subagent's display type + description from its latest activity row.
+// The `summary` column is the generic tool title ("Subagent task"), so prefer
+// the structured tool input (payload.data.input.subagent_type/description) that
+// the provider emits; fall back to parsing the "type: description" detail, and
+// only as a last resort the generic summary.
+const asRecordOrNull = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+
+const trimmedOrNull = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const deriveSubagentLabel = (
+  payload: unknown,
+  summary: string,
+): { readonly type: string; readonly description: string | null } => {
+  const input = asRecordOrNull(asRecordOrNull(asRecordOrNull(payload)?.data)?.input);
+  const structuredType = trimmedOrNull(input?.subagent_type);
+  if (structuredType !== null) {
+    return { type: structuredType, description: trimmedOrNull(input?.description) };
+  }
+
+  const detail = trimmedOrNull(asRecordOrNull(payload)?.detail);
+  if (detail !== null) {
+    const parsed = parseSubagentLabel(detail);
+    // "Agent: …" is the placeholder emitted before the tool input is known;
+    // skip it rather than surfacing "Agent" as the subagent type.
+    if (parsed.description !== null && parsed.type !== "Agent") {
+      return parsed;
+    }
+  }
+
+  return parseSubagentLabel(summary);
+};
+
+// The prompt the parent dispatched the subagent with (the Task tool input.prompt).
+const deriveSubagentPrompt = (payload: unknown): string | null => {
+  const input = asRecordOrNull(asRecordOrNull(asRecordOrNull(payload)?.data)?.input);
+  return trimmedOrNull(input?.prompt);
+};
+
+// The text the subagent returned to its parent (the tool result content), which the
+// Claude provider emits either as a plain string or an array of { type, text } blocks.
+const deriveSubagentResultText = (payload: unknown): string | null => {
+  const content = asRecordOrNull(asRecordOrNull(asRecordOrNull(payload)?.data)?.result)?.content;
+  if (typeof content === "string") return trimmedOrNull(content);
+  if (Array.isArray(content)) {
+    const text = content
+      .map((block) => {
+        const record = asRecordOrNull(block);
+        return record?.type === "text" && typeof record.text === "string" ? record.text : "";
+      })
+      .join("");
+    return trimmedOrNull(text);
+  }
+  return null;
+};
+
+const subagentStatusFromActivity = (
+  kind: string,
+  payload: unknown,
+): OrchestrationSubagentStatus => {
+  // A terminal kind is authoritative.
   if (kind === "tool.completed") return "completed";
   if (kind === "tool.failed" || kind === "tool.errored") return "failed";
   if (kind === "tool.denied") return "declined";
+  // Otherwise (tool.started/updated) the kind lags behind the real outcome — an
+  // interrupted subagent's last row stays "tool.updated" while payload.status records
+  // failed/stopped. Trust the lifecycle status so it doesn't pulse "alive" forever.
+  const status =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>).status
+      : undefined;
+  if (status === "completed") return "completed";
+  if (status === "failed" || status === "stopped") return "failed";
+  if (status === "declined") return "declined";
   return "inProgress";
 };
 
@@ -2271,7 +2345,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         if (first === undefined || latest === undefined) {
           continue;
         }
-        const { type, description } = parseSubagentLabel(latest.summary);
+        const { type, description } = deriveSubagentLabel(latest.payload, latest.summary);
         refs.push({
           threadId,
           rootItemId: RuntimeItemId.make(itemId),
@@ -2279,11 +2353,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           label: latest.summary,
           subagentType: TrimmedNonEmptyString.make(type),
           description: description === null ? null : TrimmedNonEmptyString.make(description),
-          status: subagentStatusFromKind(latest.kind),
+          status: subagentStatusFromActivity(latest.kind, latest.payload),
           iteration: latest.iteration,
           turnId: latest.turnId,
           depth: NonNegativeInt.make(depthOf(itemId)),
           childSubagentCount: NonNegativeInt.make(childCountByItem.get(itemId) ?? 0),
+          prompt: deriveSubagentPrompt(latest.payload),
+          resultText: deriveSubagentResultText(latest.payload),
           createdAt: first.createdAt,
           updatedAt: latest.createdAt,
         });

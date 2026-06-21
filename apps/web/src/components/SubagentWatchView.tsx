@@ -1,10 +1,5 @@
 import { createRef, useEffect, useMemo } from "react";
-import {
-  type EnvironmentId,
-  type MessageId,
-  RuntimeItemId,
-  type ThreadId,
-} from "@t3tools/contracts";
+import { type EnvironmentId, MessageId, RuntimeItemId, type ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime";
 import type { LegendListRef } from "@legendapp/list/react";
 import {
@@ -13,12 +8,15 @@ import {
 } from "../environments/runtime/service";
 import { createSubagentActivitiesSelector, createSubagentRefsSelector } from "../storeSelectors";
 import { useStore } from "../store";
-import { deriveTimelineEntries, deriveWorkLogEntries } from "../session-logic";
+import {
+  deriveSubagentMessages,
+  deriveTimelineEntries,
+  deriveWorkLogEntries,
+} from "../session-logic";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
-import type { TurnDiffSummary } from "../types";
+import type { ChatMessage, TurnDiffSummary } from "../types";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 
-const EMPTY_MESSAGES: never[] = [];
 const EMPTY_PLANS: never[] = [];
 const EMPTY_TURN_DIFF_SUMMARIES = new Map<MessageId, TurnDiffSummary>();
 const EMPTY_REVERT_COUNTS = new Map<MessageId, number>();
@@ -61,11 +59,55 @@ export function SubagentWatchView({
 
   const subagentRef = refs.find((r) => r.rootItemId === subagentRootItemId) ?? null;
 
-  const workLogEntries = useMemo(() => deriveWorkLogEntries(activities), [activities]);
+  // The subagent's narrative text (assistant_message / reasoning) is ingested as nested
+  // work-log activities; lift it into message bubbles so the transcript reads like a
+  // session, and keep only the tool activities in the work log.
+  const subagentMessages = useMemo(() => deriveSubagentMessages(activities), [activities]);
+  const toolActivities = useMemo(
+    () =>
+      activities.filter((activity) => {
+        const itemType =
+          activity.payload && typeof activity.payload === "object"
+            ? (activity.payload as Record<string, unknown>).itemType
+            : undefined;
+        return itemType !== "assistant_message" && itemType !== "reasoning";
+      }),
+    [activities],
+  );
+  const workLogEntries = useMemo(() => deriveWorkLogEntries(toolActivities), [toolActivities]);
+
+  // Frame the transcript with the prompt the parent dispatched (first, as a user
+  // message) and the text the subagent returned to its parent (last, as an assistant
+  // message). The returned text is skipped when it just repeats the final streamed
+  // message, to avoid showing the same text twice.
+  const timelineMessages = useMemo<ChatMessage[]>(() => {
+    const framed: ChatMessage[] = [];
+    if (subagentRef?.prompt) {
+      framed.push({
+        id: MessageId.make(`${subagentRootItemId}:prompt`),
+        role: "user",
+        text: subagentRef.prompt,
+        createdAt: subagentRef.createdAt,
+        streaming: false,
+      });
+    }
+    framed.push(...subagentMessages);
+    const resultText = subagentRef?.resultText?.trim();
+    if (resultText && resultText !== subagentMessages.at(-1)?.text.trim()) {
+      framed.push({
+        id: MessageId.make(`${subagentRootItemId}:result`),
+        role: "assistant",
+        text: resultText,
+        createdAt: subagentRef?.updatedAt ?? subagentRef?.createdAt ?? "",
+        streaming: false,
+      });
+    }
+    return framed;
+  }, [subagentRef, subagentMessages, subagentRootItemId]);
 
   const timelineEntries = useMemo(
-    () => deriveTimelineEntries(EMPTY_MESSAGES, EMPTY_PLANS, workLogEntries),
-    [workLogEntries],
+    () => deriveTimelineEntries(timelineMessages, EMPTY_PLANS, workLogEntries),
+    [timelineMessages, workLogEntries],
   );
 
   const routeThreadKey = scopedThreadKey(scopeThreadRef(environmentId, threadId));

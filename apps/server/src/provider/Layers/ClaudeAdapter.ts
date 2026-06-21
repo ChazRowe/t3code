@@ -194,6 +194,18 @@ interface ClaudeSessionContext {
   readonly inFlightTools: Map<number, ToolInFlight>;
   readonly claudeTasks: Map<string, ClaudeTaskState>;
   readonly subagentItemCounts: Map<string, number>;
+  // Classification + input for nested subagent tool_use blocks (keyed by tool_use id),
+  // remembered from the `tool_use` start so the later `tool_result` can close the SAME
+  // item type — a nested Task must complete as collab_agent_tool_call, not a generic
+  // dynamic_tool_call, or the subagent ref query never sees its terminal row.
+  readonly subagentNestedToolCalls: Map<
+    string,
+    {
+      readonly itemType: CanonicalItemType;
+      readonly toolName: string;
+      readonly input: Record<string, unknown>;
+    }
+  >;
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
@@ -2538,6 +2550,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             typeof b.input === "object" && b.input !== null
               ? (b.input as Record<string, unknown>)
               : {};
+          // Remember the classification + input so the matching tool_result can close
+          // the SAME item type (and carry the prompt) rather than a generic completion.
+          context.subagentNestedToolCalls.set(b.id, {
+            itemType,
+            toolName: b.name,
+            input: toolInput,
+          });
           const detail = summarizeToolRequest(b.name, toolInput);
           const stamp = yield* makeEventStamp();
           yield* offerRuntimeEvent({
@@ -2605,6 +2624,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (message.type === "user") {
       for (const toolResult of toolResultBlocksFromUserMessage(message)) {
         const stamp = yield* makeEventStamp();
+        // Close the result as the same kind the start opened. A nested subagent (Task)
+        // must complete as collab_agent_tool_call so the subagent ref query — which
+        // filters to collab_agent_tool_call — sees a terminal row (otherwise it pulses
+        // forever). Carry input + result so the watch view can show prompt + result,
+        // mirroring how a top-level Task completion is recorded.
+        const nestedTool = context.subagentNestedToolCalls.get(toolResult.toolUseId);
+        context.subagentNestedToolCalls.delete(toolResult.toolUseId);
+        const resultText = toolResult.text.trim();
+        const isSubagentTask = nestedTool?.itemType === "collab_agent_tool_call";
         yield* offerRuntimeEvent({
           type: "item.completed",
           eventId: stamp.eventId,
@@ -2614,11 +2642,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...turnIdPart,
           itemId: asRuntimeItemId(toolResult.toolUseId),
           payload: {
-            itemType: "dynamic_tool_call",
+            itemType: nestedTool?.itemType ?? "dynamic_tool_call",
             status: toolResult.isError ? "failed" : "completed",
-            title: "Subagent tool result",
-            ...(toolResult.text.trim().length > 0
-              ? { detail: toolResult.text.trim().slice(0, 400) }
+            title: isSubagentTask ? "Subagent task" : "Subagent tool result",
+            ...(resultText.length > 0 ? { detail: resultText.slice(0, 400) } : {}),
+            ...(isSubagentTask
+              ? {
+                  data: {
+                    toolName: nestedTool.toolName,
+                    input: nestedTool.input,
+                    result: { content: resultText },
+                  },
+                }
               : {}),
             parentItemId,
           },
@@ -3284,6 +3319,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const inFlightTools = new Map<number, ToolInFlight>();
       const claudeTasks = new Map<string, ClaudeTaskState>();
       const subagentItemCounts = new Map<string, number>();
+      const subagentNestedToolCalls = new Map<
+        string,
+        {
+          readonly itemType: CanonicalItemType;
+          readonly toolName: string;
+          readonly input: Record<string, unknown>;
+        }
+      >();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
 
@@ -3633,7 +3676,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
-        ...(serverConfig.forwardSubagentActivity ? { forwardSubagentText: true } : {}),
+        // Subagent text is always forwarded: it is nested under its parent tool call
+        // (never injected into the parent conversation), so there is no reason to disable it.
+        forwardSubagentText: true,
         canUseTool,
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
@@ -3727,6 +3772,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         inFlightTools,
         claudeTasks,
         subagentItemCounts,
+        subagentNestedToolCalls,
         turnState: undefined,
         lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,

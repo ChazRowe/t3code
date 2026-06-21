@@ -406,7 +406,6 @@ const buildAppUnderTest = (options?: {
       logWebSocketEvents: false,
       tailscaleServeEnabled: false,
       tailscaleServePort: 443,
-      forwardSubagentActivity: false,
       ...options?.config,
     };
     const layerConfig = Layer.succeed(ServerConfig, config);
@@ -5453,6 +5452,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           turnId: null,
           depth: 0,
           childSubagentCount: 0,
+          prompt: null,
+          resultText: null,
           createdAt: "2026-06-20T00:00:01.000Z",
           updatedAt: "2026-06-20T00:00:01.000Z",
         };

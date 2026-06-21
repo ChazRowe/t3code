@@ -1,4 +1,10 @@
-import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Outlet,
+  retainSearchParams,
+  useChildMatches,
+  useNavigate,
+} from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 
 import ChatView from "../components/ChatView";
@@ -15,6 +21,10 @@ function ChatThreadRouteView() {
   const threadRef = Route.useParams({
     select: (params) => resolveThreadRouteRef(params),
   });
+  // A child route (e.g. the read-only subagent watch view) takes over the pane.
+  // Without rendering its <Outlet/> here the URL would change but ChatView would
+  // stay mounted, so the view never changes.
+  const hasChildRoute = useChildMatches({ select: (matches) => matches.length > 0 });
   const bootstrapComplete = useStore(
     (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).bootstrapComplete,
   );
@@ -50,6 +60,10 @@ function ChatThreadRouteView() {
   }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
 
   if (!threadRef || !bootstrapComplete || !routeThreadExists) return null;
+
+  if (hasChildRoute) {
+    return <Outlet />;
+  }
 
   return (
     <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">

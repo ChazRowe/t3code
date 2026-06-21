@@ -3,6 +3,7 @@ import * as Arr from "effect/Array";
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
+  MessageId,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
@@ -633,6 +634,38 @@ export function hasActionableProposedPlan(
   proposedPlan: LatestProposedPlanState | Pick<ProposedPlan, "implementedAt"> | null,
 ): boolean {
   return proposedPlan !== null && proposedPlan.implementedAt === null;
+}
+
+const SUBAGENT_MESSAGE_ITEM_TYPES = new Set(["assistant_message", "reasoning"]);
+
+/**
+ * A subagent's narrative text (assistant_message / reasoning) is ingested as nested
+ * work-log activities (kind "tool.completed"), not top-level message bubbles. The
+ * read-only subagent watch view wants them rendered as a transcript, so lift them back
+ * into assistant ChatMessages; the remaining (tool) activities stay in the work log.
+ */
+export function deriveSubagentMessages(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  for (const activity of activities) {
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const itemType = typeof payload?.itemType === "string" ? payload.itemType : "";
+    if (!SUBAGENT_MESSAGE_ITEM_TYPES.has(itemType)) continue;
+    const text = typeof payload?.detail === "string" ? payload.detail.trim() : "";
+    if (text.length === 0) continue;
+    messages.push({
+      id: MessageId.make(activity.itemId ?? activity.id),
+      role: "assistant",
+      text,
+      createdAt: activity.createdAt,
+      streaming: false,
+    });
+  }
+  return messages;
 }
 
 export function deriveWorkLogEntries(

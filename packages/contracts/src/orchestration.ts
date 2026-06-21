@@ -1310,6 +1310,10 @@ export const OrchestrationSubagentRef = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   depth: NonNegativeInt,
   childSubagentCount: NonNegativeInt,
+  // The prompt the parent dispatched the subagent with, and the final text the
+  // subagent returned to its parent (the tool result) — surfaced for the watch view.
+  prompt: Schema.NullOr(Schema.String),
+  resultText: Schema.NullOr(Schema.String),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

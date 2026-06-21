@@ -12,6 +12,7 @@ import {
   deriveActivePlanState,
   derivePendingApprovals,
   derivePendingUserInputs,
+  deriveSubagentMessages,
   deriveTimelineEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
@@ -47,6 +48,46 @@ function makeActivity(overrides: {
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
+
+describe("deriveSubagentMessages", () => {
+  it("turns subagent assistant_message and reasoning activities into assistant text bubbles", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "child-tool",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.completed",
+        payload: { itemType: "command_execution", detail: "Bash: git log" },
+      }),
+      makeActivity({
+        id: "child-text",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        payload: { itemType: "assistant_message", detail: "I'll summarize the commits." },
+      }),
+      makeActivity({
+        id: "child-think",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        payload: { itemType: "reasoning", detail: "Let me read the log first." },
+      }),
+      makeActivity({
+        id: "child-empty",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "tool.completed",
+        payload: { itemType: "assistant_message", detail: "   " },
+      }),
+    ];
+
+    const messages = deriveSubagentMessages(activities);
+
+    expect(messages.map((m) => m.text)).toEqual([
+      "I'll summarize the commits.",
+      "Let me read the log first.",
+    ]);
+    expect(messages.every((m) => m.role === "assistant" && !m.streaming)).toBe(true);
+    expect(messages[0]?.createdAt).toBe("2026-02-23T00:00:02.000Z");
+  });
+});
 
 describe("derivePendingApprovals", () => {
   it("tracks open approvals and removes resolved ones", () => {

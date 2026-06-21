@@ -279,6 +279,8 @@ function makeRef(overrides: Partial<OrchestrationSubagentRef> = {}): Orchestrati
     turnId: null,
     depth: 0,
     childSubagentCount: 0,
+    prompt: null,
+    resultText: null,
     createdAt: "2026-06-20T00:00:00.000Z",
     updatedAt: "2026-06-20T00:00:00.000Z",
     ...overrides,

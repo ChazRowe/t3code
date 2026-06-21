@@ -1670,6 +1670,166 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect(
+    "getSubagentTree derives subagentType from structured tool input, not the generic summary",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_projects`;
+
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            'project-1', 'Project 1', '/tmp/project-1',
+            '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json, runtime_mode,
+            interaction_mode, branch, worktree_path, latest_turn_id,
+            latest_user_message_at, pending_approval_count, pending_user_input_count,
+            has_actionable_proposed_plan, created_at, updated_at, deleted_at
+          ) VALUES (
+            'thread-1', 'project-1', 'Thread 1',
+            '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+            NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+
+        // Real-world shape: the `summary` column holds the generic tool title
+        // ("Subagent task"); the actual subagent type + description live inside
+        // payload.data.input (as the Claude provider emits them). A started-only
+        // event has no `data` yet — the completed event carries it.
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-with-input-start', 'thread-1', 'turn-1', 'tool', 'tool.started',
+            'Subagent task started',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-a","detail":"Agent: {}"}',
+            '2026-06-20T00:00:01.000Z', 'item-a', NULL, 1
+          )
+        `;
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-with-input-done', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+            'Subagent task',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-a","detail":"Explore: map the loader","data":{"toolName":"Agent","input":{"subagent_type":"Explore","description":"map the loader","prompt":"trace the loader"},"result":{"content":[{"type":"text","text":"The loader is order-independent."}]}}}',
+            '2026-06-20T00:00:05.000Z', 'item-a', NULL, 1
+          )
+        `;
+        // A subagent whose latest row lacks structured data, but whose detail
+        // carries the "type: description" form — must fall back to parsing it.
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-detail-only', 'thread-1', 'turn-1', 'tool', 'tool.started',
+            'Subagent task started',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-b","detail":"Plan: design the fix"}',
+            '2026-06-20T00:00:06.000Z', 'item-b', NULL, 1
+          )
+        `;
+
+        const refs = yield* snapshotQuery.getSubagentTree({
+          threadId: ThreadId.make("thread-1"),
+        });
+        const byItem = new Map(refs.map((r) => [r.rootItemId, r]));
+        assert.strictEqual(refs.length, 2);
+
+        const fromInput = byItem.get(RuntimeItemId.make("item-a"));
+        assert.strictEqual(fromInput?.subagentType, "Explore");
+        assert.strictEqual(fromInput?.description, "map the loader");
+        // The dispatched prompt and the text returned to the parent are surfaced.
+        assert.strictEqual(fromInput?.prompt, "trace the loader");
+        assert.strictEqual(fromInput?.resultText, "The loader is order-independent.");
+
+        const fromDetail = byItem.get(RuntimeItemId.make("item-b"));
+        assert.strictEqual(fromDetail?.subagentType, "Plan");
+        assert.strictEqual(fromDetail?.description, "design the fix");
+        assert.strictEqual(fromDetail?.prompt, null);
+        assert.strictEqual(fromDetail?.resultText, null);
+      }),
+  );
+
+  it.effect(
+    "getSubagentTree derives status from the tool lifecycle status, not just the activity kind",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_projects`;
+
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            'project-1', 'Project 1', '/tmp/project-1',
+            '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json, runtime_mode,
+            interaction_mode, branch, worktree_path, latest_turn_id,
+            latest_user_message_at, pending_approval_count, pending_user_input_count,
+            has_actionable_proposed_plan, created_at, updated_at, deleted_at
+          ) VALUES (
+            'thread-1', 'project-1', 'Thread 1',
+            '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+            NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+
+        // When the parent is interrupted, a subagent's last row stays kind="tool.updated"
+        // but carries the real outcome in payload.status. The kind alone says inProgress;
+        // the lifecycle status says failed/stopped. (sequence is NULL on these rows.)
+        const insertUpdated = (activityId: string, itemId: string, status: string) => sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            ${activityId}, 'thread-1', 'turn-1', 'tool', 'tool.updated',
+            'Subagent task',
+            ${`{"itemType":"collab_agent_tool_call","itemId":"${itemId}","status":"${status}","data":{"toolName":"Agent","input":{"subagent_type":"Explore","description":"d"}}}`},
+            '2026-06-20T00:00:05.000Z', ${itemId}, NULL, 1
+          )
+        `;
+        yield* insertUpdated("act-failed", "item-failed", "failed");
+        yield* insertUpdated("act-stopped", "item-stopped", "stopped");
+        yield* insertUpdated("act-running", "item-running", "inProgress");
+
+        const refs = yield* snapshotQuery.getSubagentTree({
+          threadId: ThreadId.make("thread-1"),
+        });
+        const byItem = new Map(refs.map((r) => [r.rootItemId, r]));
+
+        assert.strictEqual(byItem.get(RuntimeItemId.make("item-failed"))?.status, "failed");
+        assert.strictEqual(byItem.get(RuntimeItemId.make("item-stopped"))?.status, "failed");
+        assert.strictEqual(byItem.get(RuntimeItemId.make("item-running"))?.status, "inProgress");
+      }),
+  );
+
   it.effect("getSubagentActivities returns only the direct children of a subagent root", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

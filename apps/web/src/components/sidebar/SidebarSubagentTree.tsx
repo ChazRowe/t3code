@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { ChevronRightIcon } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, OrchestrationSubagentRef, ThreadId } from "@t3tools/contracts";
 
@@ -153,6 +153,16 @@ function SubagentNode({
   allRefs: OrchestrationSubagentRef[];
 }) {
   const navigate = useNavigate();
+  // The sidebar renders in the _chat layout (an ancestor of the watch route), so
+  // useParams can't see the descendant route's subagentRootItemId — read it off the
+  // URL instead so the open subagent highlights as selected.
+  const activeSubagentRootItemId = useLocation({
+    select: (location) => {
+      const encoded = location.pathname.match(/\/subagent\/([^/]+)\/?$/)?.[1];
+      return encoded ? decodeURIComponent(encoded) : undefined;
+    },
+  });
+  const isActive = activeSubagentRootItemId === subagentRef.rootItemId;
   const key = `${threadKey}::sa::${subagentRef.rootItemId}`;
   const expanded = useUiStateStore((state) => state.subagentExpandedById[key] ?? false);
   const toggleSubagent = useUiStateStore((state) => state.toggleSubagent);
@@ -168,8 +178,13 @@ function SubagentNode({
       <SidebarMenuSubButton
         render={subagentRowRender}
         size="sm"
+        isActive={isActive}
         data-testid={`subagent-row-${subagentRef.rootItemId}`}
-        className="cursor-pointer"
+        className={
+          isActive
+            ? "cursor-pointer bg-primary/22 font-medium text-foreground hover:bg-primary/26 hover:text-foreground dark:bg-primary/30 dark:hover:bg-primary/36"
+            : "cursor-pointer"
+        }
         onClick={() =>
           void navigate({
             to: "/$environmentId/$threadId/subagent/$subagentRootItemId",

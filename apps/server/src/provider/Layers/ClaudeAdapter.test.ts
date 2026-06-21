@@ -1316,88 +1316,188 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("drops subagent partial stream text instead of leaking it into the main assistant message", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
+  it.effect(
+    "closes a nested subagent's Task tool result as a collaboration agent completion with its prompt and result",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
-        Stream.runCollect,
-        Effect.forkChild,
-      );
+        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
 
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
 
-      yield* adapter.sendTurn({
-        threadId: session.threadId,
-        input: "delegate this",
-        attachments: [],
-      });
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "delegate this",
+          attachments: [],
+        });
 
-      // A subagent streams partial assistant text (parent_tool_use_id set). This
-      // must NOT become a top-level assistant content delta — it would render as a
-      // message bubble outside the subagent card and get overwritten by the parent.
-      harness.query.emit({
-        type: "stream_event",
-        session_id: "sdk-session-subagent",
-        uuid: "stream-subagent-1",
-        parent_tool_use_id: "tool-parent-1",
-        event: {
-          type: "content_block_delta",
-          index: 0,
-          delta: {
-            type: "text_delta",
-            text: "SUBAGENT-LEAK-TEXT",
+        // A depth-1 subagent (parent_tool_use_id set) spawns a NESTED subagent via the
+        // Task tool. Its lifecycle must mirror a top-level Task: the result closes the
+        // same collab_agent_tool_call item so the subagent ref query (which filters to
+        // collab_agent_tool_call) sees a terminal row instead of pulsing forever.
+        harness.query.emit({
+          type: "assistant",
+          session_id: "sdk-session-nested",
+          uuid: "assistant-nested-1",
+          parent_tool_use_id: "tool-parent-1",
+          message: {
+            id: "assistant-message-nested-1",
+            content: [
+              {
+                type: "tool_use",
+                id: "nested-task-1",
+                name: "Task",
+                input: {
+                  description: "Nested count",
+                  prompt: "Count files per directory",
+                  subagent_type: "general-purpose",
+                },
+              },
+            ],
           },
-        },
-      } as unknown as SDKMessage);
+        } as unknown as SDKMessage);
 
-      // The parent agent streams its own text (parent_tool_use_id null) — this is
-      // the only legitimate top-level content delta.
-      harness.query.emit({
-        type: "stream_event",
-        session_id: "sdk-session-subagent",
-        uuid: "stream-main-1",
-        parent_tool_use_id: null,
-        event: {
-          type: "content_block_delta",
-          index: 0,
-          delta: {
-            type: "text_delta",
-            text: "MAIN-TEXT",
+        harness.query.emit({
+          type: "user",
+          session_id: "sdk-session-nested",
+          uuid: "user-nested-1",
+          parent_tool_use_id: "tool-parent-1",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "nested-task-1",
+                content: "NESTED-RESULT-TEXT",
+                is_error: false,
+              },
+            ],
           },
-        },
-      } as unknown as SDKMessage);
+        } as unknown as SDKMessage);
 
-      harness.query.emit({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        errors: [],
-        session_id: "sdk-session-subagent",
-        uuid: "result-subagent",
-      } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: "sdk-session-nested",
+          uuid: "result-nested-1",
+        } as unknown as SDKMessage);
 
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
-      const contentDeltas = runtimeEvents.filter((event) => event.type === "content.delta");
-      assert.equal(
-        contentDeltas.length,
-        1,
-        "subagent partial stream text must not leak as a second top-level content delta",
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        const nestedCompleted = runtimeEvents.find(
+          (event) => event.type === "item.completed" && String(event.itemId) === "nested-task-1",
+        );
+        assert.ok(nestedCompleted, "nested subagent Task should emit an item.completed");
+        if (nestedCompleted?.type === "item.completed") {
+          assert.equal(nestedCompleted.payload.itemType, "collab_agent_tool_call");
+          assert.equal(nestedCompleted.payload.status, "completed");
+          const data = nestedCompleted.payload.data as
+            | { input?: { prompt?: unknown }; result?: { content?: unknown } }
+            | undefined;
+          assert.equal(data?.input?.prompt, "Count files per directory");
+          assert.equal(data?.result?.content, "NESTED-RESULT-TEXT");
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
       );
-      const [delta] = contentDeltas;
-      if (delta?.type === "content.delta") {
-        assert.equal(delta.payload.delta, "MAIN-TEXT");
-      }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
+    },
+  );
+
+  it.effect(
+    "drops subagent partial stream text instead of leaking it into the main assistant message",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "delegate this",
+          attachments: [],
+        });
+
+        // A subagent streams partial assistant text (parent_tool_use_id set). This
+        // must NOT become a top-level assistant content delta — it would render as a
+        // message bubble outside the subagent card and get overwritten by the parent.
+        harness.query.emit({
+          type: "stream_event",
+          session_id: "sdk-session-subagent",
+          uuid: "stream-subagent-1",
+          parent_tool_use_id: "tool-parent-1",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: {
+              type: "text_delta",
+              text: "SUBAGENT-LEAK-TEXT",
+            },
+          },
+        } as unknown as SDKMessage);
+
+        // The parent agent streams its own text (parent_tool_use_id null) — this is
+        // the only legitimate top-level content delta.
+        harness.query.emit({
+          type: "stream_event",
+          session_id: "sdk-session-subagent",
+          uuid: "stream-main-1",
+          parent_tool_use_id: null,
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: {
+              type: "text_delta",
+              text: "MAIN-TEXT",
+            },
+          },
+        } as unknown as SDKMessage);
+
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: "sdk-session-subagent",
+          uuid: "result-subagent",
+        } as unknown as SDKMessage);
+
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        const contentDeltas = runtimeEvents.filter((event) => event.type === "content.delta");
+        assert.equal(
+          contentDeltas.length,
+          1,
+          "subagent partial stream text must not leak as a second top-level content delta",
+        );
+        const [delta] = contentDeltas;
+        if (delta?.type === "content.delta") {
+          assert.equal(delta.payload.delta, "MAIN-TEXT");
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("treats user-aborted Claude results as interrupted without a runtime error", () => {
     const harness = makeHarness();
@@ -1801,8 +1901,7 @@ describe("ClaudeAdapterLive", () => {
       // total as processed tokens (with its tool/duration stats).
       const subagentUsage = usageEvents.find(
         (event) =>
-          event.type === "thread.token-usage.updated" &&
-          event.payload.usage.toolUses !== undefined,
+          event.type === "thread.token-usage.updated" && event.payload.usage.toolUses !== undefined,
       );
       assert.equal(subagentUsage?.type, "thread.token-usage.updated");
       if (subagentUsage?.type === "thread.token-usage.updated") {
@@ -3892,8 +3991,8 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("passes forwardSubagentText to query when the flag is enabled", () => {
-    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+  it.effect("always passes forwardSubagentText to query", () => {
+    const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
@@ -3910,26 +4009,8 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("omits forwardSubagentText when the flag is disabled", () => {
-    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: false } });
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "approval-required",
-      });
-
-      const createInput = harness.getLastCreateQueryInput();
-      assert.equal(createInput?.options.forwardSubagentText, undefined);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
-
   it.effect("emits nested work-log items for forwarded subagent tool calls", () => {
-    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
@@ -4001,7 +4082,7 @@ describe("ClaudeAdapterLive", () => {
   });
 
   it.effect("caps nested subagent items per parent at MAX_SUBAGENT_ITEMS_PER_PARENT", () => {
-    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
@@ -4032,7 +4113,9 @@ describe("ClaudeAdapterLive", () => {
           message: {
             id: `m-${i}`,
             role: "assistant",
-            content: [{ type: "tool_use", id: `inner-${i}`, name: "Bash", input: { command: "ls" } }],
+            content: [
+              { type: "tool_use", id: `inner-${i}`, name: "Bash", input: { command: "ls" } },
+            ],
           },
         } as unknown as SDKMessage);
       }
@@ -4046,7 +4129,9 @@ describe("ClaudeAdapterLive", () => {
         message: {
           id: "m-other",
           role: "assistant",
-          content: [{ type: "tool_use", id: "inner-other", name: "Bash", input: { command: "pwd" } }],
+          content: [
+            { type: "tool_use", id: "inner-other", name: "Bash", input: { command: "pwd" } },
+          ],
         },
       } as unknown as SDKMessage);
 
@@ -4085,7 +4170,7 @@ describe("ClaudeAdapterLive", () => {
   });
 
   it.effect("does not push subagent messages into the main turn or emit token-usage events", () => {
-    const harness = makeHarness({ serverConfigOverrides: { forwardSubagentActivity: true } });
+    const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
 
@@ -4133,9 +4218,7 @@ describe("ClaudeAdapterLive", () => {
       const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
 
       // The subagent text message must NOT emit thread.token-usage.updated.
-      const tokenUsageEvents = runtimeEvents.filter(
-        (e) => e.type === "thread.token-usage.updated",
-      );
+      const tokenUsageEvents = runtimeEvents.filter((e) => e.type === "thread.token-usage.updated");
       assert.equal(tokenUsageEvents.length, 0);
 
       // The subagent text message must NOT produce item.started events

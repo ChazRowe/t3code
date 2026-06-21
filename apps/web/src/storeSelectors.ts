@@ -1,5 +1,17 @@
-import { type ScopedProjectRef, type ScopedThreadRef, type ThreadId } from "@t3tools/contracts";
-import { selectEnvironmentState, type AppState, type EnvironmentState } from "./store";
+import {
+  type EnvironmentId,
+  type OrchestrationSubagentRef,
+  type OrchestrationThreadActivity,
+  type ScopedProjectRef,
+  type ScopedThreadRef,
+  type ThreadId,
+} from "@t3tools/contracts";
+import {
+  selectEnvironmentState,
+  subagentActivitiesKey,
+  type AppState,
+  type EnvironmentState,
+} from "./store";
 import { type Project, type Thread } from "./types";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
 
@@ -65,4 +77,27 @@ export function createThreadSelectorAcrossEnvironments(
     }
     return undefined;
   });
+}
+
+const EMPTY_SUBAGENT_REFS: OrchestrationSubagentRef[] = [];
+const EMPTY_SUBAGENT_ACTIVITIES: OrchestrationThreadActivity[] = [];
+
+export function createSubagentRefsSelector(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+): (state: AppState) => OrchestrationSubagentRef[] {
+  return (state) =>
+    selectEnvironmentState(state, environmentId).subagentRefsByThreadId[threadId] ??
+    EMPTY_SUBAGENT_REFS;
+}
+
+export function createSubagentActivitiesSelector(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  rootItemId: string,
+): (state: AppState) => OrchestrationThreadActivity[] {
+  const key = subagentActivitiesKey(threadId, rootItemId);
+  return (state) =>
+    selectEnvironmentState(state, environmentId).subagentActivitiesByKey[key] ??
+    EMPTY_SUBAGENT_ACTIVITIES;
 }

@@ -485,6 +485,8 @@ function setStoreThreads(threads: ReadonlyArray<ReturnType<typeof makeThread>>) 
       ]),
     ),
     sidebarThreadSummaryById: {},
+    subagentRefsByThreadId: {},
+    subagentActivitiesByKey: {},
     bootstrapComplete: true,
   };
   useStore.setState({

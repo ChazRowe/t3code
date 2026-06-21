@@ -7,11 +7,14 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  RuntimeItemId,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
+  type OrchestrationSubagentRef,
+  type OrchestrationThreadActivity,
   type UnattendedRunState,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -29,9 +32,14 @@ import {
   setThreadBranch,
   selectThreadsAcrossEnvironments,
   syncServerShellSnapshot,
+  syncSubagentTreeSnapshot,
+  applySubagentTreeDelta,
+  syncSubagentActivitiesSnapshot,
+  appendSubagentActivity,
   type AppState,
   type EnvironmentState,
 } from "./store";
+import { createSubagentRefsSelector, createSubagentActivitiesSelector } from "./storeSelectors";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
@@ -182,6 +190,8 @@ function makeState(thread: Thread): AppState {
       ) as EnvironmentState["turnDiffSummaryByThreadId"][ThreadId],
     },
     sidebarThreadSummaryById: {},
+    subagentRefsByThreadId: {},
+    subagentActivitiesByKey: {},
     bootstrapComplete: true,
   };
   return withActiveEnvironmentState(environmentState, {
@@ -207,6 +217,8 @@ function makeEmptyState(overrides: Partial<AppState & EnvironmentState> = {}): A
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
     sidebarThreadSummaryById: {},
+    subagentRefsByThreadId: {},
+    subagentActivitiesByKey: {},
     bootstrapComplete: true,
   };
   return withActiveEnvironmentState(environmentState, overrides);
@@ -1263,5 +1275,104 @@ describe("syncServerShellSnapshot subagent fields", () => {
     );
     expect(summary2?.hasSubagents).toBe(true);
     expect(summary2?.liveSubagentCount).toBe(3);
+  });
+});
+
+function makeRef(overrides: Partial<OrchestrationSubagentRef> = {}): OrchestrationSubagentRef {
+  return {
+    threadId: ThreadId.make("thread-1"),
+    rootItemId: RuntimeItemId.make("root-1"),
+    parentItemId: null,
+    label: "code-reviewer: review the diff",
+    subagentType: "code-reviewer",
+    description: "review the diff",
+    status: "inProgress",
+    iteration: null,
+    turnId: null,
+    depth: 0,
+    childSubagentCount: 0,
+    createdAt: "2026-06-20T00:00:00.000Z",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeSubagentActivity(
+  overrides: Partial<OrchestrationThreadActivity> = {},
+): OrchestrationThreadActivity {
+  return {
+    id: EventId.make("act-1"),
+    tone: "info",
+    kind: "tool.completed",
+    summary: "Subagent message",
+    payload: { itemType: "assistant_message", status: "completed" },
+    turnId: null,
+    createdAt: "2026-06-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("subagent tree reducers", () => {
+  const environmentId = localEnvironmentId;
+  const threadId = ThreadId.make("thread-1");
+
+  it("replaces the ref array on snapshot", () => {
+    const refA = makeRef({ rootItemId: RuntimeItemId.make("root-a") });
+    const refB = makeRef({ rootItemId: RuntimeItemId.make("root-b") });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [refA]);
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)).toEqual([refA]);
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [refB]);
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)).toEqual([refB]);
+  });
+
+  it("upserts a ref on ref-changed delta", () => {
+    const ref = makeRef({ rootItemId: RuntimeItemId.make("root-a"), status: "inProgress" });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [ref]);
+    state = applySubagentTreeDelta(state, environmentId, {
+      kind: "ref-changed",
+      ref: { ...ref, status: "completed" },
+    });
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)[0]?.status).toBe("completed");
+    state = applySubagentTreeDelta(state, environmentId, {
+      kind: "ref-changed",
+      ref: makeRef({ rootItemId: RuntimeItemId.make("root-b") }),
+    });
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)).toHaveLength(2);
+  });
+
+  it("removes a ref on ref-removed delta", () => {
+    const refA = makeRef({ rootItemId: RuntimeItemId.make("root-a") });
+    const refB = makeRef({ rootItemId: RuntimeItemId.make("root-b") });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [refA, refB]);
+    state = applySubagentTreeDelta(state, environmentId, {
+      kind: "ref-removed",
+      threadId,
+      rootItemId: RuntimeItemId.make("root-a"),
+    });
+    const refs = createSubagentRefsSelector(environmentId, threadId)(state);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.rootItemId).toBe(RuntimeItemId.make("root-b"));
+  });
+
+  it("replaces activities on snapshot and appends on event", () => {
+    const rootItemId = "root-a";
+    const first = makeSubagentActivity({ id: EventId.make("act-1") });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentActivitiesSnapshot(state, environmentId, threadId, rootItemId, [first]);
+    expect(createSubagentActivitiesSelector(environmentId, threadId, rootItemId)(state)).toEqual([
+      first,
+    ]);
+    const second = makeSubagentActivity({ id: EventId.make("act-2") });
+    state = appendSubagentActivity(state, environmentId, threadId, rootItemId, second);
+    expect(
+      createSubagentActivitiesSelector(environmentId, threadId, rootItemId)(state),
+    ).toHaveLength(2);
+    state = appendSubagentActivity(state, environmentId, threadId, rootItemId, second);
+    expect(
+      createSubagentActivitiesSelector(environmentId, threadId, rootItemId)(state),
+    ).toHaveLength(2);
   });
 });

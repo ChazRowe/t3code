@@ -145,6 +145,8 @@ function makeState(thread: Thread): AppState {
       ) as EnvironmentState["turnDiffSummaryByThreadId"][ThreadId],
     },
     sidebarThreadSummaryById: {},
+    subagentRefsByThreadId: {},
+    subagentActivitiesByKey: {},
     bootstrapComplete: true,
   };
   return withActiveEnvironmentState(environmentState);

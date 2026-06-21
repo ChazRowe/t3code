@@ -11,6 +11,8 @@ import type {
   OrchestrationShellStreamEvent,
   OrchestrationSession,
   OrchestrationSessionStatus,
+  OrchestrationSubagentRef,
+  OrchestrationSubagentTreeStreamItem,
   OrchestrationThread,
   OrchestrationThreadShell,
   OrchestrationThreadActivity,
@@ -93,6 +95,13 @@ export interface EnvironmentState {
   // ---------------------------------------------------------------------------
   sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary>;
 
+  // Subagent tree + transcript — written ONLY by the subagent subscriptions
+  // (service.ts retainSubagentTreeSubscription / retainSubagentActivitiesSubscription).
+  // After Phase 1 these are NOT present in the parent thread snapshot/stream;
+  // they arrive exclusively via subscribeSubagentTree / subscribeSubagent.
+  subagentRefsByThreadId: Record<ThreadId, OrchestrationSubagentRef[]>;
+  subagentActivitiesByKey: Record<string, OrchestrationThreadActivity[]>;
+
   bootstrapComplete: boolean;
 }
 
@@ -118,6 +127,8 @@ const initialEnvironmentState: EnvironmentState = {
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
   sidebarThreadSummaryById: {},
+  subagentRefsByThreadId: {},
+  subagentActivitiesByKey: {},
   bootstrapComplete: false,
 };
 
@@ -1134,6 +1145,7 @@ function syncEnvironmentShellSnapshot(
       state.turnDiffSummaryByThreadId,
       nextThreadIds,
     ),
+    subagentRefsByThreadId: retainThreadScopedRecord(state.subagentRefsByThreadId, nextThreadIds),
     bootstrapComplete: true,
   };
 
@@ -1178,6 +1190,102 @@ export function syncServerThreadDetail(
     environmentId,
     writeThreadState(environmentState, mapThread(thread, environmentId), previousThread),
   );
+}
+
+export function subagentActivitiesKey(threadId: ThreadId, rootItemId: string): string {
+  return `${threadId}::${rootItemId}`;
+}
+
+export function syncSubagentTreeSnapshot(
+  state: AppState,
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  refs: ReadonlyArray<OrchestrationSubagentRef>,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  return commitEnvironmentState(state, environmentId, {
+    ...environmentState,
+    subagentRefsByThreadId: {
+      ...environmentState.subagentRefsByThreadId,
+      [threadId]: [...refs],
+    },
+  });
+}
+
+export function applySubagentTreeDelta(
+  state: AppState,
+  environmentId: EnvironmentId,
+  delta: Exclude<OrchestrationSubagentTreeStreamItem, { kind: "snapshot" }>,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  if (delta.kind === "ref-removed") {
+    const current = environmentState.subagentRefsByThreadId[delta.threadId];
+    if (!current) {
+      return state;
+    }
+    const next = current.filter((ref) => ref.rootItemId !== delta.rootItemId);
+    if (next.length === current.length) {
+      return state;
+    }
+    return commitEnvironmentState(state, environmentId, {
+      ...environmentState,
+      subagentRefsByThreadId: {
+        ...environmentState.subagentRefsByThreadId,
+        [delta.threadId]: next,
+      },
+    });
+  }
+  const ref = delta.ref;
+  const current = environmentState.subagentRefsByThreadId[ref.threadId] ?? [];
+  const index = current.findIndex((existing) => existing.rootItemId === ref.rootItemId);
+  const next = index >= 0 ? current.map((r, i) => (i === index ? ref : r)) : [...current, ref];
+  return commitEnvironmentState(state, environmentId, {
+    ...environmentState,
+    subagentRefsByThreadId: {
+      ...environmentState.subagentRefsByThreadId,
+      [ref.threadId]: next,
+    },
+  });
+}
+
+export function syncSubagentActivitiesSnapshot(
+  state: AppState,
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  rootItemId: string,
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const key = subagentActivitiesKey(threadId, rootItemId);
+  return commitEnvironmentState(state, environmentId, {
+    ...environmentState,
+    subagentActivitiesByKey: {
+      ...environmentState.subagentActivitiesByKey,
+      [key]: [...activities],
+    },
+  });
+}
+
+export function appendSubagentActivity(
+  state: AppState,
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  rootItemId: string,
+  activity: OrchestrationThreadActivity,
+): AppState {
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const key = subagentActivitiesKey(threadId, rootItemId);
+  const current = environmentState.subagentActivitiesByKey[key] ?? [];
+  if (current.some((existing) => existing.id === activity.id)) {
+    return state;
+  }
+  return commitEnvironmentState(state, environmentId, {
+    ...environmentState,
+    subagentActivitiesByKey: {
+      ...environmentState.subagentActivitiesByKey,
+      [key]: [...current, activity],
+    },
+  });
 }
 
 function applyEnvironmentOrchestrationEvent(
@@ -2059,6 +2167,27 @@ interface AppStore extends AppState {
     branch: string | null,
     worktreePath: string | null,
   ) => void;
+  syncSubagentTreeSnapshot: (
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    refs: ReadonlyArray<OrchestrationSubagentRef>,
+  ) => void;
+  applySubagentTreeDelta: (
+    environmentId: EnvironmentId,
+    delta: Exclude<OrchestrationSubagentTreeStreamItem, { kind: "snapshot" }>,
+  ) => void;
+  syncSubagentActivitiesSnapshot: (
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    rootItemId: string,
+    activities: ReadonlyArray<OrchestrationThreadActivity>,
+  ) => void;
+  appendSubagentActivity: (
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    rootItemId: string,
+    activity: OrchestrationThreadActivity,
+  ) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -2080,4 +2209,14 @@ export const useStore = create<AppStore>((set) => ({
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadRef, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadRef, branch, worktreePath)),
+  syncSubagentTreeSnapshot: (environmentId, threadId, refs) =>
+    set((state) => syncSubagentTreeSnapshot(state, environmentId, threadId, refs)),
+  applySubagentTreeDelta: (environmentId, delta) =>
+    set((state) => applySubagentTreeDelta(state, environmentId, delta)),
+  syncSubagentActivitiesSnapshot: (environmentId, threadId, rootItemId, activities) =>
+    set((state) =>
+      syncSubagentActivitiesSnapshot(state, environmentId, threadId, rootItemId, activities),
+    ),
+  appendSubagentActivity: (environmentId, threadId, rootItemId, activity) =>
+    set((state) => appendSubagentActivity(state, environmentId, threadId, rootItemId, activity)),
 }));

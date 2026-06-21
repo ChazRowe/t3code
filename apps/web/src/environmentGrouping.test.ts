@@ -73,6 +73,8 @@ function makeSidebarThreadSummary(
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
+    hasSubagents: false,
+    liveSubagentCount: 0,
     ...overrides,
   };
 }
@@ -95,6 +97,8 @@ function makeEmptyEnvironmentState(): EnvironmentState {
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
     sidebarThreadSummaryById: {},
+    subagentRefsByThreadId: {},
+    subagentActivitiesByKey: {},
     bootstrapComplete: true,
   };
 }

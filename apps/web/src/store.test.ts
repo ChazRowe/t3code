@@ -7,10 +7,14 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  RuntimeItemId,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
+  type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
+  type OrchestrationSubagentRef,
+  type OrchestrationThreadActivity,
   type UnattendedRunState,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -22,13 +26,20 @@ import {
   removeEnvironmentState,
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadSummaryByRef,
   selectThreadByRef,
   selectThreadExistsByRef,
   setThreadBranch,
   selectThreadsAcrossEnvironments,
+  syncServerShellSnapshot,
+  syncSubagentTreeSnapshot,
+  applySubagentTreeDelta,
+  syncSubagentActivitiesSnapshot,
+  appendSubagentActivity,
   type AppState,
   type EnvironmentState,
 } from "./store";
+import { createSubagentRefsSelector, createSubagentActivitiesSelector } from "./storeSelectors";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
@@ -179,6 +190,8 @@ function makeState(thread: Thread): AppState {
       ) as EnvironmentState["turnDiffSummaryByThreadId"][ThreadId],
     },
     sidebarThreadSummaryById: {},
+    subagentRefsByThreadId: {},
+    subagentActivitiesByKey: {},
     bootstrapComplete: true,
   };
   return withActiveEnvironmentState(environmentState, {
@@ -204,6 +217,8 @@ function makeEmptyState(overrides: Partial<AppState & EnvironmentState> = {}): A
     turnDiffIdsByThreadId: {},
     turnDiffSummaryByThreadId: {},
     sidebarThreadSummaryById: {},
+    subagentRefsByThreadId: {},
+    subagentActivitiesByKey: {},
     bootstrapComplete: true,
   };
   return withActiveEnvironmentState(environmentState, overrides);
@@ -1175,5 +1190,189 @@ describe("unattendedRun preservation across live shell upserts", () => {
     const finalUnattendedRun =
       localEnvironmentStateOf(state).threadShellById[thread.id]?.unattendedRun;
     expect(finalUnattendedRun?.status).toBe("completed");
+  });
+});
+
+describe("syncServerShellSnapshot subagent fields", () => {
+  function makeSubagentSnapshot(
+    threadId: ThreadId,
+    hasSubagents: boolean,
+    liveSubagentCount: number,
+    snapshotSequence = 1,
+  ): OrchestrationShellSnapshot {
+    return {
+      snapshotSequence,
+      updatedAt: "2026-06-20T00:00:00.000Z",
+      projects: [],
+      threads: [
+        {
+          id: threadId,
+          projectId: ProjectId.make("project-1"),
+          title: "Has subagents",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claude-code"),
+            model: DEFAULT_MODEL,
+          },
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          session: null,
+          latestTurn: null,
+          createdAt: "2026-06-20T00:00:00.000Z",
+          archivedAt: null,
+          updatedAt: "2026-06-20T00:00:00.000Z",
+          branch: null,
+          worktreePath: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+          hasSubagents,
+          liveSubagentCount,
+        } as unknown as OrchestrationShellSnapshot["threads"][number],
+      ],
+    } as unknown as OrchestrationShellSnapshot;
+  }
+
+  it("carries hasSubagents and liveSubagentCount onto the sidebar summary", () => {
+    const environmentId = localEnvironmentId;
+    const threadId = ThreadId.make("thread-subagents");
+    const snapshot = makeSubagentSnapshot(threadId, true, 2);
+
+    const state = syncServerShellSnapshot(
+      { activeEnvironmentId: environmentId, environmentStateById: {} },
+      snapshot,
+      environmentId,
+    );
+    const summary = selectSidebarThreadSummaryByRef(state, scopeThreadRef(environmentId, threadId));
+    expect(summary?.hasSubagents).toBe(true);
+    expect(summary?.liveSubagentCount).toBe(2);
+  });
+
+  it("equality guard does not swallow subagent field changes", () => {
+    const environmentId = localEnvironmentId;
+    const threadId = ThreadId.make("thread-subagents-eq");
+
+    // Apply initial snapshot: no subagents
+    const initialSnapshot = makeSubagentSnapshot(threadId, false, 0);
+    const state1 = syncServerShellSnapshot(
+      { activeEnvironmentId: environmentId, environmentStateById: {} },
+      initialSnapshot,
+      environmentId,
+    );
+    const summary1 = selectSidebarThreadSummaryByRef(
+      state1,
+      scopeThreadRef(environmentId, threadId),
+    );
+    expect(summary1?.hasSubagents).toBe(false);
+    expect(summary1?.liveSubagentCount).toBe(0);
+
+    // Apply second snapshot: only liveSubagentCount changed (all other fields identical)
+    const updatedSnapshot = makeSubagentSnapshot(threadId, true, 3, 2);
+    const state2 = syncServerShellSnapshot(state1, updatedSnapshot, environmentId);
+    const summary2 = selectSidebarThreadSummaryByRef(
+      state2,
+      scopeThreadRef(environmentId, threadId),
+    );
+    expect(summary2?.hasSubagents).toBe(true);
+    expect(summary2?.liveSubagentCount).toBe(3);
+  });
+});
+
+function makeRef(overrides: Partial<OrchestrationSubagentRef> = {}): OrchestrationSubagentRef {
+  return {
+    threadId: ThreadId.make("thread-1"),
+    rootItemId: RuntimeItemId.make("root-1"),
+    parentItemId: null,
+    label: "code-reviewer: review the diff",
+    subagentType: "code-reviewer",
+    description: "review the diff",
+    status: "inProgress",
+    iteration: null,
+    turnId: null,
+    depth: 0,
+    childSubagentCount: 0,
+    createdAt: "2026-06-20T00:00:00.000Z",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeSubagentActivity(
+  overrides: Partial<OrchestrationThreadActivity> = {},
+): OrchestrationThreadActivity {
+  return {
+    id: EventId.make("act-1"),
+    tone: "info",
+    kind: "tool.completed",
+    summary: "Subagent message",
+    payload: { itemType: "assistant_message", status: "completed" },
+    turnId: null,
+    createdAt: "2026-06-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("subagent tree reducers", () => {
+  const environmentId = localEnvironmentId;
+  const threadId = ThreadId.make("thread-1");
+
+  it("replaces the ref array on snapshot", () => {
+    const refA = makeRef({ rootItemId: RuntimeItemId.make("root-a") });
+    const refB = makeRef({ rootItemId: RuntimeItemId.make("root-b") });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [refA]);
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)).toEqual([refA]);
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [refB]);
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)).toEqual([refB]);
+  });
+
+  it("upserts a ref on ref-changed delta", () => {
+    const ref = makeRef({ rootItemId: RuntimeItemId.make("root-a"), status: "inProgress" });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [ref]);
+    state = applySubagentTreeDelta(state, environmentId, {
+      kind: "ref-changed",
+      ref: { ...ref, status: "completed" },
+    });
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)[0]?.status).toBe("completed");
+    state = applySubagentTreeDelta(state, environmentId, {
+      kind: "ref-changed",
+      ref: makeRef({ rootItemId: RuntimeItemId.make("root-b") }),
+    });
+    expect(createSubagentRefsSelector(environmentId, threadId)(state)).toHaveLength(2);
+  });
+
+  it("removes a ref on ref-removed delta", () => {
+    const refA = makeRef({ rootItemId: RuntimeItemId.make("root-a") });
+    const refB = makeRef({ rootItemId: RuntimeItemId.make("root-b") });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentTreeSnapshot(state, environmentId, threadId, [refA, refB]);
+    state = applySubagentTreeDelta(state, environmentId, {
+      kind: "ref-removed",
+      threadId,
+      rootItemId: RuntimeItemId.make("root-a"),
+    });
+    const refs = createSubagentRefsSelector(environmentId, threadId)(state);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.rootItemId).toBe(RuntimeItemId.make("root-b"));
+  });
+
+  it("replaces activities on snapshot and appends on event", () => {
+    const rootItemId = "root-a";
+    const first = makeSubagentActivity({ id: EventId.make("act-1") });
+    let state: AppState = { activeEnvironmentId: environmentId, environmentStateById: {} };
+    state = syncSubagentActivitiesSnapshot(state, environmentId, threadId, rootItemId, [first]);
+    expect(createSubagentActivitiesSelector(environmentId, threadId, rootItemId)(state)).toEqual([
+      first,
+    ]);
+    const second = makeSubagentActivity({ id: EventId.make("act-2") });
+    state = appendSubagentActivity(state, environmentId, threadId, rootItemId, second);
+    expect(
+      createSubagentActivitiesSelector(environmentId, threadId, rootItemId)(state),
+    ).toHaveLength(2);
+    state = appendSubagentActivity(state, environmentId, threadId, rootItemId, second);
+    expect(
+      createSubagentActivitiesSelector(environmentId, threadId, rootItemId)(state),
+    ).toHaveLength(2);
   });
 });

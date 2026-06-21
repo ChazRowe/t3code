@@ -3,6 +3,7 @@ import {
   type MessageId,
   type ScopedThreadRef,
   type ServerProviderSkill,
+  type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime";
@@ -59,6 +60,7 @@ import {
   XIcon,
   ZapIcon,
 } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -724,10 +726,7 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
  * filter so their live children can nest under them while the subagent runs.
  */
 function isInProgressSubagentParent(entry: WorkLogEntry): boolean {
-  return (
-    entry.itemType === "collab_agent_tool_call" &&
-    entry.toolLifecycleStatus === "inProgress"
-  );
+  return entry.itemType === "collab_agent_tool_call" && entry.toolLifecycleStatus === "inProgress";
 }
 
 /**
@@ -738,85 +737,68 @@ function isInProgressSubagentParent(entry: WorkLogEntry): boolean {
 function parseSubagentLabel(label: string): { type: string; description: string | null } {
   const colonIdx = label.indexOf(": ");
   if (colonIdx > 0) {
-    return { type: label.slice(0, colonIdx).trim(), description: label.slice(colonIdx + 2).trim() || null };
+    return {
+      type: label.slice(0, colonIdx).trim(),
+      description: label.slice(colonIdx + 2).trim() || null,
+    };
   }
   return { type: label.trim(), description: null };
 }
 
 /**
- * Renders a subagent parent entry and its children as a contained card with a
- * header showing the subagent type and a running indicator while in progress.
+ * Compact navigable chip for a subagent parent entry. Clicking opens the
+ * subagent watch route (`/$environmentId/$threadId/subagent/$subagentRootItemId`).
  */
-function SubagentCard({
+function SubagentRefChip({
   parent,
-  childEntries,
-  workspaceRoot,
+  environmentId,
+  threadId,
 }: {
   parent: TimelineWorkEntry;
-  childEntries: TimelineWorkEntry[];
-  workspaceRoot: string | undefined;
+  environmentId: EnvironmentId;
+  threadId: ThreadId | null;
 }) {
-  const isRunning = isInProgressSubagentParent(parent);
+  const navigate = useNavigate();
   const { type: subagentType, description } = parseSubagentLabel(parent.label);
+  const isRunning = isInProgressSubagentParent(parent);
+  const rootItemId = parent.toolItemId ?? "";
+  const canOpen = threadId !== null && rootItemId.length > 0;
 
-  // The child rows live in a bounded scroll viewport (~5 rows tall). All children
-  // always render — scrolling up reveals history, nothing is sliced away — and the
-  // viewport auto-sticks to the newest row unless the user has scrolled up.
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const stickToBottomRef = useRef(true);
-
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distanceFromBottom < 8;
-  }, []);
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !stickToBottomRef.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [childEntries.length]);
-
+  // A chip with no resolvable threadId/rootItemId can't open the watch route, but
+  // it's still a meaningful subagent record — keep it readable (don't dim it).
   return (
-    <div className="rounded-md border border-border/60 bg-muted/20 overflow-hidden">
-      {/* Card header */}
-      <div className="flex items-center gap-1.5 px-2 py-1 border-b border-border/40">
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px]">
-          <span className="font-semibold text-foreground/70">Subagent:</span>
-          <span className="font-medium text-foreground/82 truncate">{subagentType}</span>
-          {description && (
-            <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{description}</span>
-          )}
+    <button
+      type="button"
+      data-testid={`subagent-ref-chip-${rootItemId}`}
+      className="flex w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-left hover:bg-muted/40 focus-visible:ring-1 focus-visible:ring-ring outline-hidden disabled:cursor-default disabled:opacity-100"
+      disabled={!canOpen}
+      onClick={() => {
+        if (!canOpen || threadId === null) return;
+        void navigate({
+          to: "/$environmentId/$threadId/subagent/$subagentRootItemId",
+          params: { environmentId, threadId, subagentRootItemId: rootItemId },
+        });
+      }}
+    >
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px]">
+        <span className="font-semibold text-foreground/70">Subagent:</span>
+        <span className="font-medium text-foreground/82 truncate">{subagentType}</span>
+        {description && (
+          <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{description}</span>
+        )}
+      </span>
+      {isRunning ? (
+        <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground/70">
+          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
+          <span>running</span>
         </span>
-        {isRunning ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-            </span>
-            <span>running...</span>
-          </span>
-        ) : null}
-      </div>
-      {/* Child rows inside the card — bounded, auto-tailing scroll viewport (~5 rows) */}
-      {childEntries.length > 0 && (
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="max-h-[8rem] space-y-px overflow-y-auto px-1 py-0.5"
-        >
-          {childEntries.map((child) => (
-            <SimpleWorkEntryRow
-              key={child.id}
-              workEntry={child}
-              workspaceRoot={workspaceRoot}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+      ) : null}
+      {canOpen ? (
+        <span aria-hidden="true" className="shrink-0 text-[11px] text-muted-foreground/55">
+          open ↗
+        </span>
+      ) : null}
+    </button>
   );
 }
 
@@ -826,7 +808,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }: {
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
 }) {
-  const { workspaceRoot } = use(TimelineRowCtx);
+  const { workspaceRoot, activeThreadEnvironmentId, threadRef } = use(TimelineRowCtx);
   const [isExpanded, setIsExpanded] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
   const anchorBottomBeforeToggleRef = useRef<number | null>(null);
@@ -835,9 +817,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
   const nonEmptyEntries = useMemo(
     () =>
       groupedEntries.filter(
-        (entry) =>
-          !workEntryIndicatesToolNeutralStatus(entry) ||
-          isInProgressSubagentParent(entry),
+        (entry) => !workEntryIndicatesToolNeutralStatus(entry) || isInProgressSubagentParent(entry),
       ),
     [groupedEntries],
   );
@@ -918,17 +898,17 @@ const WorkGroupSection = memo(function WorkGroupSection({
       <div className="space-y-px">
         {topLevelEntries.map((workEntry) => {
           const isSubagentParent = workEntry.itemType === "collab_agent_tool_call";
-          const children = allChildrenByParent.get(workEntry.toolItemId ?? "") ?? [];
           if (isSubagentParent) {
             return (
-              <SubagentCard
+              <SubagentRefChip
                 key={workEntry.id}
                 parent={workEntry}
-                childEntries={children}
-                workspaceRoot={workspaceRoot}
+                environmentId={activeThreadEnvironmentId}
+                threadId={threadRef?.threadId ?? null}
               />
             );
           }
+          const children = allChildrenByParent.get(workEntry.toolItemId ?? "") ?? [];
           return (
             <Fragment key={workEntry.id}>
               <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />

@@ -2,16 +2,22 @@ import { QueryClient } from "@tanstack/react-query";
 import type { WsRpcClient } from "@t3tools/client-runtime";
 import {
   EnvironmentId,
+  EventId,
   ProjectId,
   ProviderInstanceId,
+  RuntimeItemId,
   ThreadId,
   TurnId,
   type OrchestrationShellSnapshot,
+  type OrchestrationSubagentRef,
+  type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mockSubscribeThread = vi.fn();
 const mockThreadUnsubscribe = vi.fn();
+const mockSubscribeSubagentTree = vi.fn();
+const mockSubscribeSubagent = vi.fn();
 const mockCreateEnvironmentConnection = vi.fn();
 const mockCreateWsRpcClient = vi.fn();
 const mockWaitForSavedEnvironmentRegistryHydration = vi.fn();
@@ -92,6 +98,8 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
       getArchivedShellSnapshot: vi.fn(),
       subscribeShell: vi.fn(() => () => undefined),
       subscribeThread: mockSubscribeThread,
+      subscribeSubagentTree: mockSubscribeSubagentTree,
+      subscribeSubagent: mockSubscribeSubagent,
     },
     terminal: {
       open: vi.fn(),
@@ -255,6 +263,25 @@ function makeThreadShellSnapshot(params: {
         liveSubagentCount: 0,
       },
     ],
+  };
+}
+
+function makeRef(overrides: Partial<OrchestrationSubagentRef> = {}): OrchestrationSubagentRef {
+  return {
+    threadId: ThreadId.make("thread-1"),
+    rootItemId: RuntimeItemId.make("root-1"),
+    parentItemId: null,
+    label: "code-reviewer: review the diff",
+    subagentType: "code-reviewer",
+    description: null,
+    status: "inProgress",
+    iteration: null,
+    turnId: null,
+    depth: 0,
+    childSubagentCount: 0,
+    createdAt: "2026-06-20T00:00:00.000Z",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -666,5 +693,211 @@ describe("retainThreadDetailSubscription", () => {
     expect(mockThreadUnsubscribe).toHaveBeenCalledTimes(1);
 
     stop();
+  });
+});
+
+describe("retainSubagentTreeSubscription", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockGetPrimaryKnownEnvironment.mockReturnValue({
+      id: "env-1",
+      label: "Primary environment",
+      source: "window-origin",
+      target: {
+        httpBaseUrl: "http://127.0.0.1:3000/",
+        wsBaseUrl: "ws://127.0.0.1:3000/",
+      },
+      environmentId: EnvironmentId.make("env-1"),
+    });
+    mockThreadUnsubscribe.mockImplementation(() => undefined);
+    mockSubscribeThread.mockImplementation(() => mockThreadUnsubscribe);
+    mockCreateEnvironmentConnection.mockImplementation((input) => {
+      const reconnect = vi.fn(async () => undefined);
+      mockConnectionReconnects.push(reconnect);
+      queueMicrotask(() => {
+        input.onConfigSnapshot?.({
+          environment: {
+            environmentId: input.knownEnvironment.environmentId,
+            label: input.knownEnvironment.label,
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+        });
+      });
+      return {
+        kind: input.kind,
+        environmentId: input.knownEnvironment.environmentId,
+        knownEnvironment: input.knownEnvironment,
+        client: input.client,
+        ensureBootstrapped: vi.fn(async () => undefined),
+        reconnect,
+        dispose: vi.fn(async () => undefined),
+      };
+    });
+    mockWaitForSavedEnvironmentRegistryHydration.mockResolvedValue(undefined);
+    mockListSavedEnvironmentRecords.mockReturnValue([]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(null);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue(null);
+    mockConnectionReconnects.length = 0;
+  });
+
+  afterEach(async () => {
+    const { resetEnvironmentServiceForTests } = await import("./service");
+    await resetEnvironmentServiceForTests();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("dispatches subagent tree snapshots into the store and unsubscribes on release", async () => {
+    const {
+      retainSubagentTreeSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { useStore } = await import("~/store");
+    const { createSubagentRefsSelector } = await import("~/storeSelectors");
+
+    const unsubscribe = vi.fn();
+    const capturedListeners: Array<(item: unknown) => void> = [];
+    mockSubscribeSubagentTree.mockImplementation(
+      (_input: unknown, listener: (item: unknown) => void) => {
+        capturedListeners.push(listener);
+        return unsubscribe;
+      },
+    );
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-tree-1");
+
+    const release = retainSubagentTreeSubscription(environmentId, threadId);
+    expect(mockSubscribeSubagentTree).toHaveBeenCalledWith({ threadId }, expect.any(Function));
+
+    const ref = makeRef({ threadId });
+    capturedListeners[0]?.({
+      kind: "snapshot",
+      snapshot: { snapshotSequence: 1, threadId, refs: [ref] },
+    });
+    expect(createSubagentRefsSelector(environmentId, threadId)(useStore.getState())).toHaveLength(
+      1,
+    );
+
+    release();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
+  });
+});
+
+describe("retainSubagentActivitiesSubscription", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockGetPrimaryKnownEnvironment.mockReturnValue({
+      id: "env-1",
+      label: "Primary environment",
+      source: "window-origin",
+      target: {
+        httpBaseUrl: "http://127.0.0.1:3000/",
+        wsBaseUrl: "ws://127.0.0.1:3000/",
+      },
+      environmentId: EnvironmentId.make("env-1"),
+    });
+    mockThreadUnsubscribe.mockImplementation(() => undefined);
+    mockSubscribeThread.mockImplementation(() => mockThreadUnsubscribe);
+    mockCreateEnvironmentConnection.mockImplementation((input) => {
+      const reconnect = vi.fn(async () => undefined);
+      mockConnectionReconnects.push(reconnect);
+      queueMicrotask(() => {
+        input.onConfigSnapshot?.({
+          environment: {
+            environmentId: input.knownEnvironment.environmentId,
+            label: input.knownEnvironment.label,
+            platform: { os: "darwin", arch: "arm64" },
+            serverVersion: "0.0.0-test",
+            capabilities: { repositoryIdentity: true },
+          },
+        });
+      });
+      return {
+        kind: input.kind,
+        environmentId: input.knownEnvironment.environmentId,
+        knownEnvironment: input.knownEnvironment,
+        client: input.client,
+        ensureBootstrapped: vi.fn(async () => undefined),
+        reconnect,
+        dispose: vi.fn(async () => undefined),
+      };
+    });
+    mockWaitForSavedEnvironmentRegistryHydration.mockResolvedValue(undefined);
+    mockListSavedEnvironmentRecords.mockReturnValue([]);
+    mockGetSavedEnvironmentRecord.mockReturnValue(null);
+    mockReadSavedEnvironmentBearerToken.mockResolvedValue(null);
+    mockConnectionReconnects.length = 0;
+  });
+
+  afterEach(async () => {
+    const { resetEnvironmentServiceForTests } = await import("./service");
+    await resetEnvironmentServiceForTests();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("dispatches subagent activities snapshots into the store and unsubscribes on release", async () => {
+    const {
+      retainSubagentActivitiesSubscription,
+      startEnvironmentConnectionService,
+      resetEnvironmentServiceForTests,
+    } = await import("./service");
+    const { useStore } = await import("~/store");
+    const { createSubagentActivitiesSelector } = await import("~/storeSelectors");
+
+    const unsubscribe = vi.fn();
+    const capturedListeners: Array<(item: unknown) => void> = [];
+    mockSubscribeSubagent.mockImplementation(
+      (_input: unknown, listener: (item: unknown) => void) => {
+        capturedListeners.push(listener);
+        return unsubscribe;
+      },
+    );
+
+    const stop = startEnvironmentConnectionService(new QueryClient());
+    const environmentId = EnvironmentId.make("env-1");
+    const threadId = ThreadId.make("thread-acts-1");
+    const rootItemId = RuntimeItemId.make("root-acts-1");
+
+    const release = retainSubagentActivitiesSubscription(environmentId, threadId, rootItemId);
+    expect(mockSubscribeSubagent).toHaveBeenCalledWith(
+      { threadId, rootItemId },
+      expect.any(Function),
+    );
+
+    const activity: OrchestrationThreadActivity = {
+      id: EventId.make("act-1"),
+      tone: "info",
+      kind: "tool.completed",
+      summary: "Subagent message",
+      payload: { itemType: "assistant_message", status: "completed" },
+      turnId: null,
+      createdAt: "2026-06-20T00:00:00.000Z",
+    };
+    capturedListeners[0]?.({
+      kind: "snapshot",
+      snapshot: { snapshotSequence: 1, threadId, rootItemId, activities: [activity] },
+    });
+    expect(
+      createSubagentActivitiesSelector(environmentId, threadId, rootItemId)(useStore.getState()),
+    ).toHaveLength(1);
+
+    release();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+
+    stop();
+    await resetEnvironmentServiceForTests();
   });
 });

@@ -160,6 +160,8 @@ export interface SidebarThreadSummary {
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  hasSubagents: boolean;
+  liveSubagentCount: number;
 }
 
 export interface ThreadSession {

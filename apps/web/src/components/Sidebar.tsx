@@ -99,7 +99,10 @@ import {
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "../lib/chatThreadActions";
-import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import {
+  retainSubagentTreeSubscription,
+  retainThreadDetailSubscription,
+} from "../environments/runtime/service";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import {
@@ -185,6 +188,7 @@ import {
 } from "./Sidebar.logic";
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
+import { SidebarSubagentTree } from "./sidebar/SidebarSubagentTree";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
@@ -592,6 +596,18 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   );
   const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
+  const subagentExpanded = useUiStateStore(
+    (state) => state.subagentExpandedById[threadKey] ?? false,
+  );
+  const toggleSubagent = useUiStateStore((state) => state.toggleSubagent);
+
+  useEffect(() => {
+    if (!thread.hasSubagents || !subagentExpanded) {
+      return;
+    }
+    return retainSubagentTreeSubscription(thread.environmentId, thread.id);
+  }, [thread.environmentId, thread.id, thread.hasSubagents, subagentExpanded]);
+
   return (
     <SidebarMenuSubItem
       className="w-full"
@@ -614,6 +630,26 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         onContextMenu={handleRowContextMenu}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+          {thread.hasSubagents && (
+            <button
+              type="button"
+              data-thread-selection-safe
+              data-testid={`thread-subagent-toggle-${thread.id}`}
+              aria-label={subagentExpanded ? "Collapse subagents" : "Expand subagents"}
+              className="inline-flex shrink-0 cursor-pointer items-center justify-center outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleSubagent(threadKey);
+              }}
+            >
+              <ChevronRightIcon
+                className={`size-3.5 text-muted-foreground/70 transition-transform duration-150 ${
+                  subagentExpanded ? "rotate-90" : ""
+                }`}
+              />
+            </button>
+          )}
           {prStatus && (
             <Tooltip>
               <TooltipTrigger
@@ -803,6 +839,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           </div>
         </div>
       </SidebarMenuSubButton>
+      {subagentExpanded && thread.hasSubagents && (
+        <SidebarSubagentTree environmentId={thread.environmentId} threadId={thread.id} />
+      )}
     </SidebarMenuSubItem>
   );
 });
@@ -2698,9 +2737,7 @@ export function SidebarNewSessionButton({
         <SquarePenIcon className="size-3.5" />
         <span className="flex-1 truncate text-left text-xs">New Session</span>
         {newSessionShortcutLabel ? (
-          <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
-            {newSessionShortcutLabel}
-          </Kbd>
+          <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">{newSessionShortcutLabel}</Kbd>
         ) : null}
       </SidebarMenuButton>
       <Tooltip>

@@ -46,6 +46,10 @@ vi.mock("@pierre/diffs/react", () => {
   return { FileDiff: MockFileDiff };
 });
 
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => () => {},
+}));
+
 function matchMedia() {
   return {
     matches: false,
@@ -359,7 +363,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('aria-label="Tool call failed"');
   });
 
-  it("renders child entries indented under their parent via parentItemId/toolItemId", async () => {
+  it("renders a collab_agent_tool_call parent as a chip; child entries are not shown inline", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -397,14 +401,15 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    // Parent label and child both render inside the card
+    // Parent renders as a chip with its label
     expect(markup).toContain("Subagent task");
-    expect(markup).toContain("Subagent command");
-    // Card container uses border-border (replaces the old ml-4/border-l indent)
+    // Chip uses a bordered container
     expect(markup).toContain("border-border");
+    // Children are NOT shown inline — they live in the watch route
+    expect(markup).not.toContain("Subagent command");
   });
 
-  it("renders in-progress subagent parent and nests live children under it", async () => {
+  it("renders in-progress subagent parent as a chip with a running indicator", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -443,15 +448,17 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    // In-progress parent must render (not be filtered out)
+    // In-progress parent renders as a chip (not filtered out)
     expect(markup).toContain("Subagent task");
-    // Child must also render (nested inside the card)
-    expect(markup).toContain("Live subagent command");
-    // Card container uses border-border (children are contained, not indented)
+    // Chip shows running indicator (without "..." suffix — that was the old card)
+    expect(markup).toContain("running");
+    // Chip uses a bordered container
     expect(markup).toContain("border-border");
+    // Children are NOT shown inline
+    expect(markup).not.toContain("Live subagent command");
   });
 
-  it("renders a subagent parent with children inside a bordered card with a Subagent: header", async () => {
+  it("renders a subagent parent as a SubagentRefChip with a Subagent: header and open affordance", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -489,16 +496,18 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    // Card header shows "Subagent:" prefix and the subagent type
+    // Chip shows "Subagent:" prefix and the subagent type
     expect(markup).toContain("Subagent:");
     expect(markup).toContain("general-purpose");
-    // Children still render
-    expect(markup).toContain("Bash");
-    // Card has a border (bordered container)
+    // Chip has a bordered container
     expect(markup).toContain("border-border");
+    // Chip renders with a testid on the root element
+    expect(markup).toContain("subagent-ref-chip-tool-use-card123");
+    // Children are NOT shown inline — they live in the watch route
+    expect(markup).not.toContain(">Bash<");
   });
 
-  it("renders the subagent child rows inside a bounded scroll viewport that keeps every child", async () => {
+  it("renders a chip for the subagent parent; children with parentItemId are not shown inline", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const childEntries = Array.from({ length: 12 }, (_, i) => ({
       id: `entry-child-${i}`,
@@ -539,15 +548,17 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    // Child rows live in a bounded scroll viewport (max-height + vertical scroll).
-    expect(markup).toContain("overflow-y-auto");
-    expect(markup).toContain("max-h-[8rem]");
-    // Every child still renders — scrolling up reveals history, nothing is sliced away.
-    expect(markup).toContain("child-command-0");
-    expect(markup).toContain("child-command-11");
+    // Chip renders for the parent with the testid
+    expect(markup).toContain("subagent-ref-chip-tool-use-scroll123");
+    // Chip shows the subagent label parts
+    expect(markup).toContain("general-purpose");
+    expect(markup).toContain("Long-running task");
+    // Children are NOT rendered inline — the chip links to the watch route instead
+    expect(markup).not.toContain("child-command-0");
+    expect(markup).not.toContain("child-command-11");
   });
 
-  it("renders a subagent text child (assistant_message) inside the card, not at top level", async () => {
+  it("renders a chip for a subagent parent; text child entries (assistant_message) are not shown inline", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -587,15 +598,11 @@ describe("MessagesTimeline", () => {
       />,
     );
 
+    // Chip renders the Subagent: prefix and subagent type
     expect(markup).toContain("Subagent:");
     expect(markup).toContain("code-reviewer");
-    // The subagent's text must be present (nested inside the card).
-    expect(markup).toContain("I&#x27;ll review this change rigorously.");
-    // It must render within the bordered card, after the "Subagent:" header — i.e.
-    // the text appears after the header in document order, not as a sibling above it.
-    expect(markup.indexOf("Subagent:")).toBeLessThan(
-      markup.indexOf("I&#x27;ll review this change rigorously."),
-    );
+    // Text child is NOT shown inline — it's accessible via the watch route
+    expect(markup).not.toContain("I&#x27;ll review this change rigorously.");
   });
 
   it("shows running indicator in card header when subagent parent is in-progress", async () => {
@@ -626,6 +633,37 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("running");
     // Animated dots (animate-pulse) should be present for the spinner
     expect(markup).toContain("animate-pulse");
+  });
+
+  it("renders a collab_agent_tool_call entry as a SubagentRefChip (not an inline transcript card)", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-chip",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-chip",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "code-reviewer: review the diff",
+              tone: "tool",
+              itemType: "collab_agent_tool_call",
+              toolItemId: "tool-use-chip123",
+              toolLifecycleStatus: "inProgress",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // Chip renders the Subagent: label and subagent type
+    expect(markup).toContain("Subagent:");
+    expect(markup).toContain("code-reviewer");
+    // Chip is NOT the old inline transcript card with "running..." (three dots)
+    expect(markup).not.toContain("running...");
   });
 
   it("does not truncate entries when an in-progress subagent parent is present", async () => {
@@ -665,10 +703,7 @@ describe("MessagesTimeline", () => {
     ];
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        timelineEntries={entriesWithActiveSubagent}
-      />,
+      <MessagesTimeline {...buildProps()} timelineEntries={entriesWithActiveSubagent} />,
     );
 
     // All tool calls should be visible (no "Show more" truncation)

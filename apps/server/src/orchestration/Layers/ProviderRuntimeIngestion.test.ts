@@ -2436,6 +2436,41 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activityPayload?.message).toBe("runtime activity exploded");
   });
 
+  it("records task.updated patches as info-tone status activities", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "task.updated",
+      eventId: asEventId("evt-task-updated-activity"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-task-updated"),
+      payload: {
+        taskId: "turn-task-1",
+        status: "running",
+        description: "Subagent task",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some((activity) => activity.id === "evt-task-updated-activity"),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-task-updated-activity",
+    );
+    const activityPayload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("task.updated");
+    expect(activity?.tone).toBe("info");
+    expect(activity?.summary.toLowerCase()).toContain("running");
+    expect(activityPayload?.status).toBe("running");
+  });
+
   it("keeps the session running when a runtime.warning arrives during an active turn", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

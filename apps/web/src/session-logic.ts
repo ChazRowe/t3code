@@ -690,7 +690,8 @@ export function deriveWorkLogEntries(
     if (
       activity.kind === "task.started" ||
       activity.kind === "task.progress" ||
-      activity.kind === "task.completed"
+      activity.kind === "task.completed" ||
+      activity.kind === "task.updated"
     )
       continue;
     if (activity.kind === "context-window.updated") continue;

@@ -2996,6 +2996,26 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           message,
         );
         return;
+      case "task_updated": {
+        // A wire-safe patch of a task's state (subagent lifecycle). Carries the
+        // intermediate transitions task_notification doesn't — running, paused,
+        // killed, backgrounded — so surface it as a status update, not a warning.
+        const patch = message.patch ?? {};
+        yield* offerRuntimeEvent({
+          ...base,
+          type: "task.updated",
+          payload: {
+            taskId: RuntimeTaskId.make(message.task_id),
+            ...(patch.status ? { status: patch.status } : {}),
+            ...(patch.description ? { description: patch.description } : {}),
+            ...(patch.error ? { error: patch.error } : {}),
+            ...(typeof patch.is_backgrounded === "boolean"
+              ? { isBackgrounded: patch.is_backgrounded }
+              : {}),
+          },
+        });
+        return;
+      }
       default:
         yield* emitRuntimeWarning(
           context,

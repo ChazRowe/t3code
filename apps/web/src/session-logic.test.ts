@@ -775,6 +775,13 @@ describe("deriveWorkLogEntries", () => {
         summary: "Task completed",
         tone: "info",
       }),
+      makeActivity({
+        id: "task-updated",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "task.updated",
+        summary: "Task running",
+        tone: "info",
+      }),
     ];
 
     const entries = deriveWorkLogEntries(activities);

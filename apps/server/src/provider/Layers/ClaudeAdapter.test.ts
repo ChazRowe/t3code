@@ -1864,6 +1864,64 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("maps Claude task_updated patches to task.updated events, not warnings", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "hook.started",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_updated",
+        task_id: "task-subagent-9",
+        patch: {
+          status: "running",
+          description: "Subagent task",
+        },
+        session_id: "sdk-session-task-updated",
+        uuid: "task-updated-1",
+      } as unknown as SDKMessage);
+
+      // Sentinel: a handled system message terminates the stream deterministically.
+      harness.query.emit({
+        type: "system",
+        subtype: "hook_started",
+        hook_id: "hook-sentinel",
+        hook_name: "sentinel",
+        hook_event: "PreToolUse",
+        session_id: "sdk-session-task-updated",
+        uuid: "hook-sentinel-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      const updatedEvent = runtimeEvents.find((event) => event.type === "task.updated");
+      assert.equal(updatedEvent?.type, "task.updated");
+      if (updatedEvent?.type === "task.updated") {
+        assert.equal(updatedEvent.payload.taskId, "task-subagent-9");
+        assert.equal(updatedEvent.payload.status, "running");
+        assert.equal(updatedEvent.payload.description, "Subagent task");
+      }
+
+      // A normal task state patch must not surface as a runtime warning (the ❌).
+      const warning = runtimeEvents.find((event) => event.type === "runtime.warning");
+      assert.equal(warning, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("holds main-context occupancy when a subagent reports task progress", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

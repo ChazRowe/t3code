@@ -513,6 +513,32 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "task.updated": {
+      const status = event.payload.status;
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "task.updated",
+          summary: status ? `Task ${status}` : "Task updated",
+          payload: {
+            taskId: event.payload.taskId,
+            ...(status ? { status } : {}),
+            ...(event.payload.description
+              ? { detail: truncateDetail(event.payload.description) }
+              : {}),
+            ...(event.payload.error ? { error: truncateDetail(event.payload.error) } : {}),
+            ...(event.payload.isBackgrounded !== undefined
+              ? { isBackgrounded: event.payload.isBackgrounded }
+              : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "thread.state.changed": {
       if (event.payload.state !== "compacted") {
         return [];

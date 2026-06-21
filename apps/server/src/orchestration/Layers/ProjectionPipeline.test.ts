@@ -2642,6 +2642,139 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       );
     }),
   );
+
+  it.effect(
+    "live_subagent_count stays 0 when a same-timestamp tool.updated lands after tool.completed",
+    () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+        const threadId = ThreadId.make("thread-subagent-counts-tie");
+
+        yield* appendAndProject({
+          type: "thread.created",
+          eventId: EventId.make("evt-tie-1"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-20T00:00:00.000Z",
+          commandId: CommandId.make("cmd-tie-1"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-tie-1"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-tie"),
+            title: "Tie Thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-06-20T00:00:00.000Z",
+            updatedAt: "2026-06-20T00:00:00.000Z",
+          },
+        });
+
+        yield* appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-tie-2"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-20T00:00:01.000Z",
+          commandId: CommandId.make("cmd-tie-2"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-tie-2"),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make("activity-tie-root-start"),
+              tone: "tool",
+              kind: "tool.started",
+              summary: "Subagent launched",
+              payload: { itemType: "collab_agent_tool_call", itemId: "item-root-1" },
+              turnId: null,
+              itemId: RuntimeItemId.make("item-root-1"),
+              createdAt: "2026-06-20T00:00:01.000Z",
+            },
+          },
+        });
+
+        // Terminal completion.
+        yield* appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-tie-3"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-20T00:00:02.000Z",
+          commandId: CommandId.make("cmd-tie-3"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-tie-3"),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make("activity-tie-root-done"),
+              tone: "tool",
+              kind: "tool.completed",
+              summary: "Subagent finished",
+              payload: { itemType: "collab_agent_tool_call", itemId: "item-root-1" },
+              turnId: null,
+              itemId: RuntimeItemId.make("item-root-1"),
+              createdAt: "2026-06-20T00:00:02.000Z",
+            },
+          },
+        });
+
+        // A final tool.updated stamped with the SAME created_at as the completion, whose
+        // activity id sorts AFTER it. Order-sensitive counting would resurrect the subagent
+        // as "live"; terminality is a property of the row set, not of whichever row sorts last.
+        yield* appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make("evt-tie-4"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-06-20T00:00:02.000Z",
+          commandId: CommandId.make("cmd-tie-4"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-tie-4"),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make("activity-tie-root-zupdate"),
+              tone: "tool",
+              kind: "tool.updated",
+              summary: "Subagent update",
+              payload: {
+                itemType: "collab_agent_tool_call",
+                itemId: "item-root-1",
+                status: "inProgress",
+              },
+              turnId: null,
+              itemId: RuntimeItemId.make("item-root-1"),
+              createdAt: "2026-06-20T00:00:02.000Z",
+            },
+          },
+        });
+
+        const rows = yield* sql<{ readonly liveSubagentCount: number }>`
+          SELECT live_subagent_count AS "liveSubagentCount"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+        assert.strictEqual(rows[0]?.liveSubagentCount, 0);
+      }),
+  );
 });
 
 it.effect("restores pending turn-start metadata across projection pipeline restart", () =>

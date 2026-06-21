@@ -204,20 +204,37 @@ function deriveHasActionableProposedPlan(input: {
   return latestPlan !== null && latestPlan.implementedAt === null;
 }
 
+// A subagent's terminal outcome is a property of its row SET, not of whichever row
+// sorts last. The provider stamps the final tool.updated (status "inProgress") and the
+// terminal tool.completed with an IDENTICAL created_at and a NULL sequence, so any
+// order-sensitive add/remove would resurrect a finished subagent whenever the stale
+// update sorts after the completion. Mirrors `subagentStatusFromActivity`'s terminal set.
+function isTerminalSubagentActivity(
+  kind: string,
+  payload: Record<string, unknown> | null,
+): boolean {
+  if (
+    kind === "tool.completed" ||
+    kind === "tool.failed" ||
+    kind === "tool.errored" ||
+    kind === "tool.denied"
+  ) {
+    return true;
+  }
+  const status = payload?.status;
+  return (
+    status === "completed" || status === "failed" || status === "stopped" || status === "declined"
+  );
+}
+
 function deriveSubagentCounts(activities: ReadonlyArray<ProjectionThreadActivity>): {
   readonly hasSubagents: boolean;
   readonly liveSubagentCount: number;
 } {
-  const runningRootItemIds = new Set<string>();
-  let sawAnyRoot = false;
+  const rootItemIds = new Set<string>();
+  const terminalRootItemIds = new Set<string>();
 
-  const ordered = [...activities].toSorted(
-    (left, right) =>
-      left.createdAt.localeCompare(right.createdAt) ||
-      left.activityId.localeCompare(right.activityId),
-  );
-
-  for (const activity of ordered) {
+  for (const activity of activities) {
     if (activity.parentItemId !== undefined) {
       continue;
     }
@@ -232,19 +249,23 @@ function deriveSubagentCounts(activities: ReadonlyArray<ProjectionThreadActivity
     if (rootItemId === undefined) {
       continue;
     }
-    sawAnyRoot = true;
-    // A root collab_agent_tool_call is "running" until its terminal tool.completed event;
-    // add on start/update, remove on completion, so the set size = currently-running subagents.
-    if (activity.kind === "tool.completed") {
-      runningRootItemIds.delete(rootItemId);
-    } else {
-      runningRootItemIds.add(rootItemId);
+    rootItemIds.add(rootItemId);
+    // A root is "running" only until some terminal row exists for it — order-independent.
+    if (isTerminalSubagentActivity(activity.kind, payload)) {
+      terminalRootItemIds.add(rootItemId);
+    }
+  }
+
+  let liveSubagentCount = 0;
+  for (const rootItemId of rootItemIds) {
+    if (!terminalRootItemIds.has(rootItemId)) {
+      liveSubagentCount += 1;
     }
   }
 
   return {
-    hasSubagents: sawAnyRoot,
-    liveSubagentCount: runningRootItemIds.size,
+    hasSubagents: rootItemIds.size > 0,
+    liveSubagentCount,
   };
 }
 

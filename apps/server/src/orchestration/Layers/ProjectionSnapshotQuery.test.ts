@@ -1830,6 +1830,90 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       }),
   );
 
+  it.effect(
+    "getSubagentTree treats a terminal tool.completed as authoritative even when a same-timestamp tool.updated sorts after it",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_projects`;
+
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            'project-1', 'Project 1', '/tmp/project-1',
+            '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json, runtime_mode,
+            interaction_mode, branch, worktree_path, latest_turn_id,
+            latest_user_message_at, pending_approval_count, pending_user_input_count,
+            has_actionable_proposed_plan, created_at, updated_at, deleted_at
+          ) VALUES (
+            'thread-1', 'project-1', 'Thread 1',
+            '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+            NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+
+        // Real-world shape that left subagents pulsing "running" forever: the provider
+        // stamps the terminal tool.completed AND a final tool.updated (status
+        // "inProgress") with the IDENTICAL created_at, and `sequence` is NULL on both.
+        // Under ORDER BY (sequence, created_at, activity_id) the tool.updated activity_id
+        // sorts AFTER the tool.completed, so a naive "latest row wins" derivation reports
+        // inProgress forever. The terminal row must win regardless of tie-break ordering.
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-root-a-start', 'thread-1', 'turn-1', 'tool', 'tool.started',
+            'Explore: find the bug',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-root-a","status":"inProgress","data":{"toolName":"Agent","input":{"subagent_type":"Explore","description":"find the bug"}}}',
+            '2026-06-20T00:00:01.000Z', 'item-root-a', NULL, 1
+          )
+        `;
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-root-a-completed', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+            'Explore: find the bug',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-root-a","data":{"toolName":"Agent","input":{"subagent_type":"Explore","description":"find the bug"}}}',
+            '2026-06-20T00:00:05.000Z', 'item-root-a', NULL, 1
+          )
+        `;
+        // Same created_at as the completed row, but an activity_id that sorts AFTER it.
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-root-a-zupdate', 'thread-1', 'turn-1', 'tool', 'tool.updated',
+            'Explore: find the bug',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-root-a","status":"inProgress","data":{"toolName":"Agent","input":{"subagent_type":"Explore","description":"find the bug"}}}',
+            '2026-06-20T00:00:05.000Z', 'item-root-a', NULL, 1
+          )
+        `;
+
+        const refs = yield* snapshotQuery.getSubagentTree({
+          threadId: ThreadId.make("thread-1"),
+        });
+        const root = refs.find((r) => r.rootItemId === RuntimeItemId.make("item-root-a"));
+        assert.strictEqual(root?.status, "completed");
+      }),
+  );
+
   it.effect("getSubagentActivities returns only the direct children of a subagent root", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

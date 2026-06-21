@@ -2303,6 +2303,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       type RefRow = Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>;
       const firstByItem = new Map<string, RefRow>();
       const latestByItem = new Map<string, RefRow>();
+      const statusByItem = new Map<string, OrchestrationSubagentStatus>();
       const order: Array<string> = [];
       for (const row of refRows) {
         if (row.itemId === null) {
@@ -2313,6 +2314,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           order.push(row.itemId);
         }
         latestByItem.set(row.itemId, row);
+        // A terminal outcome is authoritative no matter where its row lands in the
+        // (sequence, created_at, activity_id) order. The provider stamps the final
+        // tool.updated (status "inProgress") and the terminal tool.completed with the
+        // SAME created_at and a NULL sequence, so the terminal row can sort BEFORE the
+        // stale "inProgress" row — a "latest row wins" derivation would then pulse the
+        // subagent alive forever. Latch any terminal status off the full row set instead.
+        const rowStatus = subagentStatusFromActivity(row.kind, row.payload);
+        if (rowStatus !== "inProgress") {
+          statusByItem.set(row.itemId, rowStatus);
+        }
       }
 
       // childSubagentCount: refs whose parentItemId === this ref's itemId.
@@ -2353,7 +2364,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           label: latest.summary,
           subagentType: TrimmedNonEmptyString.make(type),
           description: description === null ? null : TrimmedNonEmptyString.make(description),
-          status: subagentStatusFromActivity(latest.kind, latest.payload),
+          status: statusByItem.get(itemId) ?? "inProgress",
           iteration: latest.iteration,
           turnId: latest.turnId,
           depth: NonNegativeInt.make(depthOf(itemId)),

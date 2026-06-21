@@ -37,7 +37,11 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+export interface UiSubagentState {
+  subagentExpandedById: Record<string, boolean>;
+}
+
+export interface UiState extends UiProjectState, UiThreadState, UiEndpointState, UiSubagentState {}
 
 export interface SyncProjectInput {
   /** Physical project key (env + cwd). Used for manual sort order. */
@@ -58,6 +62,7 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
+  subagentExpandedById: {},
 };
 
 const persistedCollapsedProjectCwds = new Set<string>();
@@ -590,6 +595,30 @@ export function setProjectExpanded(state: UiState, projectId: string, expanded: 
   };
 }
 
+export function toggleSubagent(state: UiState, key: string): UiState {
+  const expanded = state.subagentExpandedById[key] ?? false;
+  return {
+    ...state,
+    subagentExpandedById: {
+      ...state.subagentExpandedById,
+      [key]: !expanded,
+    },
+  };
+}
+
+export function setSubagentExpanded(state: UiState, key: string, expanded: boolean): UiState {
+  if ((state.subagentExpandedById[key] ?? false) === expanded) {
+    return state;
+  }
+  return {
+    ...state,
+    subagentExpandedById: {
+      ...state.subagentExpandedById,
+      [key]: expanded,
+    },
+  };
+}
+
 export function reorderProjects(
   state: UiState,
   draggedProjectIds: readonly string[],
@@ -643,6 +672,8 @@ interface UiStateStore extends UiState {
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   toggleProject: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
+  toggleSubagent: (key: string) => void;
+  setSubagentExpanded: (key: string, expanded: boolean) => void;
   reorderProjects: (
     draggedProjectIds: readonly string[],
     targetProjectIds: readonly string[],
@@ -665,6 +696,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),
+  toggleSubagent: (key) => set((state) => toggleSubagent(state, key)),
+  setSubagentExpanded: (key, expanded) => set((state) => setSubagentExpanded(state, key, expanded)),
   reorderProjects: (draggedProjectIds, targetProjectIds) =>
     set((state) => reorderProjects(state, draggedProjectIds, targetProjectIds)),
 }));

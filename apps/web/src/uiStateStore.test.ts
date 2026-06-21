@@ -12,9 +12,11 @@ import {
   reorderProjects,
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
+  setSubagentExpanded,
   setThreadChangedFilesExpanded,
   syncProjects,
   syncThreads,
+  toggleSubagent,
   type UiState,
 } from "./uiStateStore";
 
@@ -25,6 +27,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
+    subagentExpandedById: {},
     ...overrides,
   };
 }
@@ -606,5 +609,24 @@ describe("uiStateStore persistence round-trip", () => {
     ]);
 
     expect(rehydrated.projectExpandedById[nextLogicalKey]).toBe(false);
+  });
+});
+
+describe("subagent expand state", () => {
+  it("defaults to collapsed and toggles to expanded", () => {
+    const next = toggleSubagent(makeUiState(), "thread-key");
+    expect(next.subagentExpandedById["thread-key"]).toBe(true);
+  });
+
+  it("toggles an expanded entry back to collapsed", () => {
+    const expanded = setSubagentExpanded(makeUiState(), "thread-key", true);
+    const collapsed = toggleSubagent(expanded, "thread-key");
+    expect(collapsed.subagentExpandedById["thread-key"]).toBe(false);
+  });
+
+  it("setSubagentExpanded is a no-op when already in the target state", () => {
+    const base = makeUiState();
+    const next = setSubagentExpanded(base, "thread-key", false);
+    expect(next).toBe(base);
   });
 });

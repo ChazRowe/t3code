@@ -20,6 +20,11 @@ import {
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
+import {
+  CONTEXT_RESET_COMMAND,
+  PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND,
+  isContextResetCommand,
+} from "./contextClearMarker.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -392,6 +397,54 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      // `/new` is a control command, not a chat message: intercept it uniformly
+      // (no provider detection) and turn it into a context reset instead of a
+      // turn. Drop a context-cleared marker so context-scoped views rebase, then
+      // request a session stop with `resetContext` so the next turn binds a fresh
+      // provider conversation. Emit no `thread.message-sent` — `/new` stays out
+      // of the chat timeline. (Claude's own `/clear` is handled SDK-native and is
+      // intentionally not matched here; see contextClearMarker.ts.)
+      if (isContextResetCommand(command.message.text)) {
+        const crypto = yield* Crypto.Crypto;
+        const activityId = EventId.make(yield* crypto.randomUUIDv4);
+        const clearedMarkerEvent: Omit<OrchestrationEvent, "sequence"> = {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: activityId,
+              tone: "info",
+              kind: PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND,
+              summary: "Context cleared",
+              payload: { state: "cleared", trigger: CONTEXT_RESET_COMMAND },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        };
+        const sessionStopRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          causationEventId: clearedMarkerEvent.eventId,
+          type: "thread.session-stop-requested",
+          payload: {
+            threadId: command.threadId,
+            resetContext: true,
+            createdAt: command.createdAt,
+          },
+        };
+        return [clearedMarkerEvent, sessionStopRequestedEvent];
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({

@@ -1713,10 +1713,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
     const nextThreadId = message.session_id;
+    const previousThreadStartedId = context.lastThreadStartedId;
     context.resumeSessionId = message.session_id;
     yield* updateResumeCursor(context);
 
-    if (context.lastThreadStartedId !== nextThreadId) {
+    if (previousThreadStartedId !== nextThreadId) {
       context.lastThreadStartedId = nextThreadId;
       const stamp = yield* makeEventStamp();
       yield* offerRuntimeEvent({
@@ -1737,6 +1738,33 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           },
         },
       });
+
+      // A durable session id changing *after* a prior one was established means
+      // the provider reset its conversation in place — the user ran `/clear` or
+      // `/new`. (A first start or a resume of the same id is not a clear, and
+      // compaction keeps the same id.) Surface it so context-scoped views rebase.
+      if (previousThreadStartedId !== undefined) {
+        const clearedStamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "thread.state.changed",
+          eventId: clearedStamp.eventId,
+          provider: PROVIDER,
+          createdAt: clearedStamp.createdAt,
+          threadId: context.session.threadId,
+          payload: {
+            state: "cleared",
+          },
+          providerRefs: {},
+          raw: {
+            source: "claude.sdk.message",
+            method: "claude/thread/cleared",
+            payload: {
+              session_id: message.session_id,
+              previousSessionId: previousThreadStartedId,
+            },
+          },
+        });
+      }
     }
   });
 

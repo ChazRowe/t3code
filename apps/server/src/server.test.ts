@@ -85,6 +85,7 @@ import {
   type OrchestrationEngineShape,
 } from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
+import { CONTEXT_CLEARED_ACTIVITY_KIND } from "./orchestration/unattendedRun.ts";
 import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotQueryShape,
@@ -5525,6 +5526,71 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(second?.kind, "ref-changed");
         if (second?.kind === "ref-changed") {
           assert.equal(second.ref.rootItemId, "item-root-a");
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "routes websocket rpc subscribeSubagentTree re-emits a scoped snapshot when the context is cleared",
+    () =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make("thread-subagent-tree-cleared");
+
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 11 }),
+              // After the clear the prior context's subagents are scoped out, so the
+              // recomputed tree is empty.
+              getSubagentTree: () => Effect.succeed([]),
+            },
+            orchestrationEngine: {
+              streamDomainEvents: Stream.make({
+                sequence: 1,
+                eventId: EventId.make("evt-context-cleared"),
+                aggregateKind: "thread",
+                aggregateId: threadId,
+                occurredAt: "2026-06-20T00:00:10.000Z",
+                commandId: null,
+                causationEventId: null,
+                correlationId: null,
+                metadata: {},
+                type: "thread.activity-appended",
+                payload: {
+                  threadId,
+                  activity: {
+                    id: EventId.make("act-context-cleared"),
+                    tone: "info",
+                    kind: CONTEXT_CLEARED_ACTIVITY_KIND,
+                    summary: "Context cleared",
+                    payload: { fromIteration: 1, toIteration: 2 },
+                    turnId: null,
+                    createdAt: "2026-06-20T00:00:10.000Z",
+                  },
+                },
+              } satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeSubagentTree]({ threadId }).pipe(
+              Stream.take(2),
+              Stream.runCollect,
+            ),
+          ),
+        );
+
+        const [first, second] = Array.from(items);
+        assert.equal(first?.kind, "snapshot");
+        // The context-clear marker rebases the tree: a fresh (scoped, now-empty)
+        // snapshot is pushed rather than a ref-changed delta.
+        assert.equal(second?.kind, "snapshot");
+        if (second?.kind === "snapshot") {
+          assert.equal(second.snapshot.threadId, threadId);
+          assert.equal(second.snapshot.refs.length, 0);
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

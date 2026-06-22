@@ -32,6 +32,7 @@ import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { isGitRepository } from "../../git/Utils.ts";
+import { PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND } from "../contextClearMarker.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -540,6 +541,26 @@ function runtimeEventToActivities(
     }
 
     case "thread.state.changed": {
+      // A provider cleared its conversation in place (e.g. the user ran `/clear`
+      // or `/new`). Drop a boundary marker so context-scoped views rebase.
+      if (event.payload.state === "cleared") {
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND,
+            summary: "Context cleared",
+            payload: {
+              state: event.payload.state,
+              ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
+
       if (event.payload.state !== "compacted") {
         return [];
       }

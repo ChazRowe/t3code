@@ -65,6 +65,7 @@ const RuntimeThreadState = Schema.Literals([
   "archived",
   "closed",
   "compacted",
+  "cleared",
   "error",
 ]);
 export type RuntimeThreadState = typeof RuntimeThreadState.Type;

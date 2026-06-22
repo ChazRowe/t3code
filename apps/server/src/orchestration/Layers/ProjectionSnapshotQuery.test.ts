@@ -17,6 +17,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { RepositoryIdentityResolver } from "../../project/Services/RepositoryIdentityResolver.ts";
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
+import {
+  CONTEXT_CLEARED_ACTIVITY_KIND,
+  PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND,
+} from "../contextClearMarker.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -1667,6 +1671,179 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.strictEqual(rootB?.description, "design the fix");
       assert.strictEqual(rootB?.status, "inProgress");
       assert.strictEqual(rootB?.childSubagentCount, 0);
+    }),
+  );
+
+  it.effect(
+    "getSubagentTree scopes out subagents from a prior context once the context is cleared",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_projects`;
+
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            'project-1', 'Project 1', '/tmp/project-1',
+            '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json, runtime_mode,
+            interaction_mode, branch, worktree_path, latest_turn_id,
+            latest_user_message_at, pending_approval_count, pending_user_input_count,
+            has_actionable_proposed_plan, created_at, updated_at, deleted_at
+          ) VALUES (
+            'thread-1', 'project-1', 'Thread 1',
+            '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+            NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+
+        // Iteration 1 subagent (before the clear).
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-old', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+            'Explore: old context',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-old","label":"Explore: old context"}',
+            '2026-06-20T00:00:01.000Z', 'item-old', NULL, 1
+          )
+        `;
+        // Context-clear marker (iteration 1 -> 2).
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-cleared', 'thread-1', 'turn-1', 'info', ${CONTEXT_CLEARED_ACTIVITY_KIND},
+            'Context cleared', '{}',
+            '2026-06-20T00:00:10.000Z', NULL, NULL, NULL
+          )
+        `;
+        // Iteration 2 subagent (after the clear) plus a nested child of it.
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-new', 'thread-1', 'turn-2', 'tool', 'tool.started',
+            'Explore: new context',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-new","label":"Explore: new context"}',
+            '2026-06-20T00:00:20.000Z', 'item-new', NULL, 2
+          )
+        `;
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-new-nested', 'thread-1', 'turn-2', 'tool', 'tool.started',
+            'Plan: new nested',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-new-nested","label":"Plan: new nested"}',
+            '2026-06-20T00:00:21.000Z', 'item-new-nested', 'item-new', 2
+          )
+        `;
+
+        const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+
+        const itemIds = refs.map((r) => r.rootItemId).toSorted();
+        assert.deepStrictEqual(itemIds, [
+          RuntimeItemId.make("item-new"),
+          RuntimeItemId.make("item-new-nested"),
+        ]);
+        const byItem = new Map(refs.map((r) => [r.rootItemId, r]));
+        // The post-clear top-level subagent keeps its nested child count.
+        assert.strictEqual(byItem.get(RuntimeItemId.make("item-new"))?.childSubagentCount, 1);
+      }),
+  );
+
+  it.effect("getSubagentTree scopes out subagents after a provider context-clear marker", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+
+      yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            'project-1', 'Project 1', '/tmp/project-1',
+            '{"provider":"claude","model":"claude-opus-4-8"}', '[]',
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+      yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json, runtime_mode,
+            interaction_mode, branch, worktree_path, latest_turn_id,
+            latest_user_message_at, pending_approval_count, pending_user_input_count,
+            has_actionable_proposed_plan, created_at, updated_at, deleted_at
+          ) VALUES (
+            'thread-1', 'project-1', 'Thread 1',
+            '{"provider":"claude","model":"claude-opus-4-8"}', 'full-access', 'default',
+            NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+
+      // Subagent from before the user ran /clear.
+      yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-old', 'thread-1', 'turn-1', 'tool', 'tool.completed',
+            'Explore: old context',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-old","label":"Explore: old context"}',
+            '2026-06-20T00:00:01.000Z', 'item-old', NULL, NULL
+          )
+        `;
+      // Provider context-clear marker (user ran /clear).
+      yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-cleared', 'thread-1', 'turn-1', 'info', ${PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND},
+            'Context cleared', '{"state":"cleared"}',
+            '2026-06-20T00:00:10.000Z', NULL, NULL, NULL
+          )
+        `;
+      // Subagent after the clear.
+      yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-new', 'thread-1', 'turn-2', 'tool', 'tool.started',
+            'Explore: new context',
+            '{"itemType":"collab_agent_tool_call","itemId":"item-new","label":"Explore: new context"}',
+            '2026-06-20T00:00:20.000Z', 'item-new', NULL, NULL
+          )
+        `;
+
+      const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+
+      assert.deepStrictEqual(
+        refs.map((r) => r.rootItemId),
+        [RuntimeItemId.make("item-new")],
+      );
     }),
   );
 

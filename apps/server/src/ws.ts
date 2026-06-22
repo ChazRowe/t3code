@@ -41,7 +41,7 @@ import {
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
   OrchestrationReplayEventsError,
-  type OrchestrationSubagentRef,
+  type OrchestrationSubagentTreeStreamItem,
   FilesystemBrowseError,
   AssetAccessError,
   EnvironmentAuthorizationError,
@@ -62,6 +62,7 @@ import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
+import { isContextClearedActivityKind } from "./orchestration/contextClearMarker.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -153,6 +154,18 @@ function isSubagentRefEvent(
     payload?.itemType === "collab_agent_tool_call" &&
     activity.itemId !== undefined &&
     activity.itemId !== null
+  );
+}
+
+// A context-clear marker (a provider `/clear`/`/new`, or unattended clear-continue
+// between iterations). When it lands, the subagent tree is rebased to the new
+// context, so the sidebar should drop the prior context's subagents.
+function isContextClearedEvent(
+  event: OrchestrationEvent,
+): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> {
+  return (
+    event.type === "thread.activity-appended" &&
+    isContextClearedActivityKind(event.payload.activity.kind)
   );
 }
 
@@ -1074,8 +1087,11 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 ),
               ]);
 
-              // On any subagent-ref lifecycle event (root or nested), recompute the tree and
-              // emit the single changed ref so depth/childSubagentCount/status stay consistent.
+              // React to two kinds of events for this thread:
+              //  - subagent-ref lifecycle (root or nested): recompute the tree and emit the
+              //    single changed ref so depth/childSubagentCount/status stay consistent.
+              //  - a context-clear marker: the tree is rebased to the new context, so re-emit
+              //    a fresh (now-scoped) snapshot to drop the prior context's subagents.
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(
                   (
@@ -1083,24 +1099,32 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                   ): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> =>
                     event.aggregateKind === "thread" &&
                     event.aggregateId === input.threadId &&
-                    isSubagentRefEvent(event),
+                    (isSubagentRefEvent(event) || isContextClearedEvent(event)),
                 ),
                 Stream.mapEffect((event) =>
                   projectionSnapshotQuery.getSubagentTree({ threadId: input.threadId }).pipe(
-                    Effect.map((nextRefs) => {
+                    Effect.map((nextRefs): Option.Option<OrchestrationSubagentTreeStreamItem> => {
+                      if (isContextClearedActivityKind(event.payload.activity.kind)) {
+                        return Option.some({
+                          kind: "snapshot" as const,
+                          snapshot: {
+                            snapshotSequence,
+                            threadId: input.threadId,
+                            refs: nextRefs,
+                          },
+                        });
+                      }
                       const changedItemId = event.payload.activity.itemId;
                       const changed = nextRefs.find((ref) => ref.rootItemId === changedItemId);
                       return changed === undefined
-                        ? Option.none<OrchestrationSubagentRef>()
-                        : Option.some(changed);
+                        ? Option.none<OrchestrationSubagentTreeStreamItem>()
+                        : Option.some({ kind: "ref-changed" as const, ref: changed });
                     }),
-                    Effect.orElseSucceed(() => Option.none<OrchestrationSubagentRef>()),
+                    Effect.orElseSucceed(() => Option.none<OrchestrationSubagentTreeStreamItem>()),
                   ),
                 ),
-                Stream.flatMap((maybeRef) =>
-                  Option.isSome(maybeRef)
-                    ? Stream.succeed({ kind: "ref-changed" as const, ref: maybeRef.value })
-                    : Stream.empty,
+                Stream.flatMap((maybeItem) =>
+                  Option.isSome(maybeItem) ? Stream.succeed(maybeItem.value) : Stream.empty,
                 ),
               );
 

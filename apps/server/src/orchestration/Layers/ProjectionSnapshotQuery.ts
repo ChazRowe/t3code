@@ -55,6 +55,10 @@ import { ProjectionThreadProposedPlan } from "../../persistence/Services/Project
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { RepositoryIdentityResolver } from "../../project/Services/RepositoryIdentityResolver.ts";
+import {
+  CONTEXT_CLEARED_ACTIVITY_KIND,
+  PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND,
+} from "../contextClearMarker.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -1040,6 +1044,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence ASC,
           created_at ASC,
           activity_id ASC
+      `,
+  });
+
+  // The createdAt of the most recent context-clear marker for a thread, or null
+  // if the context was never cleared. Subagent refs that started at or before
+  // this boundary belong to a prior context and are scoped out of the tree.
+  const getLatestContextClearedAtByThread = SqlSchema.findOne({
+    Request: ThreadIdLookupInput,
+    Result: Schema.Struct({ clearedAt: Schema.NullOr(IsoDateTime) }),
+    execute: ({ threadId }) =>
+      sql`
+        SELECT MAX(created_at) AS "clearedAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND kind IN (${CONTEXT_CLEARED_ACTIVITY_KIND}, ${PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND})
       `,
   });
 
@@ -2300,6 +2319,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ),
       );
 
+      // Scope the tree to the current context: once the context is cleared
+      // (a provider `/clear`/`/new`, or unattended clear-continue between
+      // iterations), subagents that ran in a prior context drop out of the
+      // hierarchy. Their transcript activities stay in the thread timeline —
+      // only the live tree is rebased.
+      const contextClearedAt = yield* getLatestContextClearedAtByThread({ threadId }).pipe(
+        Effect.map((row) => row.clearedAt),
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getSubagentTree:contextClearedAt:query",
+            "ProjectionSnapshotQuery.getSubagentTree:contextClearedAt:decodeRows",
+          ),
+        ),
+      );
+
       type RefRow = Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>;
       const firstByItem = new Map<string, RefRow>();
       const latestByItem = new Map<string, RefRow>();
@@ -2354,6 +2388,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         const first = firstByItem.get(itemId);
         const latest = latestByItem.get(itemId);
         if (first === undefined || latest === undefined) {
+          continue;
+        }
+        // A subagent that started at or before the latest context clear belongs
+        // to a prior context window; leave it out of the current hierarchy.
+        if (contextClearedAt !== null && first.createdAt <= contextClearedAt) {
           continue;
         }
         const { type, description } = deriveSubagentLabel(latest.payload, latest.summary);

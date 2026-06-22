@@ -1,7 +1,7 @@
 # Design: `spawn_agent` cross-provider subagent MCP tool
 
 - **Date:** 2026-06-22
-- **Status:** Proposed
+- **Status:** Implemented
 - **Topic:** An MCP tool that lets the calling agent spawn a subagent on **any**
   configured provider (Claude, Codex, Cursor, Grok, OpenCode), run a prompt to
   completion, capture the subagent's transcript as a normal session, and surface it
@@ -346,3 +346,36 @@ quota, so it is an explicit capability rather than always-on.
   status, summary, prompt).
 - **Default target when `providerInstanceId` omitted.** Proposed: required field; no
   implicit default (use `list_agents` to discover). Revisit if it proves clumsy.
+
+## Implementation notes (as shipped)
+
+- **Files added:** `apps/server/src/mcp/toolkits/spawn/{tools.ts,handlers.ts,handlers.test.ts}`.
+- **Files changed:** `packages/contracts/src/{orchestration.ts,provider.ts}` (ref
+  fields + `ProviderSessionStartInput.subagentDepth`); `apps/server/src/mcp/{McpInvocationContext,McpSessionRegistry,McpHttpServer}.ts`
+  (`spawn` capability, `subagentDepth` scope, registration); `apps/server/src/provider/Layers/ProviderService.ts`
+  (thread depth into credential issuance); `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts`
+  (ref fields + cross-thread `getSubagentActivities`); `apps/web/src/components/SubagentWatchView.tsx`
+  (provider · model header). Plus test updates for the widened `OrchestrationSubagentRef`.
+- **Model resolution simplified.** The resolved model is read directly from
+  `ProviderSession.model` returned by `startSession` (falling back to the requested
+  model), so the node is appended *after* the session starts and no event-stream
+  "upgrade" step is needed.
+- **Safety-envelope inheritance is runtimeMode + cwd only.** `ProviderSession` echoes
+  `runtimeMode`/`cwd` but not `approvalPolicy`/`sandboxMode`, so only those two are
+  inherited (read via `listSessions()`). Spawning fails cleanly if the caller's session
+  can't be resolved.
+- **`spawn` capability is granted to every issued credential** (the gate exists but is
+  always-on, like `preview`), so any session can delegate.
+- **Final text is accumulated from `content.delta` (`assistant_text`).** The stream
+  subscription is established before `sendTurn`; the tiny forkScoped subscription-defer
+  window is immaterial since providers emit output only well after the turn is accepted.
+- **Node payload shape:** cross-provider metadata lives under
+  `payload.subagentSession = { childThreadId, providerInstanceId, provider, model }`;
+  prompt/result reuse the existing `payload.data.input` / `payload.data.result` shape so
+  the existing `deriveSubagent*` helpers work unchanged.
+- **Test-harness note:** mock `ProviderService`/`ProviderInstanceRegistry` were merged
+  into an existing `Layer.merge` in `server.test.ts` rather than added as new
+  `Layer.provide` args, to stay within the 20-argument `.pipe` limit on the serve chain.
+- **Verification:** `apps/server` + `packages/contracts` + `apps/web` typecheck clean;
+  spawn handler 4/4, ProjectionSnapshotQuery 19/19, SubagentWatchView 4/4, McpHttpServer
+  + PreviewAutomationBroker 7/7, server 100/100; new files lint- and fmt-clean.

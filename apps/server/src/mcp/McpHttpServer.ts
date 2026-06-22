@@ -10,9 +10,12 @@ import { McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { ProjectionThreadActivityRepository } from "../persistence/Services/ProjectionThreadActivities.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+import { ContextUsageTool } from "./toolkits/context/tools.ts";
+import { resolveContextUsage } from "./toolkits/context/usage.ts";
 import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
@@ -166,6 +169,53 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
   });
 });
 
+const registerContextUsage = Effect.fn("McpHttpServer.registerContextUsage")(function* () {
+  const server = yield* McpServer.McpServer;
+  const repository = yield* ProjectionThreadActivityRepository;
+  const tool = ContextUsageTool;
+  yield* server.addTool({
+    tool: new McpSchema.Tool({
+      name: tool.name,
+      description: Tool.getDescription(tool),
+      inputSchema: Tool.getJsonSchema(tool),
+      annotations: {
+        ...Context.getOption(tool.annotations, Tool.Title).pipe(
+          Option.map((title) => ({ title })),
+          Option.getOrUndefined,
+        ),
+        readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
+        destructiveHint: Context.get(tool.annotations, Tool.Destructive),
+        idempotentHint: Context.get(tool.annotations, Tool.Idempotent),
+        openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
+      },
+    }),
+    annotations: tool.annotations,
+    handle: () =>
+      Effect.withFiber((fiber) => {
+        const invocation = Context.getUnsafe(
+          fiber.context,
+          McpInvocationContext.McpInvocationContext,
+        );
+        return repository.listByThreadId({ threadId: invocation.threadId }).pipe(
+          Effect.matchCause({
+            onFailure: (cause) =>
+              new McpSchema.CallToolResult({
+                isError: true,
+                content: [{ type: "text", text: Cause.pretty(cause) }],
+              }),
+            onSuccess: (activities) =>
+              new McpSchema.CallToolResult({
+                isError: false,
+                content: [{ type: "text", text: resolveContextUsage(activities) }],
+              }),
+          }),
+        );
+      }),
+  });
+});
+
+export const ContextUsageRegistrationLive = Layer.effectDiscard(registerContextUsage());
+
 const PreviewStandardToolkitRegistrationLive = McpServer.toolkit(PreviewStandardToolkit).pipe(
   Layer.provide(PreviewStandardToolkitHandlersLive),
 );
@@ -185,7 +235,7 @@ const McpTransportLive = McpServer.layerHttp({
   path: "/mcp",
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = PreviewToolkitRegistrationLive.pipe(
-  Layer.provideMerge(McpTransportLive),
-  Layer.provide(PreviewAutomationBroker.layer),
-);
+export const layer = Layer.mergeAll(
+  PreviewToolkitRegistrationLive,
+  ContextUsageRegistrationLive,
+).pipe(Layer.provideMerge(McpTransportLive), Layer.provide(PreviewAutomationBroker.layer));

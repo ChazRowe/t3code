@@ -1,7 +1,7 @@
 # Design: `context_usage` MCP tool
 
 - **Date:** 2026-06-22
-- **Status:** Approved (pending spec review)
+- **Status:** Implemented
 - **Topic:** A tiny MCP tool that reports the calling thread's context-window consumption as a percentage string.
 
 ## Summary
@@ -168,3 +168,24 @@ credential is already thread-scoped, and every issued credential is identical to
 
 None — design approved; no-data fallback is `"unknown"`; tool name is
 `context_usage`.
+
+## Implementation notes (as shipped)
+
+- **Self-contained formatter (deviation from "Components §2").** Rather than extract
+  `formatPercent` out of `orchestration/unattendedRun.ts`, the new tool ships its own
+  `formatContextPercent` in `apps/server/src/mcp/toolkits/context/usage.ts`. The
+  spec's suggested location (`orchestration/contextUsageFormat.ts`) would not actually
+  have removed the "MCP imports from orchestration" coupling it cited, and touching
+  the orchestration module (with its own test suite) is a larger blast radius than a
+  trivial 3-line pure-formatter duplication. Behavior and the `"20%"`/`"unknown"`
+  contract are unchanged. `unattendedRun.ts` is left as-is.
+- **Files added:** `apps/server/src/mcp/toolkits/context/{tools.ts,usage.ts,usage.test.ts}`.
+- **Files changed:** `apps/server/src/mcp/McpHttpServer.ts` (register + merge into `layer`;
+  exports `ContextUsageRegistrationLive`), `apps/server/src/mcp/McpHttpServer.test.ts`
+  (end-to-end test), `apps/server/src/server.test.ts` (mock `ProjectionThreadActivityRepository`).
+- **Test-harness note:** the `makeRoutesLayer` serve chain in `server.test.ts` was already
+  at the 20-argument `pipe` limit, so the new repo mock is merged into the adjacent
+  `ProjectionSnapshotQuery` provide via `Layer.merge` rather than added as a 21st
+  `Layer.provide`.
+- **Verification:** `usage.test.ts` 8/8, `McpHttpServer.test.ts` 4/4, `server.test.ts`
+  99/99; `apps/server` typecheck clean; new files lint- and fmt-clean.

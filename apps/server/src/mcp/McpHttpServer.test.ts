@@ -7,6 +7,10 @@ import * as Stream from "effect/Stream";
 import { McpSchema, McpServer } from "effect/unstable/ai";
 import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 
+import {
+  ProjectionThreadActivityRepository,
+  type ProjectionThreadActivity,
+} from "../persistence/Services/ProjectionThreadActivities.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
@@ -35,6 +39,21 @@ const client = McpSchema.McpServerClient.of({
 const TestLayer = McpHttpServer.PreviewToolkitRegistrationLive.pipe(
   Layer.provideMerge(McpServer.McpServer.layer),
   Layer.provideMerge(PreviewAutomationBroker.layer),
+);
+
+const contextActivities = [
+  { kind: "context-window.updated", payload: { usedTokens: 40_000, maxTokens: 200_000 } },
+] as unknown as ReadonlyArray<ProjectionThreadActivity>;
+
+const ContextUsageTestLayer = McpHttpServer.ContextUsageRegistrationLive.pipe(
+  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provide(
+    Layer.mock(ProjectionThreadActivityRepository)({
+      upsert: () => Effect.void,
+      listByThreadId: () => Effect.succeed(contextActivities),
+      deleteByThreadId: () => Effect.void,
+    }),
+  ),
 );
 
 it("normalizes empty successful notification responses to accepted", () => {
@@ -216,4 +235,26 @@ it.effect("registers annotated tools and preserves authenticated request context
       expect(press.content).toEqual([{ type: "text", text: "null" }]);
     }),
   ).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("reports the calling thread's context window usage as a plain percentage", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const server = yield* McpServer.McpServer;
+
+      const contextTool = server.tools.find(({ tool }) => tool.name === "context_usage");
+      expect(contextTool?.tool.annotations?.readOnlyHint).toBe(true);
+      expect(contextTool?.tool.annotations?.idempotentHint).toBe(true);
+      expect(contextTool?.tool.annotations?.destructiveHint).toBe(false);
+
+      const usage = yield* server
+        .callTool({ name: "context_usage", arguments: {} })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+      expect(usage.isError).toBe(false);
+      expect(usage.content).toEqual([{ type: "text", text: "20%" }]);
+    }),
+  ).pipe(Effect.provide(ContextUsageTestLayer)),
 );

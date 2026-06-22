@@ -25,13 +25,17 @@ export const buildUnattendedPreamble = (totalIterations: number): string =>
     `don't keep going to a "natural" stopping point. Wrapping early and often is`,
     `correct here.`,
     ``,
+    `If you finish everything before iteration ${totalIterations}, write`,
+    `"STATUS: COMPLETE" as the first line of the handoff and end WITHOUT the`,
+    `sentinel. The run pauses there rather than spinning through empty iterations.`,
+    ``,
     `If you instead need a human decision, STOP and ask your question WITHOUT the`,
     `sentinel line — the run will pause for me.`,
   ].join("\n");
 
 /** Message sent for iterations 2..N after the context is cleared. */
 export const CONTINUE_MESSAGE =
-  "continue — read the latest handoff document and resume the unattended run.";
+  "continue — invoke your continue skill to re-orient from the handoff, then resume the unattended run without waiting for me.";
 
 /** Activity kind for the marker emitted when an iteration's context is cleared. */
 export const CONTEXT_CLEARED_ACTIVITY_KIND = "unattended.context-cleared";

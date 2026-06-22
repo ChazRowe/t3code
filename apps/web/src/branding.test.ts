@@ -54,4 +54,11 @@ describe("branding", () => {
     expect(branding.HOSTED_APP_CHANNEL).toBeNull();
     expect(branding.HOSTED_APP_CHANNEL_LABEL).toBeNull();
   });
+
+  it("falls back to the Chaz Fork label when self-hosted", async () => {
+    const branding = await import("./branding");
+
+    expect(branding.APP_STAGE_LABEL).toBe("Chaz Fork");
+    expect(branding.APP_DISPLAY_NAME).toBe("T3 Code (Chaz Fork)");
+  });
 });

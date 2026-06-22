@@ -21,7 +21,7 @@
   - Client command type strings: `thread.unattended-run.start`, `thread.unattended-run.pause`, `thread.unattended-run.resume`, `thread.unattended-run.stop`.
   - Internal command type strings: `thread.unattended-run.advance`, `thread.unattended-run.fault`, `thread.unattended-run.complete`.
   - Statuses: `running | paused | completed | stopped`. Pause reasons: `no-sentinel | error | manual`. Outcomes: `completed | stopped`.
-  - Wrap sentinel: `<<T3_WRAP_COMPLETE>>`. Max iterations: `100`.
+  - Wrap sentinel: `<<WRAP_COMPLETE>>`. Max iterations: `100`.
 
 ---
 
@@ -661,7 +661,7 @@ Expected: FAIL — module not found.
 // apps/server/src/orchestration/unattendedRun.ts
 
 /** Sentinel the agent prints on its own line after wrapping an iteration. */
-export const WRAP_SENTINEL = "<<T3_WRAP_COMPLETE>>";
+export const WRAP_SENTINEL = "<<WRAP_COMPLETE>>";
 
 /** True when the agent's final message signals a completed wrap. */
 export const messageHasWrapSentinel = (text: string): boolean =>
@@ -1674,7 +1674,7 @@ git commit -m "feat(web): unattended run banner, dialog mount, and controls"
 Run: `cd /home/chaz/projects/t3code && vp check && vp run typecheck && vp test run`
 Expected: PASS across server, web, shared, contracts. Fix any fallout and re-run until green.
 
-- [ ] **Step 2: Manual smoke (optional but recommended).** Start the app, open a thread, "Start unattended run…", pick 2 iterations, and confirm: the preamble turn starts; ending a turn with `<<T3_WRAP_COMPLETE>>` triggers a context clear + continue; the banner tracks `iteration k of N`; removing the sentinel pauses the run with the amber banner; Pause/Resume/Stop behave.
+- [ ] **Step 2: Manual smoke (optional but recommended).** Start the app, open a thread, "Start unattended run…", pick 2 iterations, and confirm: the preamble turn starts; ending a turn with `<<WRAP_COMPLETE>>` triggers a context clear + continue; the banner tracks `iteration k of N`; removing the sentinel pauses the run with the amber banner; Pause/Resume/Stop behave.
 
 - [ ] **Step 3: Commit any fixups.**
 

@@ -1,5 +1,5 @@
 /** Sentinel the agent prints on its own line after wrapping an iteration. */
-export const WRAP_SENTINEL = "<<T3_WRAP_COMPLETE>>";
+export const WRAP_SENTINEL = "<<WRAP_COMPLETE>>";
 
 /** True when the agent's final message signals a completed wrap. */
 export const messageHasWrapSentinel = (text: string): boolean =>

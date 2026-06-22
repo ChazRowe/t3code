@@ -34,7 +34,7 @@ afterthought.
   context cleared → `continue` sent. `N` iterations = `N` context windows.
 - **Wrap sentinel** — a constant token the agent prints on its own line in the
   final message of a turn that completed a unit of work and wrapped. Default:
-  `<<T3_WRAP_COMPLETE>>`.
+  `<<WRAP_COMPLETE>>`.
 - **Context clear** — within-thread provider session reset: stop the current
   provider session so the next turn starts a brand-new session id (empty
   context). Same thread, same workspace, fresh window.
@@ -163,14 +163,14 @@ It never sends `continue` onto a context window it could not verify was cleared.
 A new constants module (e.g. `apps/server/src/orchestration/unattendedRun.ts`)
 owns three editable values so wording is easy to tune:
 
-- **`WRAP_SENTINEL = "<<T3_WRAP_COMPLETE>>"`** — shared by the reactor's scan
+- **`WRAP_SENTINEL = "<<WRAP_COMPLETE>>"`** — shared by the reactor's scan
   and the wrap skill's output.
 - **Unattended preamble** (iteration 1 message): states that this is an
   unattended run of `N` iterations, that no human will respond mid-run, and the
   contract:
   > Do as much as you can this context window. When you reach a good stopping
   > point or your context is filling, invoke your wrap skill to write the
-  > handoff, then end your message with `<<T3_WRAP_COMPLETE>>` on its own line.
+  > handoff, then end your message with `<<WRAP_COMPLETE>>` on its own line.
   > If you need a human decision, stop and ask **without** the sentinel — the
   > run will pause for me.
 - **Continue message** (iterations 2..N): the user's `continue` invocation text,

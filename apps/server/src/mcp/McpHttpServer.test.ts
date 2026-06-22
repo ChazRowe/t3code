@@ -24,6 +24,7 @@ const invocation = {
   providerSessionId: "provider-session-mcp-test",
   providerInstanceId: ProviderInstanceId.make("codex"),
   capabilities: new Set(["preview"] as const),
+  subagentDepth: 0,
   issuedAt: 1,
   expiresAt: Number.MAX_SAFE_INTEGER,
 };

@@ -1,8 +1,10 @@
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
@@ -10,12 +12,17 @@ import { McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionThreadActivityRepository } from "../persistence/Services/ProjectionThreadActivities.ts";
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderService } from "../provider/Services/ProviderService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 import { ContextUsageTool } from "./toolkits/context/tools.ts";
 import { resolveContextUsage } from "./toolkits/context/usage.ts";
+import { makeSpawnAgentHandlers } from "./toolkits/spawn/handlers.ts";
+import { ListAgentsTool, SpawnAgentParameters, SpawnAgentTool } from "./toolkits/spawn/tools.ts";
 import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
@@ -214,7 +221,92 @@ const registerContextUsage = Effect.fn("McpHttpServer.registerContextUsage")(fun
   });
 });
 
+const mcpToolAnnotations = (tool: Tool.Any) => ({
+  ...Context.getOption(tool.annotations, Tool.Title).pipe(
+    Option.map((title) => ({ title })),
+    Option.getOrUndefined,
+  ),
+  readOnlyHint: Context.get(tool.annotations, Tool.Readonly),
+  destructiveHint: Context.get(tool.annotations, Tool.Destructive),
+  idempotentHint: Context.get(tool.annotations, Tool.Idempotent),
+  openWorldHint: Context.get(tool.annotations, Tool.OpenWorld),
+});
+
+const registerSpawnToolkit = Effect.fn("McpHttpServer.registerSpawnToolkit")(function* () {
+  const server = yield* McpServer.McpServer;
+  const providerService = yield* ProviderService;
+  const instanceRegistry = yield* ProviderInstanceRegistry;
+  const orchestrationEngine = yield* OrchestrationEngineService;
+  const crypto = yield* Crypto.Crypto;
+  const handlers = makeSpawnAgentHandlers({
+    providerService,
+    instanceRegistry,
+    orchestrationEngine,
+    crypto,
+  });
+  const decodeParams = Schema.decodeUnknownEffect(SpawnAgentParameters);
+
+  yield* server.addTool({
+    tool: new McpSchema.Tool({
+      name: SpawnAgentTool.name,
+      description: Tool.getDescription(SpawnAgentTool),
+      inputSchema: Tool.getJsonSchema(SpawnAgentTool),
+      annotations: mcpToolAnnotations(SpawnAgentTool),
+    }),
+    annotations: SpawnAgentTool.annotations,
+    handle: (payload) =>
+      Effect.withFiber((fiber) => {
+        const invocation = Context.getUnsafe(
+          fiber.context,
+          McpInvocationContext.McpInvocationContext,
+        );
+        return decodeParams(payload).pipe(
+          Effect.flatMap((params) => handlers.spawnAgent(params, invocation)),
+          Effect.matchCause({
+            onFailure: (cause) =>
+              new McpSchema.CallToolResult({
+                isError: true,
+                content: [{ type: "text", text: Cause.pretty(cause) }],
+              }),
+            onSuccess: (text) =>
+              new McpSchema.CallToolResult({
+                isError: false,
+                content: [{ type: "text", text }],
+              }),
+          }),
+        );
+      }),
+  });
+
+  yield* server.addTool({
+    tool: new McpSchema.Tool({
+      name: ListAgentsTool.name,
+      description: Tool.getDescription(ListAgentsTool),
+      inputSchema: Tool.getJsonSchema(ListAgentsTool),
+      annotations: mcpToolAnnotations(ListAgentsTool),
+    }),
+    annotations: ListAgentsTool.annotations,
+    handle: () =>
+      handlers.listAgents().pipe(
+        Effect.matchCause({
+          onFailure: (cause) =>
+            new McpSchema.CallToolResult({
+              isError: true,
+              content: [{ type: "text", text: Cause.pretty(cause) }],
+            }),
+          onSuccess: (text) =>
+            new McpSchema.CallToolResult({
+              isError: false,
+              content: [{ type: "text", text }],
+            }),
+        }),
+      ),
+  });
+});
+
 export const ContextUsageRegistrationLive = Layer.effectDiscard(registerContextUsage());
+
+export const SpawnToolkitRegistrationLive = Layer.effectDiscard(registerSpawnToolkit());
 
 const PreviewStandardToolkitRegistrationLive = McpServer.toolkit(PreviewStandardToolkit).pipe(
   Layer.provide(PreviewStandardToolkitHandlersLive),
@@ -238,4 +330,5 @@ const McpTransportLive = McpServer.layerHttp({
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   ContextUsageRegistrationLive,
+  SpawnToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive), Layer.provide(PreviewAutomationBroker.layer));

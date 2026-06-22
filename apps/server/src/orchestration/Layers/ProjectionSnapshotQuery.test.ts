@@ -1674,6 +1674,83 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("resolves a cross-provider subagent ref + transcript from its own child thread", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+
+      // Root node lives on the PARENT thread, carrying the child thread + provider
+      // metadata under payload.subagentSession (as the spawn_agent handler writes it).
+      yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-cross', 'thread-1', NULL, 'tool', 'tool.completed',
+            'codex: do the thing',
+            ${`{"itemType":"collab_agent_tool_call","itemId":"item-cross","status":"completed","data":{"input":{"subagent_type":"codex","prompt":"do the thing"},"result":{"content":"done"}},"subagentSession":{"childThreadId":"thread-child","providerInstanceId":"codex","provider":"codex","model":"gpt-5-codex"}}`},
+            '2026-06-20T00:00:01.000Z', 'item-cross', NULL, NULL
+          )
+        `;
+      // A direct child of the node on the PARENT thread — must NOT be returned for a
+      // cross-provider node (its transcript comes from the child thread instead).
+      yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-parent-child', 'thread-1', NULL, 'info', 'tool.completed', 'noise',
+            '{"itemType":"command_execution","itemId":"item-noise"}',
+            '2026-06-20T00:00:02.000Z', 'item-noise', 'item-cross', NULL
+          )
+        `;
+      // The child session's transcript — plain activities on the child thread.
+      yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'child-1', 'thread-child', 'turn-c', 'info', 'assistant_message.completed',
+            'hi', '{"itemType":"assistant_message","itemId":"c-msg-1"}',
+            '2026-06-20T00:00:03.000Z', 'c-msg-1', NULL, NULL
+          )
+        `;
+      yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'child-2', 'thread-child', 'turn-c', 'info', 'assistant_message.completed',
+            'done', '{"itemType":"assistant_message","itemId":"c-msg-2"}',
+            '2026-06-20T00:00:04.000Z', 'c-msg-2', NULL, NULL
+          )
+        `;
+
+      const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+      assert.strictEqual(refs.length, 1);
+      const ref = refs[0];
+      assert.strictEqual(ref?.childThreadId, "thread-child");
+      assert.strictEqual(ref?.providerInstanceId, "codex");
+      assert.strictEqual(ref?.provider, "codex");
+      assert.strictEqual(ref?.model, "gpt-5-codex");
+      assert.strictEqual(ref?.status, "completed");
+
+      // The transcript resolves from the CHILD thread, not the parent's direct children.
+      const activities = yield* snapshotQuery.getSubagentActivities({
+        threadId: ThreadId.make("thread-1"),
+        rootItemId: RuntimeItemId.make("item-cross"),
+      });
+      assert.deepStrictEqual(
+        activities.map((a) => a.id),
+        ["child-1", "child-2"],
+      );
+    }),
+  );
+
   it.effect(
     "getSubagentTree scopes out subagents from a prior context once the context is cleared",
     () =>

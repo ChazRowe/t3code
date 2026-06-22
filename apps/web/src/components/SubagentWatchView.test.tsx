@@ -1,8 +1,11 @@
 import {
   EnvironmentId,
   EventId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   RuntimeItemId,
   ThreadId,
+  TrimmedNonEmptyString,
   type OrchestrationSubagentRef,
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
@@ -134,6 +137,10 @@ function makeRef(status: OrchestrationSubagentRef["status"]): OrchestrationSubag
     childSubagentCount: 0,
     prompt: null,
     resultText: null,
+    childThreadId: null,
+    providerInstanceId: null,
+    provider: null,
+    model: null,
     createdAt: "2026-06-20T00:00:00.000Z",
     updatedAt: "2026-06-20T00:00:00.000Z",
   };
@@ -194,5 +201,52 @@ describe("SubagentWatchView", () => {
 
     expect(markup).toContain('data-testid="subagent-finished-banner"');
     expect(markup).toContain("Subagent finished");
+  });
+
+  it("shows the provider and model for a cross-provider subagent", async () => {
+    const { SubagentWatchView } = await import("./SubagentWatchView");
+
+    const crossRef: OrchestrationSubagentRef = {
+      ...makeRef("inProgress"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      provider: ProviderDriverKind.make("codex"),
+      model: TrimmedNonEmptyString.make("gpt-5-codex"),
+    };
+    storeModule.useStore
+      .getState()
+      .syncSubagentActivitiesSnapshot(ENV_ID, THREAD_ID, ROOT_ITEM_ID_STR, [makeActivity()]);
+    storeModule.useStore.getState().syncSubagentTreeSnapshot(ENV_ID, THREAD_ID, [crossRef]);
+
+    const markup = renderToStaticMarkup(
+      <SubagentWatchView
+        environmentId={ENV_ID}
+        threadId={THREAD_ID}
+        subagentRootItemId={ROOT_ITEM_ID_STR}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="subagent-provider-model"');
+    expect(markup).toContain("codex · gpt-5-codex");
+  });
+
+  it("omits the provider/model line for a same-thread subagent", async () => {
+    const { SubagentWatchView } = await import("./SubagentWatchView");
+
+    storeModule.useStore
+      .getState()
+      .syncSubagentActivitiesSnapshot(ENV_ID, THREAD_ID, ROOT_ITEM_ID_STR, [makeActivity()]);
+    storeModule.useStore
+      .getState()
+      .syncSubagentTreeSnapshot(ENV_ID, THREAD_ID, [makeRef("inProgress")]);
+
+    const markup = renderToStaticMarkup(
+      <SubagentWatchView
+        environmentId={ENV_ID}
+        threadId={THREAD_ID}
+        subagentRootItemId={ROOT_ITEM_ID_STR}
+      />,
+    );
+
+    expect(markup).not.toContain('data-testid="subagent-provider-model"');
   });
 });

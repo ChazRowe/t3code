@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
   EventId,
@@ -61,6 +61,10 @@ export const ProviderSessionStartInput = Schema.Struct({
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
   runtimeMode: RuntimeMode,
+  // Spawn depth for sessions started as a cross-provider subagent (via the
+  // `spawn_agent` MCP tool); stamped on the session's MCP credential to bound
+  // recursion. Omitted/0 for user-started sessions.
+  subagentDepth: Schema.optional(NonNegativeInt),
 });
 export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 

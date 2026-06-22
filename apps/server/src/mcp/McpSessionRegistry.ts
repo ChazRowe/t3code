@@ -14,6 +14,9 @@ import * as McpProviderSession from "./McpProviderSession.ts";
 export interface McpCredentialRequest {
   readonly threadId: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
+  // Spawn depth to stamp on the issued credential (0 for user-started sessions). A
+  // session spawned via `spawn_agent` passes its parent's depth + 1.
+  readonly subagentDepth?: number;
 }
 
 export interface McpIssuedCredential {
@@ -103,7 +106,8 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
         threadId: ThreadId.make(request.threadId),
         providerSessionId,
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
-        capabilities: new Set(["preview"]),
+        capabilities: new Set(["preview", "spawn"]),
+        subagentDepth: request.subagentDepth ?? 0,
         issuedAt,
         expiresAt,
       };

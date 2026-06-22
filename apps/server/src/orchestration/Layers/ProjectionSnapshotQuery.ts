@@ -27,6 +27,8 @@ import {
   type OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   ThreadId,
   UnattendedRunState,
 } from "@t3tools/contracts";
@@ -133,6 +135,10 @@ const ThreadIdLookupInput = Schema.Struct({
 const ThreadParentItemLookupInput = Schema.Struct({
   threadId: ThreadId,
   parentItemId: RuntimeItemId,
+});
+const ThreadItemLookupInput = Schema.Struct({
+  threadId: ThreadId,
+  itemId: RuntimeItemId,
 });
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
@@ -349,6 +355,34 @@ const deriveSubagentResultText = (payload: unknown): string | null => {
     return trimmedOrNull(text);
   }
   return null;
+};
+
+// Cross-provider subagents (spawned via the `spawn_agent` MCP tool) stash the child
+// session's identity under `payload.subagentSession`. Same-thread Claude subagents have
+// no such block, so every field resolves to null and the ref is unchanged.
+interface SubagentSessionMeta {
+  readonly childThreadId: ThreadId | null;
+  readonly providerInstanceId: ProviderInstanceId | null;
+  readonly provider: ProviderDriverKind | null;
+  readonly model: typeof TrimmedNonEmptyString.Type | null;
+}
+
+const deriveSubagentSessionMeta = (payload: unknown): SubagentSessionMeta => {
+  const meta = asRecordOrNull(asRecordOrNull(payload)?.subagentSession);
+  if (meta === null) {
+    return { childThreadId: null, providerInstanceId: null, provider: null, model: null };
+  }
+  const childThreadId = trimmedOrNull(meta.childThreadId);
+  const providerInstanceId = trimmedOrNull(meta.providerInstanceId);
+  const provider = trimmedOrNull(meta.provider);
+  const model = trimmedOrNull(meta.model);
+  return {
+    childThreadId: childThreadId === null ? null : ThreadId.make(childThreadId),
+    providerInstanceId:
+      providerInstanceId === null ? null : ProviderInstanceId.make(providerInstanceId),
+    provider: provider === null ? null : ProviderDriverKind.make(provider),
+    model: model === null ? null : TrimmedNonEmptyString.make(model),
+  };
 };
 
 const subagentStatusFromActivity = (
@@ -1012,6 +1046,66 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND parent_item_id IS NULL
           AND json_extract(payload_json, '$.itemType') = 'collab_agent_tool_call'
+        ORDER BY
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  // The latest row for a single subagent root item — used to read its
+  // `payload.subagentSession.childThreadId` when resolving a cross-provider
+  // subagent's transcript (which lives in that separate child thread).
+  const listActivityRowsByThreadAndItem = SqlSchema.findAll({
+    Request: ThreadItemLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, itemId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND item_id = ${itemId}
+        ORDER BY
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  // Every activity in a thread, in timeline order — used to surface a cross-provider
+  // subagent's full transcript from its own child thread.
+  const listAllActivityRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          item_id AS "itemId",
+          parent_item_id AS "parentItemId",
+          iteration,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
         ORDER BY
           sequence ASC,
           created_at ASC,
@@ -2298,15 +2392,50 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     threadId,
     rootItemId,
   }) =>
-    listSubagentChildActivityRowsByParent({ threadId, parentItemId: rootItemId }).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "ProjectionSnapshotQuery.getSubagentActivities:listChildren:query",
-          "ProjectionSnapshotQuery.getSubagentActivities:listChildren:decodeRows",
+    Effect.gen(function* () {
+      // A cross-provider subagent runs on its own thread; its transcript is that whole
+      // thread, not direct children of the node in the parent thread. Detect it by the
+      // `childThreadId` stashed on the root node's payload and read the child thread.
+      const rootRows = yield* listActivityRowsByThreadAndItem({
+        threadId,
+        itemId: rootItemId,
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getSubagentActivities:rootRow:query",
+            "ProjectionSnapshotQuery.getSubagentActivities:rootRow:decodeRows",
+          ),
         ),
-      ),
-      Effect.map((rows) => rows.map(mapActivityRow)),
-    );
+      );
+      const childThreadId = deriveSubagentSessionMeta(
+        rootRows[rootRows.length - 1]?.payload,
+      ).childThreadId;
+
+      if (childThreadId !== null) {
+        const childRows = yield* listAllActivityRowsByThread({ threadId: childThreadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getSubagentActivities:childThread:query",
+              "ProjectionSnapshotQuery.getSubagentActivities:childThread:decodeRows",
+            ),
+          ),
+        );
+        return childRows.map(mapActivityRow);
+      }
+
+      const childRows = yield* listSubagentChildActivityRowsByParent({
+        threadId,
+        parentItemId: rootItemId,
+      }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getSubagentActivities:listChildren:query",
+            "ProjectionSnapshotQuery.getSubagentActivities:listChildren:decodeRows",
+          ),
+        ),
+      );
+      return childRows.map(mapActivityRow);
+    });
 
   const getSubagentTree: ProjectionSnapshotQueryShape["getSubagentTree"] = ({ threadId }) =>
     Effect.gen(function* () {
@@ -2396,6 +2525,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           continue;
         }
         const { type, description } = deriveSubagentLabel(latest.payload, latest.summary);
+        const sessionMeta = deriveSubagentSessionMeta(latest.payload);
         refs.push({
           threadId,
           rootItemId: RuntimeItemId.make(itemId),
@@ -2410,6 +2540,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           childSubagentCount: NonNegativeInt.make(childCountByItem.get(itemId) ?? 0),
           prompt: deriveSubagentPrompt(latest.payload),
           resultText: deriveSubagentResultText(latest.payload),
+          childThreadId: sessionMeta.childThreadId,
+          providerInstanceId: sessionMeta.providerInstanceId,
+          provider: sessionMeta.provider,
+          model: sessionMeta.model,
           createdAt: first.createdAt,
           updatedAt: latest.createdAt,
         });

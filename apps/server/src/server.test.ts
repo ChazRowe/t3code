@@ -97,6 +97,8 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
@@ -699,12 +701,27 @@ const buildAppUnderTest = (options?: {
         ),
       ),
       Layer.provide(
-        Layer.mock(OrchestrationEngineService)({
-          readEvents: () => Stream.empty,
-          dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.empty,
-          ...options?.layers?.orchestrationEngine,
-        }),
+        Layer.mergeAll(
+          Layer.mock(OrchestrationEngineService)({
+            readEvents: () => Stream.empty,
+            dispatch: () => Effect.succeed({ sequence: 0 }),
+            streamDomainEvents: Stream.empty,
+            ...options?.layers?.orchestrationEngine,
+          }),
+          // The MCP HTTP server (part of makeRoutesLayer) exposes the spawn_agent
+          // toolkit, which depends on these provider services. Tests do not exercise
+          // spawning, so empty mocks suffice; missing methods auto-stub. Merged here
+          // (rather than added as separate Layer.provide args) to stay within the
+          // 20-argument `.pipe` limit on the serve chain.
+          Layer.mock(ProviderService)({
+            listSessions: () => Effect.succeed([]),
+            streamEvents: Stream.empty,
+          }),
+          Layer.mock(ProviderInstanceRegistry)({
+            getInstance: () => Effect.succeed(undefined),
+            listInstances: Effect.succeed([]),
+          }),
+        ),
       ),
       Layer.provide(
         Layer.merge(
@@ -5463,6 +5480,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           childSubagentCount: 0,
           prompt: null,
           resultText: null,
+          childThreadId: null,
+          providerInstanceId: null,
+          provider: null,
+          model: null,
           createdAt: "2026-06-20T00:00:01.000Z",
           updatedAt: "2026-06-20T00:00:01.000Z",
         };

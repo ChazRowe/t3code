@@ -22,7 +22,7 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -1314,6 +1314,15 @@ export const OrchestrationSubagentRef = Schema.Struct({
   // subagent returned to its parent (the tool result) — surfaced for the watch view.
   prompt: Schema.NullOr(Schema.String),
   resultText: Schema.NullOr(Schema.String),
+  // Cross-provider subagents (spawned via the `spawn_agent` MCP tool) run as a real
+  // session on their own thread; `childThreadId` points the watch view at that
+  // thread's transcript, and `providerInstanceId`/`provider`/`model` let it show
+  // which provider + model the subagent ran on at the top of the transcript. All null
+  // for ordinary same-thread (Claude SDK) subagents.
+  childThreadId: Schema.NullOr(ThreadId),
+  providerInstanceId: Schema.NullOr(ProviderInstanceId),
+  provider: Schema.NullOr(ProviderDriverKind),
+  model: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

@@ -114,6 +114,13 @@ export function SubagentWatchView({
 
   const isFinished = subagentRef != null && subagentRef.status !== "inProgress";
 
+  // Cross-provider subagents (spawned via `spawn_agent`) carry the provider + model
+  // they ran on; show it at the top of the transcript. Same-thread Claude subagents
+  // leave these null, so the label is omitted and the header is unchanged.
+  const providerLabel = subagentRef?.provider ?? subagentRef?.providerInstanceId ?? null;
+  const providerModelLabel =
+    [providerLabel, subagentRef?.model ?? null].filter((part) => part !== null).join(" · ") || null;
+
   const listRef = useMemo(() => createRef<LegendListRef | null>(), []);
 
   return (
@@ -123,6 +130,14 @@ export function SubagentWatchView({
           Subagent:{" "}
           <span className="text-foreground">{subagentRef?.subagentType ?? "unknown"}</span>
         </div>
+        {providerModelLabel !== null && (
+          <div
+            data-testid="subagent-provider-model"
+            className="mt-1 text-xs font-medium text-muted-foreground"
+          >
+            {providerModelLabel}
+          </div>
+        )}
         {subagentRef?.description && (
           <div className="mt-1 text-xs text-muted-foreground">{subagentRef.description}</div>
         )}

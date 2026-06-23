@@ -7,6 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import type { McpInvocationScope } from "../../McpInvocationContext.ts";
@@ -69,6 +70,7 @@ const makeDeps = (options: {
       Effect.succeed({ threadId: "subagent-id-1", turnId: "turn-1" }) as unknown as ReturnType<
         typeof ProviderService.Service.sendTurn
       >,
+    stopSession: () => Effect.void,
     streamEvents: Stream.fromIterable(options.events ?? []),
   } as unknown as typeof ProviderService.Service;
 
@@ -85,10 +87,26 @@ const makeDeps = (options: {
       }),
   } as unknown as typeof OrchestrationEngineService.Service;
 
+  // Resolves both the parent thread (for project lookup) and the child thread (so the
+  // projection-wait loop terminates immediately).
+  const snapshotQuery = {
+    getThreadShellById: () =>
+      Effect.succeed(
+        Option.some({
+          id: PARENT_THREAD_ID,
+          projectId: "project-1",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        }),
+      ),
+  } as unknown as typeof import("../../../orchestration/Services/ProjectionSnapshotQuery.ts").ProjectionSnapshotQuery.Service;
+
   return {
     providerService,
     instanceRegistry,
     orchestrationEngine,
+    snapshotQuery,
     crypto: makeCrypto(),
   };
 };

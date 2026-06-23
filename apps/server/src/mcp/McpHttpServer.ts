@@ -13,6 +13,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 
 import packageJson from "../../package.json" with { type: "json" };
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionThreadActivityRepository } from "../persistence/Services/ProjectionThreadActivities.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
@@ -237,11 +238,13 @@ const registerSpawnToolkit = Effect.fn("McpHttpServer.registerSpawnToolkit")(fun
   const providerService = yield* ProviderService;
   const instanceRegistry = yield* ProviderInstanceRegistry;
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const snapshotQuery = yield* ProjectionSnapshotQuery;
   const crypto = yield* Crypto.Crypto;
   const handlers = makeSpawnAgentHandlers({
     providerService,
     instanceRegistry,
     orchestrationEngine,
+    snapshotQuery,
     crypto,
   });
   const decodeParams = Schema.decodeUnknownEffect(SpawnAgentParameters);

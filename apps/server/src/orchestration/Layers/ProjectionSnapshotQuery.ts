@@ -521,6 +521,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NULL
+          AND parent_thread_id IS NULL
         ORDER BY project_id ASC, created_at ASC, thread_id ASC
       `,
   });
@@ -554,6 +555,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NOT NULL
+          AND parent_thread_id IS NULL
         ORDER BY project_id ASC, archived_at DESC, thread_id DESC
       `,
   });

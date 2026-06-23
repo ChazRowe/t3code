@@ -33,6 +33,10 @@ export const ProjectionThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  // Set when this thread is a cross-provider subagent; points at the spawning thread.
+  // Optional so queries that don't select the column still decode. Hidden from the
+  // top-level shell snapshot.
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

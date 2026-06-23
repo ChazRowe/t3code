@@ -573,6 +573,67 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
   );
 
   it.effect(
+    "hides cross-provider subagent threads from the shell snapshot but keeps them in the read model",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_projects`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_state`;
+
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            'project-1', 'Project 1', '/tmp/project-1',
+            '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+            '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+          )
+        `;
+        // A normal thread and a subagent thread (parent_thread_id set).
+        yield* sql`
+          INSERT INTO projection_threads (
+            thread_id, project_id, title, model_selection_json, runtime_mode,
+            interaction_mode, branch, worktree_path, parent_thread_id, latest_turn_id,
+            latest_user_message_at, pending_approval_count, pending_user_input_count,
+            has_actionable_proposed_plan, created_at, updated_at, archived_at, deleted_at
+          ) VALUES
+            (
+              'thread-normal', 'project-1', 'Normal',
+              '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+              NULL, NULL, NULL, NULL, NULL, 0, 0, 0,
+              '2026-06-20T00:00:02.000Z', '2026-06-20T00:00:03.000Z', NULL, NULL
+            ),
+            (
+              'thread-subagent', 'project-1', 'codex: do it',
+              '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+              NULL, NULL, 'thread-normal', NULL, NULL, 0, 0, 0,
+              '2026-06-20T00:00:04.000Z', '2026-06-20T00:00:05.000Z', NULL, NULL
+            )
+        `;
+        yield* sql`
+          INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
+          VALUES (${ORCHESTRATION_PROJECTOR_NAMES.threads}, 4, '2026-06-20T00:00:07.000Z')
+        `;
+
+        // Shell (sidebar) snapshot excludes the subagent thread.
+        const shell = yield* snapshotQuery.getShellSnapshot();
+        assert.deepEqual(
+          shell.threads.map((t) => t.id),
+          [ThreadId.make("thread-normal")],
+        );
+
+        // The command/read model still includes it (so the decider's requireThread
+        // passes for the child's own activity appends).
+        const readModel = yield* snapshotQuery.getSnapshot();
+        assert.isTrue(readModel.threads.some((t) => t.id === ThreadId.make("thread-subagent")));
+      }),
+  );
+
+  it.effect(
     "reads targeted project, thread, and count queries without hydrating the full snapshot",
     () =>
       Effect.gen(function* () {

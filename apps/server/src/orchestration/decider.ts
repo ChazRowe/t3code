@@ -244,6 +244,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          ...(command.parentThreadId !== undefined
+            ? { parentThreadId: command.parentThreadId }
+            : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -809,7 +812,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "thread.unattended-run.start": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
-      if (thread.unattendedRun && (thread.unattendedRun.status === "running" || thread.unattendedRun.status === "paused")) {
+      if (
+        thread.unattendedRun &&
+        (thread.unattendedRun.status === "running" || thread.unattendedRun.status === "paused")
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Thread '${command.threadId}' already has an active unattended run.`,
@@ -817,9 +823,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
         type: "thread.unattended-run-started",
-        payload: { threadId: command.threadId, totalIterations: command.totalIterations, startedAt: occurredAt, updatedAt: occurredAt },
+        payload: {
+          threadId: command.threadId,
+          totalIterations: command.totalIterations,
+          startedAt: occurredAt,
+          updatedAt: occurredAt,
+        },
       };
     }
 
@@ -827,13 +843,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const run = thread.unattendedRun;
       if (!run || run.status !== "running") {
-        return yield* new OrchestrationCommandInvariantError({ commandType: command.type, detail: `Thread '${command.threadId}' has no running unattended run to advance.` });
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no running unattended run to advance.`,
+        });
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
         type: "thread.unattended-run-iteration-advanced",
-        payload: { threadId: command.threadId, iteration: run.currentIteration + 1, updatedAt: occurredAt },
+        payload: {
+          threadId: command.threadId,
+          iteration: run.currentIteration + 1,
+          updatedAt: occurredAt,
+        },
       };
     }
 
@@ -841,13 +869,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const run = thread.unattendedRun;
       if (!run || run.status !== "running") {
-        return yield* new OrchestrationCommandInvariantError({ commandType: command.type, detail: `Thread '${command.threadId}' has no running unattended run to pause.` });
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no running unattended run to pause.`,
+        });
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
         type: "thread.unattended-run-paused",
-        payload: { threadId: command.threadId, reason: command.reason ?? "manual", updatedAt: occurredAt },
+        payload: {
+          threadId: command.threadId,
+          reason: command.reason ?? "manual",
+          updatedAt: occurredAt,
+        },
       };
     }
 
@@ -855,11 +895,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const run = thread.unattendedRun;
       if (!run || run.status !== "running") {
-        return yield* new OrchestrationCommandInvariantError({ commandType: command.type, detail: `Thread '${command.threadId}' has no running unattended run to fault.` });
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no running unattended run to fault.`,
+        });
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
         type: "thread.unattended-run-paused",
         payload: { threadId: command.threadId, reason: command.reason, updatedAt: occurredAt },
       };
@@ -869,11 +917,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const run = thread.unattendedRun;
       if (!run || run.status !== "paused") {
-        return yield* new OrchestrationCommandInvariantError({ commandType: command.type, detail: `Thread '${command.threadId}' has no paused unattended run to resume.` });
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no paused unattended run to resume.`,
+        });
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
         type: "thread.unattended-run-resumed",
         payload: { threadId: command.threadId, updatedAt: occurredAt },
       };
@@ -883,13 +939,26 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const run = thread.unattendedRun;
       if (!run || (run.status !== "running" && run.status !== "paused")) {
-        return yield* new OrchestrationCommandInvariantError({ commandType: command.type, detail: `Thread '${command.threadId}' has no active unattended run to stop.` });
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no active unattended run to stop.`,
+        });
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
         type: "thread.unattended-run-finished",
-        payload: { threadId: command.threadId, outcome: "stopped", iteration: run.currentIteration, updatedAt: occurredAt },
+        payload: {
+          threadId: command.threadId,
+          outcome: "stopped",
+          iteration: run.currentIteration,
+          updatedAt: occurredAt,
+        },
       };
     }
 
@@ -897,13 +966,26 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const run = thread.unattendedRun;
       if (!run || run.status !== "running") {
-        return yield* new OrchestrationCommandInvariantError({ commandType: command.type, detail: `Thread '${command.threadId}' has no running unattended run to complete.` });
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no running unattended run to complete.`,
+        });
       }
       const occurredAt = yield* nowIso;
       return {
-        ...(yield* withEventBase({ aggregateKind: "thread", aggregateId: command.threadId, occurredAt, commandId: command.commandId })),
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
         type: "thread.unattended-run-finished",
-        payload: { threadId: command.threadId, outcome: "completed", iteration: run.currentIteration, updatedAt: occurredAt },
+        payload: {
+          threadId: command.threadId,
+          outcome: "completed",
+          iteration: run.currentIteration,
+          updatedAt: occurredAt,
+        },
       };
     }
 

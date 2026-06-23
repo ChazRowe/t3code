@@ -2,9 +2,12 @@ import {
   CommandId,
   EventId,
   IsoDateTime,
+  ProjectId,
   ProviderInstanceId,
   RuntimeItemId,
   ThreadId,
+  TrimmedNonEmptyString,
+  type ProviderInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import type * as Crypto from "effect/Crypto";
@@ -19,6 +22,7 @@ import * as Stream from "effect/Stream";
 
 import type { McpInvocationScope } from "../../McpInvocationContext.ts";
 import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderInstanceRegistry } from "../../../provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderService } from "../../../provider/Services/ProviderService.ts";
 import type { SpawnAgentParameters } from "./tools.ts";
@@ -40,6 +44,7 @@ export interface SpawnAgentDeps {
   readonly providerService: typeof ProviderService.Service;
   readonly instanceRegistry: typeof ProviderInstanceRegistry.Service;
   readonly orchestrationEngine: typeof OrchestrationEngineService.Service;
+  readonly snapshotQuery: typeof ProjectionSnapshotQuery.Service;
   readonly crypto: typeof Crypto.Crypto.Service;
 }
 
@@ -49,7 +54,7 @@ const firstLine = (text: string): string => {
 };
 
 export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
-  const { providerService, instanceRegistry, orchestrationEngine, crypto } = deps;
+  const { providerService, instanceRegistry, orchestrationEngine, snapshotQuery, crypto } = deps;
 
   // UUID generation can technically fail with a PlatformError; in practice it does not,
   // and there is no meaningful recovery, so treat a failure as a defect.
@@ -117,6 +122,56 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
       });
     });
 
+  // Poll (bounded) until the projection pipeline reflects a thread, swallowing query
+  // errors and giving up after `attemptsLeft` tries (best-effort).
+  const waitForThreadProjection = (
+    threadId: ThreadId,
+    attemptsLeft: number,
+  ): Effect.Effect<void> => {
+    if (attemptsLeft <= 0) return Effect.void;
+    const retry = Effect.sleep(Duration.millis(50)).pipe(
+      Effect.andThen(() => waitForThreadProjection(threadId, attemptsLeft - 1)),
+    );
+    return snapshotQuery.getThreadShellById(threadId).pipe(
+      Effect.flatMap((shell) => (Option.isSome(shell) ? Effect.void : retry)),
+      Effect.catch(() => retry),
+    );
+  };
+
+  const createChildThread = (input: {
+    readonly childThreadId: ThreadId;
+    readonly parentThreadId: ThreadId;
+    readonly projectId: ProjectId;
+    readonly title: string;
+    readonly targetInstanceId: ProviderInstanceId;
+    readonly model: string;
+    readonly runtimeMode: RuntimeMode;
+    readonly interactionMode: ProviderInteractionMode;
+    readonly branch: string | null;
+    readonly worktreePath: string | null;
+    readonly createdAt: IsoDateTime;
+  }) =>
+    Effect.gen(function* () {
+      const commandUuid = yield* randomId;
+      yield* orchestrationEngine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`spawn-create:${input.childThreadId}:${commandUuid}`),
+        threadId: input.childThreadId,
+        projectId: input.projectId,
+        title: TrimmedNonEmptyString.make(input.title),
+        modelSelection: {
+          instanceId: input.targetInstanceId,
+          model: TrimmedNonEmptyString.make(input.model),
+        },
+        runtimeMode: input.runtimeMode,
+        interactionMode: input.interactionMode,
+        branch: input.branch,
+        worktreePath: input.worktreePath,
+        parentThreadId: input.parentThreadId,
+        createdAt: input.createdAt,
+      });
+    });
+
   const spawnAgent = (
     params: SpawnAgentParameters,
     invocation: McpInvocationScope,
@@ -152,6 +207,24 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         }
         const runtimeMode: RuntimeMode = parentSession.runtimeMode;
 
+        // The child is a real thread under the caller's project; resolve it so the
+        // child thread.create has a project to attach to and inherits branch/worktree.
+        const parentShell = yield* snapshotQuery.getThreadShellById(invocation.threadId).pipe(
+          Effect.mapError(
+            (error) =>
+              new SpawnAgentError({
+                message: `Failed to resolve the calling thread: ${error.message ?? String(error)}`,
+              }),
+          ),
+        );
+        if (Option.isNone(parentShell)) {
+          return yield* new SpawnAgentError({
+            message:
+              "Could not resolve the calling thread to place the subagent under its project.",
+          });
+        }
+        const parent = parentShell.value;
+
         const childThreadId = ThreadId.make(`subagent-${yield* randomId}`);
         const rootItemId = RuntimeItemId.make(`spawn-${yield* randomId}`);
         const description = params.description ?? null;
@@ -162,7 +235,10 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         const startedAt = yield* nowIso;
 
         // Start the child session, inheriting cwd/runtime mode and stamping the spawn
-        // depth so the child's MCP credential bounds further recursion.
+        // depth so the child's MCP credential bounds further recursion. Starting the
+        // session dispatches no orchestration command, so the child thread need not
+        // exist yet; its early lifecycle events are dropped until the thread is created
+        // below, which is fine — the transcript we care about is the post-prompt turn.
         const session = yield* providerService
           .startSession(childThreadId, {
             threadId: childThreadId,
@@ -183,7 +259,35 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
             ),
           );
 
+        // Stop the spawned session when the tool call ends (success, error, or
+        // interruption) so each spawn doesn't leak a live provider process.
+        yield* Effect.addFinalizer(() =>
+          providerService.stopSession({ threadId: childThreadId }).pipe(Effect.ignore),
+        );
+
         const resolvedModel = session.model ?? params.model ?? null;
+
+        // Create the child's orchestration thread under the parent's project so its
+        // runtime events are accepted by ingestion (which drops events for unknown
+        // threads). Marked with parentThreadId so it stays out of the top-level shell
+        // snapshot and is reachable only via the parent's subagent tree.
+        yield* createChildThread({
+          childThreadId,
+          parentThreadId: invocation.threadId,
+          projectId: parent.projectId,
+          title: summary,
+          targetInstanceId,
+          model: resolvedModel ?? provider,
+          runtimeMode,
+          interactionMode: parent.interactionMode,
+          branch: parent.branch,
+          worktreePath: parent.worktreePath,
+          createdAt: startedAt,
+        }).pipe(Effect.ignore);
+
+        // Wait (bounded) for the projection pipeline to reflect the new thread before
+        // sending the turn, so the turn's activities aren't dropped by ingestion.
+        yield* waitForThreadProjection(childThreadId, 100);
 
         yield* appendNode({
           parentThreadId: invocation.threadId,

@@ -7,7 +7,6 @@ import {
   mergeWorkflowAgents,
   reconcileWorkflowAgents,
   formatWorkflowAgentLabel,
-  type WorkflowRunSnapshot,
 } from "./ClaudeWorkflowWatch.ts";
 
 const BACKGROUND_RESULT = `Workflow launched in background. Task ID: w4h1ox7dc

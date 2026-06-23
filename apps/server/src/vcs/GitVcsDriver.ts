@@ -608,22 +608,26 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }),
     );
 
-  const resolveGitCommonDir = (cwd: string) =>
+  // Resolves the worktree's own git dir (per-worktree for linked worktrees,
+  // the repo `.git` for the main one). This is where the real index lives and
+  // a safe, writable location for the scratch checkpoint index.
+  const resolveGitDir = (cwd: string) =>
     Effect.gen(function* () {
       const result = yield* execute({
-        operation: "GitVcsDriver.checkpoints.resolveGitCommonDir",
+        operation: "GitVcsDriver.checkpoints.resolveGitDir",
         cwd,
-        args: ["rev-parse", "--git-common-dir"],
+        args: ["rev-parse", "--absolute-git-dir"],
       });
-      const gitCommonDir = result.stdout.trim();
-      return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
+      const gitDir = result.stdout.trim();
+      return path.isAbsolute(gitDir) ? gitDir : path.resolve(cwd, gitDir);
     });
 
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = "GitVcsDriver.checkpoints.captureCheckpoint";
-      const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
-      const tempIndexPath = path.join(gitCommonDir, `t3-checkpoint-index-${randomUUID()}`);
+      const gitDir = yield* resolveGitDir(input.cwd);
+      const realIndexPath = path.join(gitDir, "index");
+      const tempIndexPath = path.join(gitDir, `t3-checkpoint-index-${randomUUID()}`);
       const commitEnv: NodeJS.ProcessEnv = {
         ...process.env,
         GIT_INDEX_FILE: tempIndexPath,
@@ -638,14 +642,35 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         .pipe(Effect.ignore);
 
       yield* Effect.gen(function* () {
-        const headExists = yield* hasHeadCommit(input.cwd);
-        if (headExists) {
-          yield* execute({
-            operation,
-            cwd: input.cwd,
-            args: ["read-tree", "HEAD"],
-            env: commitEnv,
-          });
+        // Seed the scratch index from the worktree's real index so its stat
+        // cache (mtime/size/inode per path) carries over and `git add -A` only
+        // re-hashes files whose stat actually changed. Seeding via
+        // `read-tree HEAD` instead leaves every entry without stat info, forcing
+        // `git add -A` to re-hash the ENTIRE working tree — tens of seconds on
+        // large repos, which trips the VCS timeout so the checkpoint is never
+        // written and turn diffs fail to load. Fall back to `read-tree HEAD`
+        // only when there is no real index yet (a freshly-initialized repo).
+        const seededFromRealIndex = yield* Effect.gen(function* () {
+          const realIndexExists = yield* fileSystem
+            .exists(realIndexPath)
+            .pipe(Effect.orElseSucceed(() => false));
+          if (!realIndexExists) {
+            return false;
+          }
+          yield* fileSystem.copyFile(realIndexPath, tempIndexPath);
+          return true;
+        }).pipe(Effect.orElseSucceed(() => false));
+
+        if (!seededFromRealIndex) {
+          const headExists = yield* hasHeadCommit(input.cwd);
+          if (headExists) {
+            yield* execute({
+              operation,
+              cwd: input.cwd,
+              args: ["read-tree", "HEAD"],
+              env: commitEnv,
+            });
+          }
         }
 
         yield* execute({

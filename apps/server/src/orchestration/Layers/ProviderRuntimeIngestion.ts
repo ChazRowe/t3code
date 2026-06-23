@@ -722,6 +722,51 @@ const make = Effect.gen(function* () {
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
     );
 
+  // Dispatches a placeholder turn checkpoint (status "missing") onto the durable
+  // orchestration domain-event stream. The CheckpointReactor consumes this and
+  // captures the real git checkpoint. Routing through a domain event is the
+  // reliable trigger: the reactor's direct subscription to the provider runtime
+  // PubSub does not reliably deliver turn lifecycle events to it. Codex uses
+  // this via turn.diff.updated; every other provider reaches it via
+  // turn.completed. No-ops when the thread is not in a git workspace or a
+  // checkpoint already exists for the turn (so a real capture is never clobbered
+  // and the checkpointTurnCount stays stable).
+  const dispatchTurnCheckpointPlaceholder = Effect.fn("dispatchTurnCheckpointPlaceholder")(
+    function* (input: {
+      readonly event: ProviderRuntimeEvent;
+      readonly threadId: ThreadId;
+      readonly turnId: TurnId;
+      readonly checkpointRefSeed: string;
+      readonly assistantItemHint: string;
+      readonly now: string;
+    }) {
+      const checkpointContext = yield* projectionSnapshotQuery
+        .getThreadCheckpointContext(input.threadId)
+        .pipe(Effect.map(Option.getOrUndefined));
+      const workspaceCwd =
+        checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
+      if (!checkpointContext || !workspaceCwd || !isGitRepository(workspaceCwd)) {
+        return;
+      }
+      if (hasCheckpointForTurn(checkpointContext.checkpoints, input.turnId)) {
+        return;
+      }
+      yield* orchestrationEngine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: yield* providerCommandId(input.event, "thread-turn-diff-complete"),
+        threadId: input.threadId,
+        turnId: input.turnId,
+        completedAt: input.now,
+        checkpointRef: CheckpointRef.make(input.checkpointRefSeed),
+        status: "missing",
+        files: [],
+        assistantMessageId: MessageId.make(`assistant:${input.assistantItemHint}`),
+        checkpointTurnCount: maxCheckpointTurnCount(checkpointContext.checkpoints) + 1,
+        createdAt: input.now,
+      });
+    },
+  );
+
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
     timeToLive: TURN_MESSAGE_IDS_BY_TURN_TTL,
@@ -1660,6 +1705,23 @@ const make = Effect.gen(function* () {
             turnId,
             updatedAt: now,
           });
+
+          // Trigger checkpoint capture for the completed turn. Codex also reaches
+          // this through turn.diff.updated above; every other provider depends on
+          // turn.completed alone. Gated on shouldApplyThreadLifecycle so only the
+          // primary/active turn produces a checkpoint, matching the reactor's own
+          // primary-turn guard. dispatchTurnCheckpointPlaceholder is idempotent,
+          // so a redundant Codex dispatch here is a harmless no-op.
+          if (shouldApplyThreadLifecycle) {
+            yield* dispatchTurnCheckpointPlaceholder({
+              event,
+              threadId: thread.id,
+              turnId,
+              checkpointRefSeed: `turn-complete:${event.eventId}`,
+              assistantItemHint: event.turnId ?? event.eventId,
+              now,
+            });
+          }
         }
       }
 
@@ -1707,38 +1769,15 @@ const make = Effect.gen(function* () {
 
       if (event.type === "turn.diff.updated") {
         const turnId = toTurnId(event.turnId);
-        const checkpointContext = turnId
-          ? yield* projectionSnapshotQuery
-              .getThreadCheckpointContext(thread.id)
-              .pipe(Effect.map(Option.getOrUndefined))
-          : undefined;
-        const workspaceCwd =
-          checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
-        if (turnId && checkpointContext && workspaceCwd && isGitRepository(workspaceCwd)) {
-          // Skip if a checkpoint already exists for this turn. A real
-          // (non-placeholder) capture from CheckpointReactor should not
-          // be clobbered, and dispatching a duplicate placeholder for the
-          // same turnId would produce an unstable checkpointTurnCount.
-          if (hasCheckpointForTurn(checkpointContext.checkpoints, turnId)) {
-            // Already tracked; no-op.
-          } else {
-            const assistantMessageId = MessageId.make(
-              `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
-            );
-            yield* orchestrationEngine.dispatch({
-              type: "thread.turn.diff.complete",
-              commandId: yield* providerCommandId(event, "thread-turn-diff-complete"),
-              threadId: thread.id,
-              turnId,
-              completedAt: now,
-              checkpointRef: CheckpointRef.make(`provider-diff:${event.eventId}`),
-              status: "missing",
-              files: [],
-              assistantMessageId,
-              checkpointTurnCount: maxCheckpointTurnCount(checkpointContext.checkpoints) + 1,
-              createdAt: now,
-            });
-          }
+        if (turnId) {
+          yield* dispatchTurnCheckpointPlaceholder({
+            event,
+            threadId: thread.id,
+            turnId,
+            checkpointRefSeed: `provider-diff:${event.eventId}`,
+            assistantItemHint: event.itemId ?? event.turnId ?? event.eventId,
+            now,
+          });
         }
       }
 

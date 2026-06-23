@@ -2701,6 +2701,76 @@ describe("ProviderRuntimeIngestion", () => {
     expect(checkpoint?.checkpointRef).toBe("provider-diff:evt-turn-diff-updated");
   });
 
+  it("creates a turn checkpoint placeholder on turn.completed when no provider diff event is emitted", async () => {
+    // Providers other than Codex never emit turn.diff.updated, so the only
+    // durable signal that a turn finished is turn.completed. The reactor's
+    // direct runtime subscription does not reliably deliver it, so ingestion
+    // must dispatch the placeholder here to guarantee a checkpoint exists.
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-seed-claude-diff"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "claudeAgent",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          updatedAt: now,
+          lastError: null,
+        },
+        createdAt: now,
+      }),
+    );
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-claude-diff"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-claude-diff"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-claude-diff",
+    );
+
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-claude-diff"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-claude-diff"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) =>
+        entry.checkpoints.some(
+          (checkpoint: ProviderRuntimeTestCheckpoint) =>
+            checkpoint.turnId === "turn-claude-diff",
+        ),
+    );
+
+    const checkpoint = thread.checkpoints.find(
+      (entry: ProviderRuntimeTestCheckpoint) => entry.turnId === "turn-claude-diff",
+    );
+    expect(checkpoint?.status).toBe("missing");
+    expect(checkpoint?.checkpointRef).toBe("turn-complete:evt-turn-completed-claude-diff");
+  });
+
   it("projects context window updates into normalized thread activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

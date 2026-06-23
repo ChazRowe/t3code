@@ -1,6 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
 
-import { parseWorkflowLaunch, parseWorkflowRunFile } from "./ClaudeWorkflowWatch.ts";
+import {
+  parseWorkflowLaunch,
+  parseWorkflowRunFile,
+  parseWorkflowJournalLines,
+  mergeWorkflowAgents,
+  type WorkflowRunSnapshot,
+} from "./ClaudeWorkflowWatch.ts";
 
 const BACKGROUND_RESULT = `Workflow launched in background. Task ID: w4h1ox7dc
 Summary: Deep parallel mapping of 3 realization-wiring lanes
@@ -83,5 +89,61 @@ describe("parseWorkflowRunFile", () => {
     assert.equal(snapshot.terminal, true);
     assert.equal(snapshot.agents[0]?.label, "abc");
     assert.equal(snapshot.agents[0]?.phase, undefined);
+  });
+});
+
+describe("parseWorkflowJournalLines", () => {
+  const LINES = [
+    `{"type":"started","key":"v2:k1","agentId":"a1385c15bd4ffd5af"}`,
+    `{"type":"started","key":"v2:k2","agentId":"a7a784072f116c4e6"}`,
+    `{"type":"result","key":"v2:k2","agentId":"a7a784072f116c4e6","result":{"findings":[{"severity":"low"}]}}`,
+    ``,
+    `{ this is not json `,
+  ];
+
+  it("derives latest lifecycle per agentId and a short result summary", () => {
+    const state = parseWorkflowJournalLines(LINES);
+    assert.equal(state.statuses.get("a1385c15bd4ffd5af"), "started");
+    assert.equal(state.statuses.get("a7a784072f116c4e6"), "completed");
+    assert.ok((state.resultSummaries.get("a7a784072f116c4e6") ?? "").includes("findings"));
+  });
+
+  it("tolerates an empty array", () => {
+    const state = parseWorkflowJournalLines([]);
+    assert.equal(state.statuses.size, 0);
+  });
+});
+
+describe("mergeWorkflowAgents", () => {
+  it("uses snapshot labels and journal lifecycle, defaulting unseen agents to started", () => {
+    const snapshot = parseWorkflowRunFile({
+      status: "running",
+      workflowProgress: [
+        { type: "workflow_phase", title: "Review" },
+        { type: "workflow_agent", agentId: "a1", label: "alpha", tokens: 10 },
+        { type: "workflow_agent", agentId: "a2", label: "beta" },
+      ],
+    });
+    const journal = parseWorkflowJournalLines([
+      `{"type":"started","agentId":"a1"}`,
+      `{"type":"result","agentId":"a1","result":"done-a1"}`,
+    ]);
+    const merged = mergeWorkflowAgents(snapshot, journal);
+    const a1 = merged.find((m) => m.info.agentId === "a1");
+    const a2 = merged.find((m) => m.info.agentId === "a2");
+    assert.equal(a1?.status, "completed");
+    assert.equal(a1?.info.label, "alpha");
+    assert.equal(a1?.resultSummary, "done-a1");
+    assert.equal(a2?.status, "started");
+    assert.equal(a2?.info.label, "beta");
+  });
+
+  it("includes journal-only agents not yet in the run file", () => {
+    const snapshot = parseWorkflowRunFile({ status: "running", workflowProgress: [] });
+    const journal = parseWorkflowJournalLines([`{"type":"started","agentId":"ghost"}`]);
+    const merged = mergeWorkflowAgents(snapshot, journal);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0]?.info.agentId, "ghost");
+    assert.equal(merged[0]?.info.label, "ghost");
   });
 });

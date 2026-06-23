@@ -109,3 +109,111 @@ export function parseWorkflowRunFile(raw: unknown): WorkflowRunSnapshot {
     agents,
   };
 }
+
+export type WorkflowAgentLifecycle = "started" | "completed";
+
+export interface WorkflowJournalState {
+  readonly statuses: ReadonlyMap<string, WorkflowAgentLifecycle>;
+  readonly resultSummaries: ReadonlyMap<string, string>;
+}
+
+export interface MergedWorkflowAgent {
+  readonly info: WorkflowAgentInfo;
+  readonly status: WorkflowAgentLifecycle;
+  readonly resultSummary: string | undefined;
+}
+
+const MAX_RESULT_SUMMARY = 400;
+
+function summarizeJournalResult(result: unknown): string | undefined {
+  if (result === undefined || result === null) {
+    return undefined;
+  }
+  if (typeof result === "string") {
+    return result.slice(0, MAX_RESULT_SUMMARY);
+  }
+  try {
+    return JSON.stringify(result).slice(0, MAX_RESULT_SUMMARY);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Fold `journal.jsonl` lines into the latest lifecycle per agentId. A `result`
+ * line always wins (terminal); a `started` line only sets status if none seen.
+ * Malformed/blank lines are skipped (partial-write tolerance).
+ */
+export function parseWorkflowJournalLines(
+  lines: ReadonlyArray<string>,
+): WorkflowJournalState {
+  const statuses = new Map<string, WorkflowAgentLifecycle>();
+  const resultSummaries = new Map<string, string>();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    let evt: unknown;
+    try {
+      evt = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof evt !== "object" || evt === null) {
+      continue;
+    }
+    const e = evt as Record<string, unknown>;
+    const agentId = typeof e.agentId === "string" ? e.agentId : undefined;
+    if (!agentId) {
+      continue;
+    }
+    if (e.type === "result") {
+      statuses.set(agentId, "completed");
+      const summary = summarizeJournalResult(e.result);
+      if (summary !== undefined) {
+        resultSummaries.set(agentId, summary);
+      }
+    } else if (e.type === "started") {
+      if (!statuses.has(agentId)) {
+        statuses.set(agentId, "started");
+      }
+    }
+  }
+  return { statuses, resultSummaries };
+}
+
+/**
+ * Union of agents known from the run file (rich: label/model/tokens/phase) and
+ * agents seen live in the journal. Status comes from the journal; an agent that
+ * appears only in the run file is treated as "started" until its result lands.
+ */
+export function mergeWorkflowAgents(
+  snapshot: WorkflowRunSnapshot,
+  journal: WorkflowJournalState,
+): ReadonlyArray<MergedWorkflowAgent> {
+  const byId = new Map<string, WorkflowAgentInfo>();
+  for (const agent of snapshot.agents) {
+    byId.set(agent.agentId, agent);
+  }
+  for (const agentId of journal.statuses.keys()) {
+    if (!byId.has(agentId)) {
+      byId.set(agentId, {
+        agentId,
+        label: agentId,
+        model: undefined,
+        tokens: undefined,
+        phase: undefined,
+      });
+    }
+  }
+  const merged: Array<MergedWorkflowAgent> = [];
+  for (const [agentId, info] of byId) {
+    merged.push({
+      info,
+      status: journal.statuses.get(agentId) ?? "started",
+      resultSummary: journal.resultSummaries.get(agentId),
+    });
+  }
+  return merged;
+}

@@ -431,6 +431,12 @@ export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 export const OrchestrationThreadShell = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
+  // Set when this thread is a cross-provider subagent spawned via `spawn_agent`; points
+  // at the spawning (parent) thread. Such threads are hidden from the top-level shell —
+  // both the snapshot and the live shell stream filter them out — and are surfaced only
+  // through the parent's subagent tree. Optional so the many shells that are never
+  // subagents (and existing fixtures) decode without the field.
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,

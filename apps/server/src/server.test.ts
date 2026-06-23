@@ -5462,7 +5462,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   );
 
   it.effect(
-    "routes websocket rpc subscribeSubagentTree replays snapshot then emits ref-changed",
+    "routes websocket rpc subscribeSubagentTree replays snapshot then re-emits a snapshot on a ref event",
     () =>
       Effect.gen(function* () {
         const threadId = ThreadId.make("thread-subagent-tree");
@@ -5544,9 +5544,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           assert.equal(first.snapshot.refs.length, 1);
           assert.equal(first.snapshot.refs[0]?.rootItemId, "item-root-a");
         }
-        assert.equal(second?.kind, "ref-changed");
-        if (second?.kind === "ref-changed") {
-          assert.equal(second.ref.rootItemId, "item-root-a");
+        // The live stream re-emits the full recomputed tree as a snapshot (self-healing
+        // against the subscribe-time gap) rather than a single ref-changed delta.
+        assert.equal(second?.kind, "snapshot");
+        if (second?.kind === "snapshot") {
+          assert.equal(second.snapshot.refs.length, 1);
+          assert.equal(second.snapshot.refs[0]?.rootItemId, "item-root-a");
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

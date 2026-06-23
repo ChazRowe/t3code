@@ -656,6 +656,14 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
 
 function classifyToolItemType(toolName: string): CanonicalItemType {
   const normalized = toolName.toLowerCase();
+  // The spawn toolkit ships as MCP tools whose names contain "agent". `spawn_agent`
+  // already emits its own rich collab_agent_tool_call orchestration record (with
+  // provider/model/childThreadId) via the spawn handler, and `list_agents` is a plain
+  // query — not a subagent at all. Classifying the raw MCP call as a subagent task
+  // would double-count it in the watch tree, so treat them as ordinary MCP calls.
+  if (normalized.includes("spawn_agent") || normalized.includes("list_agents")) {
+    return "mcp_tool_call";
+  }
   if (normalized.includes("agent")) {
     return "collab_agent_tool_call";
   }

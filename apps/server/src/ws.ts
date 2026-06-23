@@ -30,6 +30,7 @@ import {
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
+  type OrchestrationThreadShell,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
@@ -519,6 +520,23 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const enrichOrchestrationEvents = (events: ReadonlyArray<OrchestrationEvent>) =>
         Effect.forEach(events, enrichProjectEvent, { concurrency: 4 });
 
+      // Subagent (child) threads are hidden from the top-level shell: the snapshot
+      // already excludes them (parent_thread_id IS NULL), so the live stream must too,
+      // or a child's activity events would register it in the sidebar.
+      const toThreadUpsertedEvent = (
+        sequence: number,
+        thread: Option.Option<OrchestrationThreadShell>,
+      ): Option.Option<OrchestrationShellStreamEvent> =>
+        Option.flatMap(thread, (nextThread) =>
+          nextThread.parentThreadId != null
+            ? Option.none()
+            : Option.some({
+                kind: "thread-upserted" as const,
+                sequence,
+                thread: nextThread,
+              }),
+        );
+
       const toShellStreamEvent = (
         event: OrchestrationEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
@@ -554,13 +572,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             );
           case "thread.unarchived":
             return projectionSnapshotQuery.getThreadShellById(event.payload.threadId).pipe(
-              Effect.map((thread) =>
-                Option.map(thread, (nextThread) => ({
-                  kind: "thread-upserted" as const,
-                  sequence: event.sequence,
-                  thread: nextThread,
-                })),
-              ),
+              Effect.map((thread) => toThreadUpsertedEvent(event.sequence, thread)),
               Effect.orElseSucceed(() => Option.none()),
             );
           default:
@@ -570,13 +582,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
             return projectionSnapshotQuery
               .getThreadShellById(ThreadId.make(event.aggregateId))
               .pipe(
-                Effect.map((thread) =>
-                  Option.map(thread, (nextThread) => ({
-                    kind: "thread-upserted" as const,
-                    sequence: event.sequence,
-                    thread: nextThread,
-                  })),
-                ),
+                Effect.map((thread) => toThreadUpsertedEvent(event.sequence, thread)),
                 Effect.orElseSucceed(() => Option.none()),
               );
         }
@@ -1087,11 +1093,19 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 ),
               ]);
 
-              // React to two kinds of events for this thread:
-              //  - subagent-ref lifecycle (root or nested): recompute the tree and emit the
-              //    single changed ref so depth/childSubagentCount/status stay consistent.
-              //  - a context-clear marker: the tree is rebased to the new context, so re-emit
-              //    a fresh (now-scoped) snapshot to drop the prior context's subagents.
+              // React to two kinds of events for this thread, re-emitting the full
+              // recomputed tree as a snapshot in both cases:
+              //  - subagent-ref lifecycle (root or nested): the tree changed (status,
+              //    depth, childSubagentCount, a new sibling).
+              //  - a context-clear marker: the tree is rebased to the new context.
+              //
+              // We emit the WHOLE tree rather than the single changed ref so the view is
+              // self-healing: there's an unavoidable gap between taking the snapshot above
+              // and this live stream attaching to the PubSub, and during a burst (e.g.
+              // several `spawn_agent` calls in parallel) a ref's lifecycle events can land
+              // in that gap. Emitting only the changed ref would leave such a ref missing
+              // forever, since a later event for a DIFFERENT ref never resurfaces it. A
+              // full snapshot lets any subsequent event reconcile the missed ref.
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(
                   (
@@ -1101,25 +1115,19 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                     event.aggregateId === input.threadId &&
                     (isSubagentRefEvent(event) || isContextClearedEvent(event)),
                 ),
-                Stream.mapEffect((event) =>
+                Stream.mapEffect(() =>
                   projectionSnapshotQuery.getSubagentTree({ threadId: input.threadId }).pipe(
-                    Effect.map((nextRefs): Option.Option<OrchestrationSubagentTreeStreamItem> => {
-                      if (isContextClearedActivityKind(event.payload.activity.kind)) {
-                        return Option.some({
+                    Effect.map(
+                      (nextRefs): Option.Option<OrchestrationSubagentTreeStreamItem> =>
+                        Option.some({
                           kind: "snapshot" as const,
                           snapshot: {
                             snapshotSequence,
                             threadId: input.threadId,
                             refs: nextRefs,
                           },
-                        });
-                      }
-                      const changedItemId = event.payload.activity.itemId;
-                      const changed = nextRefs.find((ref) => ref.rootItemId === changedItemId);
-                      return changed === undefined
-                        ? Option.none<OrchestrationSubagentTreeStreamItem>()
-                        : Option.some({ kind: "ref-changed" as const, ref: changed });
-                    }),
+                        }),
+                    ),
                     Effect.orElseSucceed(() => Option.none<OrchestrationSubagentTreeStreamItem>()),
                   ),
                 ),

@@ -3353,6 +3353,25 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
+      // A thread can outlive its working directory (e.g. a git worktree that was
+      // removed). Spawning the Claude CLI with a missing cwd fails with a bare
+      // `spawn claude ENOENT`, which the Agent SDK misreports as "native binary
+      // not found at claude". Fail fast here with the real cause. The existence
+      // check is best-effort: if it cannot be performed (e.g. a permission error
+      // on a parent dir), proceed and let the spawn surface whatever happens.
+      if (input.cwd !== undefined) {
+        const cwdExists = yield* fileSystem
+          .exists(input.cwd)
+          .pipe(Effect.orElseSucceed(() => true));
+        if (!cwdExists) {
+          return yield* new ProviderAdapterProcessError({
+            provider: PROVIDER,
+            threadId: input.threadId,
+            detail: `Working directory no longer exists: ${input.cwd}`,
+          });
+        }
+      }
+
       const existingContext = sessions.get(input.threadId);
       if (existingContext) {
         yield* Effect.logWarning("claude.session.replacing", {

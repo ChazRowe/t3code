@@ -311,6 +311,39 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("fails with a clear error when the working directory no longer exists", () => {
+    const harness = makeHarness();
+    const missingCwd = "/tmp/t3code-claude-adapter-missing-cwd-DOES-NOT-EXIST";
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const result = yield* adapter
+        .startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: missingCwd,
+        })
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      if (result._tag !== "Failure") {
+        return;
+      }
+      if (result.failure._tag !== "ProviderAdapterProcessError") {
+        assert.fail(`expected ProviderAdapterProcessError, got ${result.failure._tag}`);
+        return;
+      }
+      assert.match(result.failure.detail, /working directory no longer exists/i);
+      assert.ok(
+        result.failure.detail.includes(missingCwd),
+        `expected detail to mention the missing cwd, got: ${result.failure.detail}`,
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("derives bypass permission mode from full-access runtime policy", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

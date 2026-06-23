@@ -88,6 +88,15 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  formatWorkflowAgentLabel,
+  mergeWorkflowAgents,
+  parseWorkflowJournalLines,
+  parseWorkflowLaunch,
+  parseWorkflowRunFile,
+  reconcileWorkflowAgents,
+  type WorkflowLaunch,
+} from "./ClaudeWorkflowWatch.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
 
@@ -211,6 +220,11 @@ interface ClaudeSessionContext {
       readonly input: Record<string, unknown>;
     }
   >;
+  // Run IDs of Workflow runs we've already started a disk-watcher fiber for —
+  // guards against re-triggering on a reprocessed tool_result.
+  readonly workflowWatchedRunIds: Set<string>;
+  // Live workflow watcher fibers keyed by runId, interrupted on session stop.
+  readonly workflowWatchers: Map<string, Fiber.Fiber<void, never>>;
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
@@ -2568,6 +2582,29 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       context.inFlightTools.delete(index);
+
+      if (tool.toolName === "Workflow" && !toolResult.isError) {
+        const launch = parseWorkflowLaunch(toolResult.text);
+        if (launch && !context.workflowWatchedRunIds.has(launch.runId)) {
+          context.workflowWatchedRunIds.add(launch.runId);
+          const parentToolUseId = tool.itemId;
+          const watcher = yield* watchWorkflowRun(context, parentToolUseId, launch).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logError("Claude workflow watcher failed.", {
+                cause,
+                runId: launch.runId,
+              }),
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                context.workflowWatchers.delete(launch.runId);
+              }),
+            ),
+            Effect.forkDetach,
+          );
+          context.workflowWatchers.set(launch.runId, watcher);
+        }
+      }
     }
   });
 
@@ -2739,6 +2776,142 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
       return;
+    }
+  });
+
+  const WORKFLOW_MAX_POLLS = 1800; // ~30 min at 1 poll/sec — backstop against a leaked fiber.
+
+  // Builds the shared item payload for a workflow agent's nested collab item. The
+  // `data` mirrors a Task subagent (toolName/input/result) so existing watch-view
+  // rendering works unchanged; phase/model/tokens ride along for v2 badge work.
+  const workflowAgentItemData = (
+    runId: string,
+    agent: { info: { agentId: string; label: string; model: string | undefined; tokens: number | undefined; phase: string | undefined }; resultSummary: string | undefined },
+    includeResult: boolean,
+  ): Record<string, unknown> => ({
+    toolName: "Workflow",
+    input: {
+      subagent_type: agent.info.phase ?? "workflow",
+      description: agent.info.label,
+      ...(agent.info.model ? { model: agent.info.model } : {}),
+    },
+    ...(includeResult ? { result: { content: agent.resultSummary ?? "" } } : {}),
+    workflowRunId: runId,
+    workflowAgentId: agent.info.agentId,
+    ...(agent.info.tokens !== undefined ? { tokens: agent.info.tokens } : {}),
+  });
+
+  // Polls a Workflow run's on-disk files and translates each agent into nested
+  // collab_agent_tool_call lifecycle events parented to the Workflow tool item.
+  // Stops when the run reaches a terminal status or the poll backstop is hit.
+  const watchWorkflowRun = Effect.fn("watchWorkflowRun")(function* (
+    context: ClaudeSessionContext,
+    parentToolUseId: string,
+    launch: WorkflowLaunch,
+  ) {
+    const sessionDir = path.dirname(path.dirname(path.dirname(launch.transcriptDir)));
+    const runFilePath = path.join(sessionDir, "workflows", `${launch.runId}.json`);
+    const journalPath = path.join(launch.transcriptDir, "journal.jsonl");
+    const parentItemId = asRuntimeItemId(parentToolUseId);
+
+    const readRunFile = fileSystem.readFileString(runFilePath).pipe(
+      Effect.map((text): unknown => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return undefined;
+        }
+      }),
+      Effect.catchCause(() => Effect.succeed(undefined as unknown)),
+    );
+    const readJournalLines = fileSystem.readFileString(journalPath).pipe(
+      Effect.map((text) => text.split("\n")),
+      Effect.catchCause(() => Effect.succeed([] as Array<string>)),
+    );
+
+    let emitted = new Set<string>();
+
+    const pollOnce = Effect.fn("watchWorkflowRun.poll")(function* () {
+      const snapshot = parseWorkflowRunFile(yield* readRunFile);
+      const journal = parseWorkflowJournalLines(yield* readJournalLines);
+      let merged = mergeWorkflowAgents(snapshot, journal);
+      // On a terminal run, force every known agent to "completed" so no nested
+      // item is left pulsing forever if its journal result line never landed.
+      if (snapshot.terminal) {
+        merged = merged.map((m) => ({ ...m, status: "completed" as const }));
+      }
+      const result = reconcileWorkflowAgents(emitted, merged);
+      emitted = new Set(result.emitted);
+
+      const turnIdPart = context.turnState
+        ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+        : {};
+
+      for (const agent of result.toStart) {
+        const stamp = yield* makeEventStamp();
+        const itemId = `${launch.runId}:${agent.info.agentId}`;
+        yield* offerRuntimeEvent({
+          type: "item.started",
+          eventId: stamp.eventId,
+          provider: PROVIDER,
+          createdAt: stamp.createdAt,
+          threadId: context.session.threadId,
+          ...turnIdPart,
+          itemId: asRuntimeItemId(itemId),
+          payload: {
+            itemType: "collab_agent_tool_call",
+            status: "inProgress",
+            title: "Subagent task",
+            detail: formatWorkflowAgentLabel(agent.info),
+            data: workflowAgentItemData(launch.runId, agent, false),
+            parentItemId,
+          },
+          providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),
+          raw: {
+            source: "claude.sdk.message" as const,
+            method: "workflow/agent/started",
+            payload: { runId: launch.runId, agentId: agent.info.agentId },
+          },
+        });
+      }
+
+      for (const agent of result.toComplete) {
+        const stamp = yield* makeEventStamp();
+        const itemId = `${launch.runId}:${agent.info.agentId}`;
+        yield* offerRuntimeEvent({
+          type: "item.completed",
+          eventId: stamp.eventId,
+          provider: PROVIDER,
+          createdAt: stamp.createdAt,
+          threadId: context.session.threadId,
+          ...turnIdPart,
+          itemId: asRuntimeItemId(itemId),
+          payload: {
+            itemType: "collab_agent_tool_call",
+            status: "completed",
+            title: "Subagent task",
+            detail: formatWorkflowAgentLabel(agent.info),
+            data: workflowAgentItemData(launch.runId, agent, true),
+            parentItemId,
+          },
+          providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),
+          raw: {
+            source: "claude.sdk.message" as const,
+            method: "workflow/agent/completed",
+            payload: { runId: launch.runId, agentId: agent.info.agentId },
+          },
+        });
+      }
+
+      return snapshot.terminal;
+    });
+
+    let polls = 0;
+    while (polls < WORKFLOW_MAX_POLLS) {
+      const terminal = yield* pollOnce();
+      if (terminal) break;
+      yield* Effect.sleep("1 second");
+      polls += 1;
     }
   });
 
@@ -3298,6 +3471,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* Fiber.interrupt(streamFiber);
     }
 
+    for (const watcher of context.workflowWatchers.values()) {
+      if (watcher.pollUnsafe() === undefined) {
+        yield* Fiber.interrupt(watcher);
+      }
+    }
+    context.workflowWatchers.clear();
+
     yield* Effect.try({
       try: () => context.query.close(),
       catch: (cause) =>
@@ -3447,6 +3627,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           readonly input: Record<string, unknown>;
         }
       >();
+      const workflowWatchedRunIds = new Set<string>();
+      const workflowWatchers = new Map<string, Fiber.Fiber<void, never>>();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
 
@@ -3902,6 +4084,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         claudeTasks,
         subagentItemCounts,
         subagentNestedToolCalls,
+        workflowWatchedRunIds,
+        workflowWatchers,
         turnState: undefined,
         lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,

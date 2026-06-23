@@ -1415,6 +1415,110 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("surfaces Workflow agents as nested subagent items via the disk watcher", () => {
+    const sessionRoot = mkdtempSync(path.join(os.tmpdir(), "t3-wf-watch-"));
+    const runId = "wf_test123";
+    const transcriptDir = path.join(sessionRoot, "subagents", "workflows", runId);
+    mkdirSync(path.join(sessionRoot, "workflows"), { recursive: true });
+    mkdirSync(transcriptDir, { recursive: true });
+    writeFileSync(
+      path.join(sessionRoot, "workflows", `${runId}.json`),
+      JSON.stringify({
+        runId,
+        status: "completed",
+        summary: "two-agent review",
+        workflowProgress: [
+          { type: "workflow_phase", index: 1, title: "Review" },
+          { type: "workflow_agent", index: 1, label: "alpha", agentId: "agentAAA", model: "claude-opus-4-8[1m]", tokens: 100 },
+          { type: "workflow_agent", index: 2, label: "beta", agentId: "agentBBB", model: "claude-opus-4-8[1m]", tokens: 200 },
+        ],
+      }),
+    );
+    writeFileSync(
+      path.join(transcriptDir, "journal.jsonl"),
+      [
+        `{"type":"started","agentId":"agentAAA"}`,
+        `{"type":"started","agentId":"agentBBB"}`,
+        `{"type":"result","agentId":"agentAAA","result":"alpha-done"}`,
+        `{"type":"result","agentId":"agentBBB","result":"beta-done"}`,
+      ].join("\n"),
+    );
+
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      // Collect until both workflow-agent completions have arrived (robust to ordering).
+      let completedAgents = 0;
+      const runtimeEventsFiber = yield* Stream.takeUntil(adapter.streamEvents, (event) => {
+        if (event.type === "item.completed" && String(event.itemId).startsWith(`${runId}:`)) {
+          completedAgents += 1;
+        }
+        return completedAgents >= 2;
+      }).pipe(Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
+
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-wf2",
+        uuid: "stream-wf2-1",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "wf-tool-2", name: "Workflow", input: { scriptPath: "/tmp/x.js" } },
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "user",
+        session_id: "sdk-session-wf2",
+        uuid: "user-wf2-1",
+        parent_tool_use_id: null,
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "wf-tool-2",
+              is_error: false,
+              content: `Workflow launched in background. Task ID: tk1\nTranscript dir: ${transcriptDir}\nRun ID: ${runId}`,
+            },
+          ],
+        },
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      const started = runtimeEvents.filter(
+        (e) => e.type === "item.started" && String(e.itemId).startsWith(`${runId}:`),
+      );
+      const completed = runtimeEvents.filter(
+        (e) => e.type === "item.completed" && String(e.itemId).startsWith(`${runId}:`),
+      );
+      assert.equal(started.length, 2, "both workflow agents should start");
+      assert.equal(completed.length, 2, "both workflow agents should complete");
+
+      const alpha = completed.find((e) => String(e.itemId) === `${runId}:agentAAA`);
+      assert.ok(alpha, "alpha completion present");
+      if (alpha?.type === "item.completed") {
+        assert.equal(alpha.payload.itemType, "collab_agent_tool_call");
+        assert.equal(alpha.payload.status, "completed");
+        assert.equal(alpha.payload.parentItemId, "wf-tool-2");
+        assert.equal(alpha.payload.detail, "Review: alpha");
+      }
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(sessionRoot, { recursive: true, force: true }))),
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect(
     "closes a nested subagent's Task tool result as a collaboration agent completion with its prompt and result",
     () => {

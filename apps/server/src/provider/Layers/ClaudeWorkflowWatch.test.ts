@@ -112,6 +112,14 @@ describe("parseWorkflowJournalLines", () => {
     const state = parseWorkflowJournalLines([]);
     assert.equal(state.statuses.size, 0);
   });
+
+  it("result wins even when a started line appears after it", () => {
+    const state = parseWorkflowJournalLines([
+      `{"type":"result","agentId":"x","result":"done"}`,
+      `{"type":"started","agentId":"x"}`,
+    ]);
+    assert.equal(state.statuses.get("x"), "completed");
+  });
 });
 
 describe("mergeWorkflowAgents", () => {

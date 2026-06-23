@@ -1349,6 +1349,72 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("classifies a top-level Workflow tool as a subagent container", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
+
+      harness.query.emit({
+        type: "stream_event",
+        session_id: "sdk-session-wf",
+        uuid: "stream-wf-1",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_start",
+          index: 0,
+          content_block: {
+            type: "tool_use",
+            id: "wf-tool-1",
+            name: "Workflow",
+            input: { scriptPath: "/tmp/wf-understand.js" },
+          },
+        },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "assistant",
+        session_id: "sdk-session-wf",
+        uuid: "assistant-wf-1",
+        parent_tool_use_id: null,
+        message: { id: "assistant-message-wf-1", content: [{ type: "text", text: "Launched" }] },
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: "sdk-session-wf",
+        uuid: "result-wf-1",
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const toolStarted = runtimeEvents.find(
+        (event) => event.type === "item.started" && String(event.itemId) === "wf-tool-1",
+      );
+      assert.equal(toolStarted?.type, "item.started");
+      if (toolStarted?.type === "item.started") {
+        assert.equal(toolStarted.payload.itemType, "collab_agent_tool_call");
+        assert.equal(toolStarted.payload.detail, "Workflow: /tmp/wf-understand.js");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect(
     "closes a nested subagent's Task tool result as a collaboration agent completion with its prompt and result",
     () => {

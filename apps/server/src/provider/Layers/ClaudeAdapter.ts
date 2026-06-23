@@ -669,6 +669,12 @@ function classifyToolItemType(toolName: string): CanonicalItemType {
   if (normalized.includes("spawn_agent") || normalized.includes("list_agents")) {
     return "mcp_tool_call";
   }
+  // The Workflow tool orchestrates a fleet of agent() sub-queries. Classify it as
+  // a subagent container so it renders as a root subagent node and the workflow
+  // agents (emitted by ClaudeWorkflowWatch) can nest beneath it.
+  if (normalized === "workflow") {
+    return "collab_agent_tool_call";
+  }
   if (normalized.includes("agent")) {
     return "collab_agent_tool_call";
   }
@@ -901,6 +907,10 @@ function planStepsFromClaudeTasks(tasks: Map<string, ClaudeTaskState>): PlanStep
 }
 
 function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
+  if (toolName === "Workflow") {
+    const scriptPath = typeof input.scriptPath === "string" ? input.scriptPath : undefined;
+    return scriptPath ? `Workflow: ${scriptPath}` : "Workflow: inline script";
+  }
   const commandValue = input.command ?? input.cmd;
   const command = typeof commandValue === "string" ? commandValue : undefined;
   if (command && command.trim().length > 0) {

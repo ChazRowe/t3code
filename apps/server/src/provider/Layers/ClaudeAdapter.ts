@@ -2590,10 +2590,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           const parentToolUseId = tool.itemId;
           const watcher = yield* watchWorkflowRun(context, parentToolUseId, launch).pipe(
             Effect.catchCause((cause) =>
-              Effect.logError("Claude workflow watcher failed.", {
-                cause,
-                runId: launch.runId,
-              }),
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.void
+                : Effect.logError("Claude workflow watcher failed.", {
+                    cause,
+                    runId: launch.runId,
+                  }),
             ),
             Effect.ensuring(
               Effect.sync(() => {
@@ -3477,6 +3479,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
     }
     context.workflowWatchers.clear();
+    context.workflowWatchedRunIds.clear();
 
     yield* Effect.try({
       try: () => context.query.close(),

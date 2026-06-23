@@ -361,7 +361,12 @@ function resultErrorsText(result: SDKResultMessage): string {
 
 function isInterruptedResult(result: SDKResultMessage): boolean {
   const errors = resultErrorsText(result);
-  if (errors.includes("interrupt")) {
+  // `[ede_diagnostic]` is an SDK-internal note the Claude Agent SDK packs into
+  // result.errors when a turn is aborted mid-flight (e.g. the user hits stop
+  // during a tool call). It is not a user-facing error, so its presence — even
+  // without a companion "Request was aborted." entry — means the turn was
+  // interrupted, not failed.
+  if (errors.includes("interrupt") || errors.includes("[ede_diagnostic]")) {
     return true;
   }
 
@@ -2824,7 +2829,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const status = turnStatusFromResult(message);
-    const errorMessage = message.subtype === "success" ? undefined : message.errors[0];
+    // Never surface SDK-internal `[ede_diagnostic]` entries as the user-facing
+    // error; fall through to a real error if one accompanies it, else undefined.
+    const errorMessage =
+      message.subtype === "success"
+        ? undefined
+        : message.errors.find((error) => !error.toLowerCase().includes("[ede_diagnostic]"));
 
     if (status === "failed") {
       yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");

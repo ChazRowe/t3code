@@ -379,3 +379,35 @@ quota, so it is an explicit capability rather than always-on.
 - **Verification:** `apps/server` + `packages/contracts` + `apps/web` typecheck clean;
   spawn handler 4/4, ProjectionSnapshotQuery 19/19, SubagentWatchView 4/4, McpHttpServer
   + PreviewAutomationBroker 7/7, server 100/100; new files lint- and fmt-clean.
+
+## Correction: the child must be a real (hidden) thread
+
+The first cut spawned the subagent on a bare `threadId` with no orchestration thread
+record. That **silently broke transcript capture**: `ProviderRuntimeIngestion`
+skips events for unknown threads (`ProviderRuntimeIngestion.ts` `resolveThreadShell →
+if (!thread) return`), and `thread.activity.append` is guarded by `requireThread`
+(`commandInvariants.ts`), so none of the child's activities persisted — the tool
+returned text but the watch transcript was blank.
+
+Fix (the chosen "real thread + hide from sidebar" option):
+
+- The handler creates a real orchestration thread for the child via `thread.create`
+  under the **caller's project**, inheriting runtime mode / cwd / branch / worktree,
+  then waits (bounded poll on `getThreadShellById`) for the projection to catch up
+  before sending the prompt — so the turn's activities are ingested, not dropped.
+- New nullable `projection_threads.parent_thread_id` (migration **036**), threaded
+  through the `thread.create` command → `thread.created` payload → projector. It's
+  `Schema.optional` on the persisted row so unrelated queries decode unchanged.
+- The **active + archived shell snapshots** filter `parent_thread_id IS NULL`
+  (`listActiveThreadRows` / `listArchivedThreadRows`), hiding subagent threads from
+  the sidebar. The **command read model** (`listThreadRows`, used by `getSnapshot` /
+  `getCommandReadModel`) is deliberately *not* filtered, so the child thread exists
+  for the decider and its own `thread.activity.append`s pass `requireThread`.
+- Session teardown: an `Effect.addFinalizer` stops the spawned session when the tool
+  call ends (success / error / interrupt), so spawns no longer leak live sessions.
+- The resolved model is read from the started `ProviderSession.model`; the child's
+  early session-lifecycle events (emitted before `thread.create` lands) drop
+  harmlessly — only the post-prompt turn is the transcript we keep.
+
+This resolves the "`thread.activity.append` shape" open question above (the synthetic
+node + child thread both go through the normal command path).

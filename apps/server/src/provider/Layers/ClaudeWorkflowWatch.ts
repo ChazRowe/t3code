@@ -217,3 +217,41 @@ export function mergeWorkflowAgents(
   }
   return merged;
 }
+
+export interface WorkflowReconcileResult {
+  readonly toStart: ReadonlyArray<MergedWorkflowAgent>;
+  readonly toComplete: ReadonlyArray<MergedWorkflowAgent>;
+  readonly emitted: ReadonlySet<string>;
+}
+
+/**
+ * Diff the merged agent set against the keys already emitted, returning only the
+ * new start/complete intentions. Idempotent: re-running with the same (or a
+ * superset) input produces empty lists once everything has settled.
+ */
+export function reconcileWorkflowAgents(
+  emitted: ReadonlySet<string>,
+  merged: ReadonlyArray<MergedWorkflowAgent>,
+): WorkflowReconcileResult {
+  const next = new Set(emitted);
+  const toStart: Array<MergedWorkflowAgent> = [];
+  const toComplete: Array<MergedWorkflowAgent> = [];
+  for (const agent of merged) {
+    const startKey = `start:${agent.info.agentId}`;
+    const doneKey = `done:${agent.info.agentId}`;
+    if (!next.has(startKey)) {
+      toStart.push(agent);
+      next.add(startKey);
+    }
+    if (agent.status === "completed" && !next.has(doneKey)) {
+      toComplete.push(agent);
+      next.add(doneKey);
+    }
+  }
+  return { toStart, toComplete, emitted: next };
+}
+
+/** Fold the workflow phase into the agent label as a "type: description" pair. */
+export function formatWorkflowAgentLabel(info: WorkflowAgentInfo): string {
+  return info.phase ? `${info.phase}: ${info.label}` : info.label;
+}

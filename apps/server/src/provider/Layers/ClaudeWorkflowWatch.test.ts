@@ -5,6 +5,8 @@ import {
   parseWorkflowRunFile,
   parseWorkflowJournalLines,
   mergeWorkflowAgents,
+  reconcileWorkflowAgents,
+  formatWorkflowAgentLabel,
   type WorkflowRunSnapshot,
 } from "./ClaudeWorkflowWatch.ts";
 
@@ -153,5 +155,52 @@ describe("mergeWorkflowAgents", () => {
     assert.equal(merged.length, 1);
     assert.equal(merged[0]?.info.agentId, "ghost");
     assert.equal(merged[0]?.info.label, "ghost");
+  });
+});
+
+describe("reconcileWorkflowAgents", () => {
+  const agent = (agentId: string, status: "started" | "completed") => ({
+    info: { agentId, label: agentId, model: undefined, tokens: undefined, phase: undefined },
+    status,
+    resultSummary: undefined,
+  });
+
+  it("emits a start for a newly-seen started agent, no complete yet", () => {
+    const r = reconcileWorkflowAgents(new Set(), [agent("a1", "started")]);
+    assert.deepEqual(r.toStart.map((a) => a.info.agentId), ["a1"]);
+    assert.equal(r.toComplete.length, 0);
+    assert.ok(r.emitted.has("start:a1"));
+    assert.ok(!r.emitted.has("done:a1"));
+  });
+
+  it("emits start+complete together for an already-completed agent", () => {
+    const r = reconcileWorkflowAgents(new Set(), [agent("a1", "completed")]);
+    assert.deepEqual(r.toStart.map((a) => a.info.agentId), ["a1"]);
+    assert.deepEqual(r.toComplete.map((a) => a.info.agentId), ["a1"]);
+  });
+
+  it("does not re-emit already-emitted keys across polls", () => {
+    const first = reconcileWorkflowAgents(new Set(), [agent("a1", "started")]);
+    const second = reconcileWorkflowAgents(first.emitted, [agent("a1", "completed")]);
+    assert.equal(second.toStart.length, 0); // start already emitted
+    assert.deepEqual(second.toComplete.map((a) => a.info.agentId), ["a1"]);
+    const third = reconcileWorkflowAgents(second.emitted, [agent("a1", "completed")]);
+    assert.equal(third.toStart.length, 0);
+    assert.equal(third.toComplete.length, 0); // fully settled — nothing new
+  });
+});
+
+describe("formatWorkflowAgentLabel", () => {
+  it("prefixes the phase as a 'type: description' label when present", () => {
+    assert.equal(
+      formatWorkflowAgentLabel({ agentId: "a1", label: "alpha", model: undefined, tokens: undefined, phase: "Review" }),
+      "Review: alpha",
+    );
+  });
+  it("uses the bare label when no phase", () => {
+    assert.equal(
+      formatWorkflowAgentLabel({ agentId: "a1", label: "alpha", model: undefined, tokens: undefined, phase: undefined }),
+      "alpha",
+    );
   });
 });

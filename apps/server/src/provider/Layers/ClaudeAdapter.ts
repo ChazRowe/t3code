@@ -252,6 +252,13 @@ export interface ClaudeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /**
+   * Invoked when the SDK pushes a `commands_changed` message (the slash-command
+   * / skill list changed mid-session, e.g. a skill was installed). The driver
+   * wires this to invalidate its capabilities cache and refresh the provider
+   * snapshot so connected clients pick up the new list. Fire-and-forget.
+   */
+  readonly onCommandsChanged?: () => Effect.Effect<void>;
 }
 
 function isUuid(value: string): boolean {
@@ -3245,6 +3252,27 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               : {}),
           },
         });
+        return;
+      }
+      case "commands_changed": {
+        // The slash-command / skill list changed mid-session (e.g. a skill was
+        // installed). Surface a low-key notice instead of the generic unknown-
+        // message warning, and ask the driver to reload the snapshot so the new
+        // list reaches connected clients.
+        const count = Array.isArray(message.commands) ? message.commands.length : 0;
+        yield* offerRuntimeEvent({
+          ...base,
+          type: "commands.changed",
+          payload: {
+            message: count > 0 ? `Skills updated (${count} available)` : "Skills updated",
+            count,
+          },
+        });
+        if (options?.onCommandsChanged) {
+          yield* options
+            .onCommandsChanged()
+            .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach);
+        }
         return;
       }
       default:

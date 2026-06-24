@@ -192,6 +192,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "model.rerouted",
   "config.warning",
   "deprecation.notice",
+  "commands.changed",
   "files.persisted",
   "runtime.warning",
   "runtime.error",
@@ -243,6 +244,7 @@ const McpOauthCompletedType = Schema.Literal("mcp.oauth.completed");
 const ModelReroutedType = Schema.Literal("model.rerouted");
 const ConfigWarningType = Schema.Literal("config.warning");
 const DeprecationNoticeType = Schema.Literal("deprecation.notice");
+const CommandsChangedType = Schema.Literal("commands.changed");
 const FilesPersistedType = Schema.Literal("files.persisted");
 const ToolDeniedType = Schema.Literal("tool.denied");
 const RuntimeWarningType = Schema.Literal("runtime.warning");
@@ -589,6 +591,16 @@ const DeprecationNoticePayload = Schema.Struct({
   details: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type DeprecationNoticePayload = typeof DeprecationNoticePayload.Type;
+
+// Fire-and-forget push when the slash-command/skill list changes mid-session
+// (e.g. a skill is installed). Carries a human-readable summary and the new
+// command count so the UI can surface a low-key notice; the actual updated list
+// reaches clients via a provider snapshot refresh, not this payload.
+const CommandsChangedPayload = Schema.Struct({
+  message: TrimmedNonEmptyStringSchema,
+  count: Schema.optional(NonNegativeInt),
+});
+export type CommandsChangedPayload = typeof CommandsChangedPayload.Type;
 
 const FilesPersistedPayload = Schema.Struct({
   files: Schema.Array(
@@ -961,6 +973,14 @@ const ProviderRuntimeDeprecationNoticeEvent = Schema.Struct({
 export type ProviderRuntimeDeprecationNoticeEvent =
   typeof ProviderRuntimeDeprecationNoticeEvent.Type;
 
+const ProviderRuntimeCommandsChangedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: CommandsChangedType,
+  payload: CommandsChangedPayload,
+});
+export type ProviderRuntimeCommandsChangedEvent =
+  typeof ProviderRuntimeCommandsChangedEvent.Type;
+
 const ProviderRuntimeFilesPersistedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: FilesPersistedType,
@@ -1035,6 +1055,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeModelReroutedEvent,
   ProviderRuntimeConfigWarningEvent,
   ProviderRuntimeDeprecationNoticeEvent,
+  ProviderRuntimeCommandsChangedEvent,
   ProviderRuntimeFilesPersistedEvent,
   ProviderRuntimeToolDeniedEvent,
   ProviderRuntimeWarningEvent,

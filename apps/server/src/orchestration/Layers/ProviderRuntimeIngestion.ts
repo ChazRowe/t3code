@@ -703,6 +703,24 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "commands.changed": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "commands.changed",
+          summary: truncateDetail(event.payload.message, 120),
+          payload: {
+            message: truncateDetail(event.payload.message),
+            ...(event.payload.count !== undefined ? { count: event.payload.count } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     default:
       break;
   }

@@ -133,14 +133,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         continuationGroupKey,
       });
 
-      const adapterOptions = {
-        instanceId,
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-      };
-      const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
-      const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);
-
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
       const capabilitiesProbeCache = yield* Cache.make({
@@ -199,6 +191,23 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
             }),
         ),
       );
+
+      // Built after the capabilities cache + snapshot so the commands_changed
+      // reload can invalidate the cached probe and force a fresh snapshot —
+      // pushing the new slash-command / skill list to connected clients without
+      // waiting for the periodic refresh.
+      const adapterOptions = {
+        instanceId,
+        environment: processEnv,
+        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        onCommandsChanged: () =>
+          Cache.invalidate(capabilitiesProbeCache, capabilitiesCacheKey).pipe(
+            Effect.flatMap(() => snapshot.refresh),
+            Effect.asVoid,
+          ),
+      };
+      const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
+      const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);
 
       return {
         instanceId,

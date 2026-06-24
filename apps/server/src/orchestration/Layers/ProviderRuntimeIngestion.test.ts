@@ -2436,6 +2436,40 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activityPayload?.message).toBe("runtime activity exploded");
   });
 
+  it("records commands.changed as an info-tone notice activity", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "commands.changed",
+      eventId: asEventId("evt-commands-changed-activity"),
+      provider: ProviderDriverKind.make("claudeAgent"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-commands-changed"),
+      payload: {
+        message: "Skills updated (3 available)",
+        count: 3,
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some((activity) => activity.id === "evt-commands-changed-activity"),
+    );
+    const activity = thread.activities.find(
+      (entry: ProviderRuntimeTestActivity) => entry.id === "evt-commands-changed-activity",
+    );
+    const activityPayload =
+      activity?.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : undefined;
+
+    expect(activity?.kind).toBe("commands.changed");
+    expect(activity?.tone).toBe("info");
+    expect(activityPayload?.message).toBe("Skills updated (3 available)");
+    expect(activityPayload?.count).toBe(3);
+  });
+
   it("records task.updated patches as info-tone status activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

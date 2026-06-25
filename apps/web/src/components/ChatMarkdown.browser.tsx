@@ -48,6 +48,7 @@ vi.mock("../browser/openFileInPreview", async (importOriginal) => ({
 }));
 
 import ChatMarkdown from "./ChatMarkdown";
+import { renderMermaid } from "../lib/mermaidRendering";
 import { serializeTableElementToCsv, serializeTableElementToMarkdown } from "../markdown-clipboard";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
@@ -700,6 +701,37 @@ describe("ChatMarkdown", () => {
         expect(document.querySelector(".chat-markdown-mermaid-canvas svg")).not.toBeNull();
       } finally {
         await screen.unmount();
+      }
+    });
+
+    it("gives an explicit light fill contrasting (dark) label text in dark mode", async () => {
+      // Real failure: a classDef sets a light fill but no text color. Under the
+      // dark theme mermaid's default node text is light, so the box renders
+      // light-on-light. renderMermaid must derive a dark text color from the fill.
+      const { svg } = await renderMermaid(
+        [
+          "flowchart TD",
+          "  N[box]",
+          "  classDef hot fill:#eef6ff,stroke:#2471a3;",
+          "  class N hot;",
+        ].join("\n"),
+        "dark",
+      );
+
+      const host = document.createElement("div");
+      host.innerHTML = svg;
+      document.body.appendChild(host);
+      try {
+        const label = host.querySelector<HTMLElement>(".nodeLabel");
+        expect(label).not.toBeNull();
+        const color = getComputedStyle(label as HTMLElement).color;
+        const channels = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(color);
+        expect(channels).not.toBeNull();
+        const [r = 0, g = 0, b = 0] = [channels![1], channels![2], channels![3]].map(Number);
+        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        expect(luminance).toBeLessThan(0.5);
+      } finally {
+        host.remove();
       }
     });
 

@@ -595,6 +595,135 @@ describe("ChatMarkdown", () => {
     });
   });
 
+  describe("mermaid diagrams", () => {
+    // Mirrors the shape of a real agent-generated diagram: a flowchart with a
+    // subgraph, edge labels, and <br/> line breaks inside node labels.
+    const diagramSource = [
+      "```mermaid",
+      "flowchart TD",
+      "    A([raw text]) --> B{Decision}",
+      "    B -->|yes| C[Do the thing<br/>second line]",
+      "    B -->|no| D[Skip]",
+      "    subgraph G[Group]",
+      "      C --> E[End]",
+      "    end",
+      "```",
+    ].join("\n");
+
+    it("renders a finished diagram as inline SVG", async () => {
+      const screen = await render(<ChatMarkdown text={diagramSource} cwd="/repo/project" />);
+
+      try {
+        await vi.waitFor(
+          () => {
+            const svg = document.querySelector(".chat-markdown-mermaid-canvas svg");
+            expect(svg).not.toBeNull();
+          },
+          { timeout: 15_000 },
+        );
+        const container = document.querySelector(".chat-markdown-mermaid");
+        expect(container?.getAttribute("data-view")).toBe("diagram");
+        // A toggle back to source is offered once a diagram is available.
+        await expect.element(page.getByRole("button", { name: "Show source" })).toBeInTheDocument();
+      } finally {
+        await screen.unmount();
+      }
+    });
+
+    it("renders despite a leaked tool-call control tag in the source", async () => {
+      // Mirrors a real failure: a valid diagram followed by a stray "</parameter>"
+      // tag the agent leaked into its message text, just before the closing fence.
+      const withLeakedTag = [
+        "```mermaid",
+        "flowchart TD",
+        "    A([raw text]) --> B{Decision}",
+        "    B -->|yes| C[Do the thing<br/>second line]",
+        "    classDef meas fill:#f4f4f4,stroke:#888;",
+        "    class B meas;",
+        "</parameter>",
+        "```",
+      ].join("\n");
+      const screen = await render(<ChatMarkdown text={withLeakedTag} cwd="/repo/project" />);
+
+      try {
+        await vi.waitFor(
+          () => {
+            expect(document.querySelector(".chat-markdown-mermaid-canvas svg")).not.toBeNull();
+          },
+          { timeout: 15_000 },
+        );
+        const container = document.querySelector(".chat-markdown-mermaid");
+        expect(container?.getAttribute("data-view")).toBe("diagram");
+      } finally {
+        await screen.unmount();
+      }
+    });
+
+    it("keeps showing source while the diagram is still streaming", async () => {
+      const screen = await render(
+        <ChatMarkdown text={diagramSource} cwd="/repo/project" isStreaming />,
+      );
+
+      try {
+        const container = document.querySelector(".chat-markdown-mermaid");
+        expect(container).not.toBeNull();
+        expect(container?.getAttribute("data-view")).toBe("source");
+        // No render attempt happens while streaming, so no diagram and no toggle.
+        await vi.waitFor(() => {
+          expect(document.querySelector(".chat-markdown-mermaid-canvas")).toBeNull();
+        });
+        expect(page.getByRole("button", { name: "Show source" }).query()).toBeNull();
+        expect(container?.textContent).toContain("flowchart TD");
+      } finally {
+        await screen.unmount();
+      }
+    });
+
+    it("toggles between the diagram and its source", async () => {
+      const screen = await render(<ChatMarkdown text={diagramSource} cwd="/repo/project" />);
+
+      try {
+        await vi.waitFor(
+          () => {
+            expect(document.querySelector(".chat-markdown-mermaid-canvas svg")).not.toBeNull();
+          },
+          { timeout: 15_000 },
+        );
+
+        await page.getByRole("button", { name: "Show source" }).click();
+        const container = document.querySelector(".chat-markdown-mermaid");
+        expect(container?.getAttribute("data-view")).toBe("source");
+        expect(document.querySelector(".chat-markdown-mermaid-canvas")).toBeNull();
+
+        await page.getByRole("button", { name: "Show diagram" }).click();
+        expect(container?.getAttribute("data-view")).toBe("diagram");
+        expect(document.querySelector(".chat-markdown-mermaid-canvas svg")).not.toBeNull();
+      } finally {
+        await screen.unmount();
+      }
+    });
+
+    it("falls back to source when the diagram fails to parse", async () => {
+      const broken = ["```mermaid", "this is not a valid mermaid diagram {{{", "```"].join("\n");
+      const screen = await render(<ChatMarkdown text={broken} cwd="/repo/project" />);
+
+      try {
+        await vi.waitFor(
+          () => {
+            const title = document.querySelector(
+              ".chat-markdown-mermaid .chat-markdown-codeblock-title",
+            );
+            expect(title?.textContent).toContain("render failed");
+          },
+          { timeout: 15_000 },
+        );
+        expect(document.querySelector(".chat-markdown-mermaid-canvas")).toBeNull();
+      } finally {
+        await screen.unmount();
+      }
+    });
+  });
+
   it("scrolls wide tables horizontally instead of letter-wrapping cells", async () => {
     const header = `| ${Array.from({ length: 8 }, (_, i) => `ColumnHeading${i}`).join(" | ")} |`;
     const separator = `| ${Array.from({ length: 8 }, () => "---").join(" | ")} |`;

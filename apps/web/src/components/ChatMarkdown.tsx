@@ -2,10 +2,12 @@ import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pie
 import {
   CheckIcon,
   ChevronRightIcon,
+  CodeIcon,
   CopyIcon,
   GlobeIcon,
   Maximize2Icon,
   Minimize2Icon,
+  NetworkIcon,
   WrapTextIcon,
 } from "lucide-react";
 import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
@@ -45,6 +47,7 @@ import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
+import { renderMermaid } from "../lib/mermaidRendering";
 import { useTheme } from "../hooks/useTheme";
 import {
   chatMarkdownClipboardPayload,
@@ -662,6 +665,166 @@ function UncachedShikiCodeBlock({
 
   return (
     <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+  );
+}
+
+interface MermaidDiagramProps {
+  code: string;
+  className: string | undefined;
+  theme: "light" | "dark";
+  diffThemeName: DiffThemeName;
+  isStreaming: boolean;
+}
+
+function MermaidDiagram({
+  code,
+  className,
+  theme,
+  diffThemeName,
+  isStreaming,
+}: MermaidDiagramProps) {
+  const [svg, setSvg] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState(false);
+  const [showSource, setShowSource] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // While the message is streaming the diagram source is incomplete; rendering
+    // it would just produce parse errors on every token. Wait for the full block.
+    if (isStreaming) {
+      return;
+    }
+    let cancelled = false;
+    setRenderError(false);
+    // Keep any previously-rendered SVG on screen while re-rendering (e.g. on a
+    // theme switch) so the diagram doesn't flash to source and back.
+    renderMermaid(code, theme)
+      .then((result) => {
+        if (!cancelled) {
+          setSvg(result.svg);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn(
+            "Mermaid diagram failed to render, falling back to source.",
+            error instanceof Error ? error.message : error,
+          );
+          setSvg(null);
+          setRenderError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [code, theme, isStreaming]);
+
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current != null) {
+        clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const handleCopy = useCallback(() => {
+    if (typeof navigator === "undefined" || navigator.clipboard == null) {
+      return;
+    }
+    void navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        if (copiedTimerRef.current != null) {
+          clearTimeout(copiedTimerRef.current);
+        }
+        setCopied(true);
+        copiedTimerRef.current = setTimeout(() => {
+          setCopied(false);
+          copiedTimerRef.current = null;
+        }, 1200);
+      })
+      .catch(() => undefined);
+  }, [code]);
+
+  const hasDiagram = svg != null && !renderError;
+  // Show source while streaming, when rendering failed, before the first render
+  // resolves, or when the user explicitly toggled to the source view.
+  const sourceVisible = isStreaming || renderError || svg == null || showSource;
+  const copyLabel = copied ? "Copied" : "Copy source";
+  const title = renderError
+    ? "Diagram source · render failed"
+    : sourceVisible
+      ? "Diagram source"
+      : "Diagram";
+
+  return (
+    <div className="chat-markdown-mermaid" data-view={sourceVisible ? "source" : "diagram"}>
+      <div className="chat-markdown-codeblock-header select-none">
+        <span className="chat-markdown-codeblock-title">{title}</span>
+        <span className="flex items-center gap-0.5">
+          {hasDiagram ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="chat-markdown-chrome-action"
+                    aria-pressed={showSource}
+                    onClick={() => setShowSource((value) => !value)}
+                    aria-label={showSource ? "Show diagram" : "Show source"}
+                  />
+                }
+              >
+                {showSource ? <NetworkIcon className="size-3" /> : <CodeIcon className="size-3" />}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{showSource ? "Show diagram" : "Show source"}</TooltipPopup>
+            </Tooltip>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="chat-markdown-chrome-action"
+                  onClick={handleCopy}
+                  aria-label={copyLabel}
+                />
+              }
+            >
+              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{copyLabel}</TooltipPopup>
+          </Tooltip>
+        </span>
+      </div>
+      {sourceVisible ? (
+        <CodeHighlightErrorBoundary
+          fallback={<pre className="chat-markdown-mermaid-source">{code}</pre>}
+        >
+          <Suspense fallback={<pre className="chat-markdown-mermaid-source">{code}</pre>}>
+            <SuspenseShikiCodeBlock
+              className={className}
+              code={code}
+              themeName={diffThemeName}
+              isStreaming={isStreaming}
+            />
+          </Suspense>
+        </CodeHighlightErrorBoundary>
+      ) : (
+        <div
+          className="chat-markdown-mermaid-canvas"
+          // SVG is produced by mermaid with securityLevel:"strict" (DOMPurify-sanitized).
+          dangerouslySetInnerHTML={{ __html: svg as string }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -1356,6 +1519,17 @@ function ChatMarkdown({
         }
 
         const language = extractFenceLanguage(codeBlock.className);
+        if (language === "mermaid") {
+          return (
+            <MermaidDiagram
+              code={codeBlock.code}
+              className={codeBlock.className}
+              theme={resolvedTheme}
+              diffThemeName={diffThemeName}
+              isStreaming={isStreaming}
+            />
+          );
+        }
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
         return (
           <MarkdownCodeBlock

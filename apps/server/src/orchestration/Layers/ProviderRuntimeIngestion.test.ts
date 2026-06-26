@@ -2312,6 +2312,96 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completionEvents).toHaveLength(1);
   });
 
+  it("finalizes the turn's assistant message before the turn-ending session ready", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-ordering"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-ordering"),
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-ordering",
+    );
+
+    // Buffered mode (the default): the assistant text is only flushed when the
+    // turn finalizes. No item.completed(assistant_message) arrives, so the lone
+    // flush is the turn.completed finalize — which must run BEFORE session ready
+    // so turn-end reactors (e.g. the unattended-run sentinel check) observe the
+    // final assistant text first.
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-content-delta-ordering"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-ordering"),
+      itemId: asItemId("item-ordering"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "done\n<<WRAP_COMPLETE>>",
+      },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-turn-completed-ordering"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-ordering"),
+      payload: {
+        state: "completed",
+      },
+    });
+
+    await waitForThread(
+      harness.readModel,
+      (thread) =>
+        thread.session?.status === "ready" &&
+        thread.session?.activeTurnId === null &&
+        thread.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-ordering" &&
+            message.text.includes("<<WRAP_COMPLETE>>"),
+        ),
+    );
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const sentinelMessageIndex = events.findIndex(
+      (event) =>
+        event.type === "thread.message-sent" &&
+        event.payload.role === "assistant" &&
+        event.payload.text.includes("<<WRAP_COMPLETE>>"),
+    );
+    // The turn-ending session ready is the last `ready` with no active turn (the
+    // seed session is also ready, earlier).
+    let turnReadyIndex = -1;
+    events.forEach((event, index) => {
+      if (
+        event.type === "thread.session-set" &&
+        event.payload.session.status === "ready" &&
+        event.payload.session.activeTurnId === null
+      ) {
+        turnReadyIndex = index;
+      }
+    });
+
+    expect(sentinelMessageIndex).toBeGreaterThanOrEqual(0);
+    expect(turnReadyIndex).toBeGreaterThanOrEqual(0);
+    expect(sentinelMessageIndex).toBeLessThan(turnReadyIndex);
+  });
+
   it("maps canonical request events into approval activities with requestKind", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

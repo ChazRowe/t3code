@@ -9,6 +9,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -33,7 +34,51 @@ import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { __test, UnattendedRunReactorLive } from "./UnattendedRunReactor.ts";
 
-const { decideTurnEndAction } = __test;
+const { decideTurnEndAction, projectionTurnHasWrapSentinel } = __test;
+
+describe("projectionTurnHasWrapSentinel", () => {
+  const makeThread = (
+    latestTurnId: string | null,
+    messages: ReadonlyArray<{ role: "assistant" | "user"; turnId: string | null; text: string }>,
+  ): OrchestrationThread =>
+    ({
+      latestTurn: latestTurnId === null ? null : { turnId: TurnId.make(latestTurnId) },
+      messages: messages.map((message) => ({
+        role: message.role,
+        text: message.text,
+        turnId: message.turnId === null ? null : TurnId.make(message.turnId),
+      })),
+    }) as unknown as OrchestrationThread;
+
+  it("matches the sentinel in the latest turn's assistant text", () => {
+    const thread = makeThread("turn-2", [
+      { role: "assistant", turnId: "turn-2", text: `wrapped up\n${WRAP_SENTINEL}` },
+    ]);
+    expect(projectionTurnHasWrapSentinel(thread)).toBe(true);
+  });
+
+  it("ignores a sentinel from a previous turn (no cross-iteration leak)", () => {
+    const thread = makeThread("turn-2", [
+      { role: "assistant", turnId: "turn-1", text: `older wrap\n${WRAP_SENTINEL}` },
+      { role: "assistant", turnId: "turn-2", text: "still working" },
+    ]);
+    expect(projectionTurnHasWrapSentinel(thread)).toBe(false);
+  });
+
+  it("ignores the sentinel in a user message", () => {
+    const thread = makeThread("turn-2", [
+      { role: "user", turnId: "turn-2", text: `please emit ${WRAP_SENTINEL}` },
+    ]);
+    expect(projectionTurnHasWrapSentinel(thread)).toBe(false);
+  });
+
+  it("returns false when there is no latest turn to scope to", () => {
+    const thread = makeThread(null, [
+      { role: "assistant", turnId: null, text: `done\n${WRAP_SENTINEL}` },
+    ]);
+    expect(projectionTurnHasWrapSentinel(thread)).toBe(false);
+  });
+});
 
 describe("decideTurnEndAction", () => {
   it("error status faults with reason error", () => {

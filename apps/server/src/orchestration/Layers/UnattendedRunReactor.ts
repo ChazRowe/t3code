@@ -62,6 +62,22 @@ export const decideTurnEndAction = (input: {
   return { kind: "clear-continue" };
 };
 
+/**
+ * True when the just-completed turn's finalized assistant text carries the wrap
+ * sentinel. Scoped to the thread's latest turn so a sentinel from a previous
+ * iteration can never be mistaken for the current one.
+ */
+const projectionTurnHasWrapSentinel = (thread: OrchestrationThread): boolean => {
+  const turnId = thread.latestTurn?.turnId;
+  if (!turnId) return false;
+  return thread.messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.turnId === turnId &&
+      messageHasWrapSentinel(message.text),
+  );
+};
+
 const STOP_POLL_MAX_TRIES = 20;
 const STOP_POLL_INTERVAL = Duration.millis(50);
 
@@ -255,7 +271,16 @@ const make = Effect.gen(function* () {
       sawRunningSinceTurnStart.set(threadId, true);
     }
 
-    const hasSentinel = messageHasWrapSentinel(latestAssistantText.get(threadId) ?? "");
+    // Primary signal is the streamed accumulator, which the reactor's serial
+    // worker fills from the turn's assistant message-sent events before it ever
+    // processes this turn-end. The projection snapshot loaded above is a free
+    // second source: if a late or missed stream append left the accumulator
+    // empty, the finalized assistant text for the just-ended turn still catches
+    // the sentinel. Scoped to the latest turn, so a prior iteration's sentinel
+    // can't leak in.
+    const hasSentinel =
+      messageHasWrapSentinel(latestAssistantText.get(threadId) ?? "") ||
+      projectionTurnHasWrapSentinel(thread);
     const action = decideTurnEndAction({
       status: event.payload.session.status,
       hasSentinel,
@@ -450,4 +475,4 @@ const make = Effect.gen(function* () {
 export const UnattendedRunReactorLive = Layer.effect(UnattendedRunReactor, make);
 
 // Re-exported for unit testing pure helpers.
-export const __test = { decideTurnEndAction };
+export const __test = { decideTurnEndAction, projectionTurnHasWrapSentinel };

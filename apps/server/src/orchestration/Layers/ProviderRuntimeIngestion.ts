@@ -1419,6 +1419,39 @@ const make = Effect.gen(function* () {
           ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
           : null;
 
+      // Finalize this turn's assistant messages BEFORE the turn-ending
+      // session.set(ready) is dispatched below. Reactors that key off the turn
+      // end read the assistant text the instant they observe `ready` — most
+      // notably the unattended-run sentinel check — so the final segment (which
+      // may carry a trailing `<<WRAP_COMPLETE>>`) must already be on the
+      // domain-event stream ahead of the turn-end signal. When an earlier
+      // item.completed already finalized the segment this is a no-op: its
+      // message id was forgotten, so getAssistantMessageIdsForTurn returns
+      // nothing. Clearing the per-turn message/segment state here also makes the
+      // later turn.completed block's own finalize a no-op.
+      if (event.type === "turn.completed" && eventTurnId) {
+        const detailedThread = yield* getLoadedThreadDetail();
+        const messages = detailedThread?.messages ?? [];
+        const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, eventTurnId);
+        yield* Effect.forEach(
+          assistantMessageIds,
+          (assistantMessageId) =>
+            finalizeAssistantMessage({
+              event,
+              threadId: thread.id,
+              messageId: assistantMessageId,
+              turnId: eventTurnId,
+              createdAt: now,
+              commandTag: "assistant-complete-finalize",
+              finalDeltaCommandTag: "assistant-delta-finalize-fallback",
+              hasProjectedMessage: findMessageById(messages, assistantMessageId) !== undefined,
+            }),
+          { concurrency: 1 },
+        ).pipe(Effect.asVoid);
+        yield* clearAssistantMessageIdsForTurn(thread.id, eventTurnId);
+        yield* clearAssistantSegmentStateForTurn(thread.id, eventTurnId);
+      }
+
       if (
         event.type === "session.started" ||
         event.type === "session.state.changed" ||
@@ -1692,29 +1725,13 @@ const make = Effect.gen(function* () {
 
       if (event.type === "turn.completed") {
         const detailedThread = yield* getLoadedThreadDetail();
-        const messages = detailedThread?.messages ?? [];
         const proposedPlans = detailedThread?.proposedPlans ?? [];
         const turnId = toTurnId(event.turnId);
         if (turnId) {
-          const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
-          yield* Effect.forEach(
-            assistantMessageIds,
-            (assistantMessageId) =>
-              finalizeAssistantMessage({
-                event,
-                threadId: thread.id,
-                messageId: assistantMessageId,
-                turnId,
-                createdAt: now,
-                commandTag: "assistant-complete-finalize",
-                finalDeltaCommandTag: "assistant-delta-finalize-fallback",
-                hasProjectedMessage: findMessageById(messages, assistantMessageId) !== undefined,
-              }),
-            { concurrency: 1 },
-          ).pipe(Effect.asVoid);
-          yield* clearAssistantMessageIdsForTurn(thread.id, turnId);
-          yield* clearAssistantSegmentStateForTurn(thread.id, turnId);
-
+          // This turn's assistant messages were already finalized above, before
+          // the session.set(ready) dispatch, so turn-end reactors observe the
+          // final assistant text first. Only the proposed-plan flush and
+          // checkpoint placeholder remain here.
           yield* finalizeBufferedProposedPlan({
             event,
             threadId: thread.id,

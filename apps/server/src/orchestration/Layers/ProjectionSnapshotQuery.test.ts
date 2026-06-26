@@ -1813,6 +1813,43 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
   );
 
   it.effect(
+    "getSubagentTree surfaces the model for a native same-thread subagent from data.subagentSession",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`DELETE FROM projection_thread_activities`;
+        yield* sql`DELETE FROM projection_threads`;
+        yield* sql`DELETE FROM projection_projects`;
+
+        // A native Task/Agent subagent runs on the parent's session, so it has no
+        // childThreadId/provider — but the adapter records the model it ran on inside
+        // `data.subagentSession`, and the ref must surface it (provider stays null).
+        yield* sql`
+          INSERT INTO projection_thread_activities (
+            activity_id, thread_id, turn_id, tone, kind, summary, payload_json,
+            created_at, item_id, parent_item_id, iteration
+          ) VALUES (
+            'act-native', 'thread-1', NULL, 'tool', 'tool.completed',
+            'Explore: map the loader',
+            ${`{"itemType":"collab_agent_tool_call","itemId":"item-native","status":"completed","data":{"toolName":"Agent","input":{"subagent_type":"Explore","description":"map the loader"},"result":{"content":"done"},"subagentSession":{"model":"claude-opus-4-8"}}}`},
+            '2026-06-20T00:00:01.000Z', 'item-native', NULL, NULL
+          )
+        `;
+
+        const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+        assert.strictEqual(refs.length, 1);
+        const ref = refs[0];
+        assert.strictEqual(ref?.subagentType, "Explore");
+        assert.strictEqual(ref?.model, "claude-opus-4-8");
+        assert.strictEqual(ref?.childThreadId, null);
+        assert.strictEqual(ref?.provider, null);
+        assert.strictEqual(ref?.providerInstanceId, null);
+      }),
+  );
+
+  it.effect(
     "getSubagentTree scopes out subagents from a prior context once the context is cleared",
     () =>
       Effect.gen(function* () {

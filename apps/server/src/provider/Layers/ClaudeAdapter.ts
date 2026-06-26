@@ -1212,6 +1212,19 @@ function nativeProviderRefs(
   return {};
 }
 
+// The model a native same-thread subagent (Task/Agent tool or Workflow agent) runs on:
+// an explicit per-call override if one was supplied, else the parent session's model
+// (subagents inherit it). Surfaced via `data.subagentSession.model` so the watch view
+// shows the model for native subagents the same way it does for cross-provider ones.
+function resolveSubagentModel(
+  context: ClaudeSessionContext,
+  explicit?: string | undefined,
+): string | undefined {
+  const override =
+    typeof explicit === "string" && explicit.trim().length > 0 ? explicit.trim() : undefined;
+  return override ?? context.session.model ?? context.currentApiModelId;
+}
+
 function extractAssistantTextBlocks(message: SDKMessage): Array<string> {
   if (message.type !== "assistant") {
     return [];
@@ -2541,6 +2554,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const detail = summarizeToolRequest(toolName, toolInput);
       const inputFingerprint =
         Object.keys(toolInput).length > 0 ? toolInputFingerprint(toolInput) : undefined;
+      // For a top-level subagent dispatch (Task/Agent — what the superpowers subagent
+      // skill invokes), record the model it runs on so the watch view shows it: an
+      // explicit `model` override if the input carried one, else the parent's model.
+      const subagentModel =
+        itemType === "collab_agent_tool_call"
+          ? resolveSubagentModel(
+              context,
+              typeof toolInput.model === "string" ? toolInput.model : undefined,
+            )
+          : undefined;
 
       const tool: ToolInFlight = {
         itemId,
@@ -2571,6 +2594,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           data: {
             toolName: tool.toolName,
             input: toolInput,
+            ...(subagentModel ? { subagentSession: { model: subagentModel } } : {}),
           },
         },
         providerRefs: nativeProviderRefs(context, {
@@ -2626,10 +2650,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const [index, tool] = toolEntry;
       const itemStatus = toolResult.isError ? "failed" : "completed";
       const toolUseResult = readClaudeToolUseResult(message);
+      // Re-stamp the subagent model on update/completion (the completion is the latest
+      // payload the subagent ref query reads), matching the started event.
+      const subagentModel =
+        tool.itemType === "collab_agent_tool_call"
+          ? resolveSubagentModel(
+              context,
+              typeof tool.input.model === "string" ? tool.input.model : undefined,
+            )
+          : undefined;
       const toolData = {
         toolName: tool.toolName,
         input: tool.input,
         result: toolResult.block,
+        ...(subagentModel ? { subagentSession: { model: subagentModel } } : {}),
       };
 
       const updatedStamp = yield* makeEventStamp();
@@ -2810,6 +2844,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             input: toolInput,
           });
           const detail = summarizeToolRequest(b.name, toolInput);
+          // For a subagent spawn (Task/Agent), record the model it runs on so the
+          // watch view can show it — an explicit `model` override if the input carried
+          // one, else the parent session's model.
+          const subagentModel =
+            itemType === "collab_agent_tool_call"
+              ? resolveSubagentModel(
+                  context,
+                  typeof toolInput.model === "string" ? toolInput.model : undefined,
+                )
+              : undefined;
           const stamp = yield* makeEventStamp();
           yield* offerRuntimeEvent({
             type: "item.started",
@@ -2824,7 +2868,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               status: "inProgress",
               title: titleForTool(itemType),
               ...(detail ? { detail } : {}),
-              data: { toolName: b.name, input: toolInput },
+              data: {
+                toolName: b.name,
+                input: toolInput,
+                ...(subagentModel ? { subagentSession: { model: subagentModel } } : {}),
+              },
               parentItemId,
             },
             providerRefs: nativeProviderRefs(context, { providerItemId: b.id }),
@@ -2885,6 +2933,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         context.subagentNestedToolCalls.delete(toolResult.toolUseId);
         const resultText = toolResult.text.trim();
         const isSubagentTask = nestedTool?.itemType === "collab_agent_tool_call";
+        // Re-stamp the model on completion (this is the latest payload the subagent ref
+        // query reads), matching the started event so the model survives past completion.
+        const subagentModel = isSubagentTask
+          ? resolveSubagentModel(
+              context,
+              typeof nestedTool.input.model === "string" ? nestedTool.input.model : undefined,
+            )
+          : undefined;
         yield* offerRuntimeEvent({
           type: "item.completed",
           eventId: stamp.eventId,
@@ -2904,6 +2960,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                     toolName: nestedTool.toolName,
                     input: nestedTool.input,
                     result: { content: resultText },
+                    ...(subagentModel ? { subagentSession: { model: subagentModel } } : {}),
                   },
                 }
               : {}),
@@ -2939,6 +2996,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       resultSummary: string | undefined;
     },
     includeResult: boolean,
+    // Effective model for this agent: its per-call override if it had one, else the
+    // parent session's model (workflow agents inherit it). Surfaced via
+    // `data.subagentSession.model` so the watch view shows the model, same as a Task.
+    subagentModel: string | undefined,
   ): Record<string, unknown> => ({
     toolName: "Workflow",
     input: {
@@ -2950,6 +3011,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     workflowRunId: runId,
     workflowAgentId: agent.info.agentId,
     ...(agent.info.tokens !== undefined ? { tokens: agent.info.tokens } : {}),
+    ...(subagentModel ? { subagentSession: { model: subagentModel } } : {}),
   });
 
   // Polls a Workflow run's on-disk files and translates each agent into nested
@@ -3014,7 +3076,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             status: "inProgress",
             title: "Subagent task",
             detail: formatWorkflowAgentLabel(agent.info),
-            data: workflowAgentItemData(launch.runId, agent, false),
+            data: workflowAgentItemData(
+              launch.runId,
+              agent,
+              false,
+              resolveSubagentModel(context, agent.info.model),
+            ),
             parentItemId,
           },
           providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),
@@ -3042,7 +3109,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             status: "completed",
             title: "Subagent task",
             detail: formatWorkflowAgentLabel(agent.info),
-            data: workflowAgentItemData(launch.runId, agent, true),
+            data: workflowAgentItemData(
+              launch.runId,
+              agent,
+              true,
+              resolveSubagentModel(context, agent.info.model),
+            ),
             parentItemId,
           },
           providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),

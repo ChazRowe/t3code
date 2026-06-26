@@ -1309,6 +1309,10 @@ describe("ClaudeAdapterLive", () => {
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-8",
+        },
         runtimeMode: "full-access",
       });
 
@@ -1365,6 +1369,13 @@ describe("ClaudeAdapterLive", () => {
       if (toolStarted?.type === "item.started") {
         assert.equal(toolStarted.payload.itemType, "collab_agent_tool_call");
         assert.equal(toolStarted.payload.title, "Subagent task");
+        // The dispatch records the model the subagent runs on (the parent session's
+        // model here, since the Task input carried no per-call override) so the watch
+        // view can show it for Agent/Task subagents the same as cross-provider ones.
+        const data = toolStarted.payload.data as {
+          subagentSession?: { model?: string };
+        };
+        assert.equal(data.subagentSession?.model, "claude-opus-4-8");
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

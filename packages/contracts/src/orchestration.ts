@@ -1329,8 +1329,11 @@ export const OrchestrationSubagentRef = Schema.Struct({
   // Cross-provider subagents (spawned via the `spawn_agent` MCP tool) run as a real
   // session on their own thread; `childThreadId` points the watch view at that
   // thread's transcript, and `providerInstanceId`/`provider`/`model` let it show
-  // which provider + model the subagent ran on at the top of the transcript. All null
-  // for ordinary same-thread (Claude SDK) subagents.
+  // which provider + model the subagent ran on at the top of the transcript.
+  // Ordinary same-thread subagents (the Task/Agent tool and Workflow agents) run on
+  // the parent's session, so `childThreadId`/`providerInstanceId`/`provider` stay null
+  // but `model` is still populated (the override or inherited parent model) so the
+  // watch view shows the model for them too.
   childThreadId: Schema.NullOr(ThreadId),
   providerInstanceId: Schema.NullOr(ProviderInstanceId),
   provider: Schema.NullOr(ProviderDriverKind),

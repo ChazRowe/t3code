@@ -358,8 +358,11 @@ const deriveSubagentResultText = (payload: unknown): string | null => {
 };
 
 // Cross-provider subagents (spawned via the `spawn_agent` MCP tool) stash the child
-// session's identity under `payload.subagentSession`. Same-thread Claude subagents have
-// no such block, so every field resolves to null and the ref is unchanged.
+// session's identity under `payload.subagentSession`. Native same-thread subagents (the
+// Task/Agent tool and Workflow agents) can't add top-level payload fields — their runtime
+// event is validated against a closed schema that strips extras — so they ride the same
+// block inside `payload.data.subagentSession` (model only; the rest stay null since they
+// run on the parent's session). Subagents with neither block leave every field null.
 interface SubagentSessionMeta {
   readonly childThreadId: ThreadId | null;
   readonly providerInstanceId: ProviderInstanceId | null;
@@ -368,7 +371,10 @@ interface SubagentSessionMeta {
 }
 
 const deriveSubagentSessionMeta = (payload: unknown): SubagentSessionMeta => {
-  const meta = asRecordOrNull(asRecordOrNull(payload)?.subagentSession);
+  const record = asRecordOrNull(payload);
+  const meta =
+    asRecordOrNull(record?.subagentSession) ??
+    asRecordOrNull(asRecordOrNull(record?.data)?.subagentSession);
   if (meta === null) {
     return { childThreadId: null, providerInstanceId: null, provider: null, model: null };
   }

@@ -115,8 +115,9 @@ export function SubagentWatchView({
   const isFinished = subagentRef != null && subagentRef.status !== "inProgress";
 
   // Cross-provider subagents (spawned via `spawn_agent`) carry the provider + model
-  // they ran on; show it at the top of the transcript. Same-thread Claude subagents
-  // leave these null, so the label is omitted and the header is unchanged.
+  // they ran on; native same-thread subagents (Task/Agent + Workflow agents) carry just
+  // the model. Show whichever is present at the top of the transcript — with no provider
+  // the label collapses to the model alone, and with neither it's omitted entirely.
   const providerLabel = subagentRef?.provider ?? subagentRef?.providerInstanceId ?? null;
   const providerModelLabel =
     [providerLabel, subagentRef?.model ?? null].filter((part) => part !== null).join(" · ") || null;

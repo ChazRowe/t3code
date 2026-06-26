@@ -2002,14 +2002,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   // an account.usage.updated event. Fired at turn boundaries — best-effort and
   // never allowed to disrupt the turn, mirroring queryCurrentContextUsage.
   const emitAccountUsage = Effect.fn("emitAccountUsage")(function* (context: ClaudeSessionContext) {
-    const fetchUsage = context.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-    if (!fetchUsage) {
+    if (!context.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET) {
       return;
     }
 
+    // Call the SDK method on `context.query` directly so it keeps its `this`
+    // binding — detaching it into a local and invoking it bare makes the SDK's
+    // internal `this.request` throw. Mirrors how getContextUsage is queried.
     const usage = yield* Effect.promise(async () => {
       try {
-        return await fetchUsage();
+        return await context.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?.();
       } catch {
         return undefined;
       }

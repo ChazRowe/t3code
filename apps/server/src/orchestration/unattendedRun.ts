@@ -2,8 +2,7 @@
 export const WRAP_SENTINEL = "<<WRAP_COMPLETE>>";
 
 /** True when the agent's final message signals a completed wrap. */
-export const messageHasWrapSentinel = (text: string): boolean =>
-  text.includes(WRAP_SENTINEL);
+export const messageHasWrapSentinel = (text: string): boolean => text.includes(WRAP_SENTINEL);
 
 /** Message that opens iteration 1 and sets the unattended contract. */
 export const buildUnattendedPreamble = (totalIterations: number): string =>
@@ -17,25 +16,30 @@ export const buildUnattendedPreamble = (totalIterations: number): string =>
     ``,
     WRAP_SENTINEL,
     ``,
-    `on its own line. Seeing that line, I will clear the context and send you a`,
-    `"continue" so you can resume from the handoff.`,
+    `on its own line. That line is the ONLY thing that advances the run: seeing`,
+    `it, I clear the context and send you a "continue" so you resume from the`,
+    `handoff.`,
     ``,
     `Treat about 35% of your context window as your wrap ceiling. When you cross`,
     `it, finish your current step, invoke your wrap skill, and emit the sentinel —`,
     `don't keep going to a "natural" stopping point. Wrapping early and often is`,
     `correct here.`,
     ``,
+    `Ending a turn WITHOUT the sentinel never pauses the run — it just stays`,
+    `running and idle until you emit the sentinel or something starts your next`,
+    `turn. So you are free to end your turn to let background work you started (a`,
+    `subagent, a review, a CI run) finish; you do NOT need to poll or burn the turn`,
+    `waiting on it. When that work completes you'll be continued to pick the result`,
+    `up — emit the sentinel then, once you want a fresh iteration.`,
+    ``,
     `If you finish everything before iteration ${totalIterations}, write`,
     `"STATUS: COMPLETE" as the first line of the handoff and end WITHOUT the`,
-    `sentinel. The run pauses there rather than spinning through empty iterations.`,
+    `sentinel. The run simply sits idle (still running) so I find your result when`,
+    `I return — it won't spin through empty iterations.`,
     ``,
-    `If you instead need a human decision, STOP and ask your question WITHOUT the`,
-    `sentinel line — the run will pause for me.`,
-    ``,
-    `Never end your turn just to wait on a background task you started (a review, a`,
-    `subagent, a CI run): ending without the sentinel pauses the run. Either wait for`,
-    `the result within this turn (poll or monitor it), or invoke your wrap skill and`,
-    `emit the sentinel so the next iteration resumes and picks the result up.`,
+    `If you need a human decision, stop and ask your question (plainly, or via`,
+    `AskUserQuestion) WITHOUT the sentinel. The run stays running and I'll answer`,
+    `when I'm back. Only I pause or stop the run.`,
   ].join("\n");
 
 /** Message sent for iterations 2..N after the context is cleared. */

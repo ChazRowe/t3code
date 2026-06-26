@@ -33,7 +33,6 @@ import {
 } from "../Services/UnattendedRunReactor.ts";
 
 export type TurnEndAction =
-  | { readonly kind: "fault"; readonly reason: "error" | "no-sentinel" }
   | { readonly kind: "complete" }
   | { readonly kind: "clear-continue" }
   | { readonly kind: "ignore" };
@@ -45,20 +44,25 @@ export const decideTurnEndAction = (input: {
   readonly totalIterations: number;
   readonly sawRunningSinceTurnStart: boolean;
 }): TurnEndAction => {
-  if (input.status === "error") return { kind: "fault", reason: "error" };
+  // Only a real turn end — the session leaving `running` for idle/ready — is a
+  // turn-end signal. An errored session, or any other status, is left alone: the
+  // reactor never auto-pauses, so the run simply stays running. (An error is
+  // visible on the turn itself; the user decides what to do with it.)
   if (input.status !== "idle" && input.status !== "ready") return { kind: "ignore" };
   // A freshly (re)created session passes through `ready`/`idle` while it warms up
   // for the next turn — BEFORE the agent has run. That is not a turn end. Only
   // treat idle/ready as a turn end once we've actually seen the turn running;
   // otherwise the warm-up status of each continued iteration is misread as an
-  // empty turn and faults `no-sentinel`.
+  // empty turn.
   if (!input.sawRunningSinceTurnStart) return { kind: "ignore" };
-  // The final iteration's turn end ends the run whether or not it wrapped: there
-  // is no further iteration to continue into, so a missing sentinel here means
-  // "done" rather than "stopped early for a human". Mid-run, a sentinel-less
-  // turn end IS the stop-for-human signal and pauses.
+  // The final iteration's turn end completes the run: there is no further
+  // iteration to continue into, so the iteration ceiling is the run's natural end.
   if (input.currentIteration >= input.totalIterations) return { kind: "complete" };
-  if (!input.hasSentinel) return { kind: "fault", reason: "no-sentinel" };
+  // Mid-run without a sentinel: the agent has not asked to advance. Stay running
+  // and do nothing — it may simply be waiting on background work it started, and
+  // will emit the sentinel when it wants the next (cleared) iteration. Only the
+  // sentinel advances the loop; only the user pauses or stops it.
+  if (!input.hasSentinel) return { kind: "ignore" };
   return { kind: "clear-continue" };
 };
 
@@ -81,9 +85,7 @@ const projectionTurnHasWrapSentinel = (thread: OrchestrationThread): boolean => 
 const STOP_POLL_MAX_TRIES = 20;
 const STOP_POLL_INTERVAL = Duration.millis(50);
 
-class UnattendedRunStopTimeoutError extends Data.TaggedError(
-  "UnattendedRunStopTimeoutError",
-)<{
+class UnattendedRunStopTimeoutError extends Data.TaggedError("UnattendedRunStopTimeoutError")<{
   readonly threadId: string;
 }> {}
 
@@ -135,9 +137,12 @@ const make = Effect.gen(function* () {
     });
   });
 
+  // Only ever reached when clear-and-continue itself fails — a genuine internal
+  // defect, not a routine turn end. Surfaces as a paused run so the operator can
+  // see it; normal turn ends never fault.
   const dispatchFault = Effect.fn("dispatchFault")(function* (
     threadId: OrchestrationThread["id"],
-    reason: "error" | "no-sentinel",
+    reason: "error",
   ) {
     yield* orchestrationEngine.dispatch({
       type: "thread.unattended-run.fault",
@@ -209,9 +214,7 @@ const make = Effect.gen(function* () {
       });
 
       const sessionStopped = (current: OrchestrationThread | undefined): boolean =>
-        current === undefined ||
-        current.session === null ||
-        current.session.status === "stopped";
+        current === undefined || current.session === null || current.session.status === "stopped";
 
       let settled = false;
       for (let attempt = 0; attempt < STOP_POLL_MAX_TRIES; attempt++) {
@@ -292,8 +295,6 @@ const make = Effect.gen(function* () {
     switch (action.kind) {
       case "ignore":
         return;
-      case "fault":
-        return yield* dispatchFault(threadId, action.reason);
       case "complete":
         return yield* orchestrationEngine.dispatch({
           type: "thread.unattended-run.complete",
@@ -355,26 +356,11 @@ const make = Effect.gen(function* () {
             return;
           }
 
-          // The agent asked the human a question via an interactive tool
-          // (AskUserQuestion). That SUSPENDS the turn waiting for an answer —
-          // no turn-end (idle/ready) fires — so the no-sentinel pause path
-          // never triggers and the run would hang. Pause it here for the human;
-          // leave the session/turn suspended so they can answer in place, then
-          // resume the run when ready.
-          if (activity.kind !== "user-input.requested") {
-            return;
-          }
-          const thread = yield* readThread(threadId);
-          if (thread?.unattendedRun?.status !== "running") {
-            return;
-          }
-          yield* orchestrationEngine.dispatch({
-            type: "thread.unattended-run.pause",
-            commandId: yield* serverCommandId("unattended-await-input"),
-            threadId: thread.id,
-            reason: "awaiting-input",
-            createdAt: yield* nowIso,
-          });
+          // Any other activity — including `user-input.requested` from
+          // AskUserQuestion — is left alone. The agent is free to ask the human a
+          // question and suspend its turn; the run stays running until the human
+          // answers (and the agent later emits the sentinel) or the user pauses
+          // or stops. The reactor never auto-pauses.
           return;
         }
         case "thread.unattended-run-started": {
@@ -407,9 +393,14 @@ const make = Effect.gen(function* () {
           if (thread?.unattendedRun?.status !== "running") {
             return;
           }
+          // The user interrupted the streaming turn (the chat Stop button, which
+          // is distinct from the unattended Pause button). That exits unattended
+          // mode altogether rather than pausing: the turn is interrupted as usual
+          // and the run terminates (stopped), leaving an ordinary thread the user
+          // can drive directly or restart unattended afresh.
           yield* orchestrationEngine.dispatch({
-            type: "thread.unattended-run.pause",
-            commandId: yield* serverCommandId("unattended-pause"),
+            type: "thread.unattended-run.stop",
+            commandId: yield* serverCommandId("unattended-interrupt-stop"),
             threadId: thread.id,
             createdAt: yield* nowIso,
           });

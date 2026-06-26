@@ -37,6 +37,15 @@ describe("unattended run constants", () => {
   it("has a non-empty continue message", () => {
     expect(CONTINUE_MESSAGE.length).toBeGreaterThan(0);
   });
+
+  it("preamble tells the agent that ending a turn without the sentinel never pauses", () => {
+    const preamble = buildUnattendedPreamble(3).toLowerCase();
+    expect(preamble).toContain("never pauses");
+    // The agent may end its turn to let background work (e.g. a subagent) finish.
+    expect(preamble).toContain("subagent");
+    // Only the user controls pause/stop.
+    expect(preamble).toContain("only i pause or stop");
+  });
 });
 
 describe("context-clear marker formatting", () => {

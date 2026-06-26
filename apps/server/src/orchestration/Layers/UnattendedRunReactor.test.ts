@@ -81,16 +81,16 @@ describe("projectionTurnHasWrapSentinel", () => {
 });
 
 describe("decideTurnEndAction", () => {
-  it("error status faults with reason error", () => {
+  it("error status is ignored — the reactor never auto-pauses, so the run stays running", () => {
     expect(
       decideTurnEndAction({
         status: "error",
-        hasSentinel: true,
+        hasSentinel: false,
         currentIteration: 1,
         totalIterations: 3,
         sawRunningSinceTurnStart: true,
       }),
-    ).toEqual({ kind: "fault", reason: "error" });
+    ).toEqual({ kind: "ignore" });
   });
 
   it("running status is ignored", () => {
@@ -189,7 +189,7 @@ describe("decideTurnEndAction", () => {
     ).toEqual({ kind: "complete" });
   });
 
-  it("idle without sentinel after the turn ran faults with reason no-sentinel", () => {
+  it("idle without sentinel mid-run is ignored — the run stays running until the agent emits the sentinel", () => {
     expect(
       decideTurnEndAction({
         status: "idle",
@@ -198,7 +198,7 @@ describe("decideTurnEndAction", () => {
         totalIterations: 3,
         sawRunningSinceTurnStart: true,
       }),
-    ).toEqual({ kind: "fault", reason: "no-sentinel" });
+    ).toEqual({ kind: "ignore" });
   });
 
   it("ready with sentinel mid-run clears and continues", () => {
@@ -378,6 +378,19 @@ const setupHarness = Effect.fn("setupHarness")(function* () {
       yield* reactor.drain;
     });
 
+  // Emit the user's turn interrupt (the chat Stop button) via the command path,
+  // which the decider turns into a `thread.turn-interrupt-requested` event.
+  const emitTurnInterrupt = (label: string) =>
+    Effect.gen(function* () {
+      yield* engine.dispatch({
+        type: "thread.turn.interrupt",
+        commandId: CommandId.make(`cmd-interrupt-${label}`),
+        threadId,
+        createdAt: now,
+      });
+      yield* reactor.drain;
+    });
+
   // Emit a `context-window.updated` activity the way the provider does as token
   // usage is reported during a turn.
   const emitContextWindowUpdated = (label: string, usedTokens: number, maxTokens: number) =>
@@ -406,6 +419,7 @@ const setupHarness = Effect.fn("setupHarness")(function* () {
     driveTurnEnd,
     emitSessionStatus,
     emitUserInputRequested,
+    emitTurnInterrupt,
     emitContextWindowUpdated,
   };
 });
@@ -456,23 +470,28 @@ effectIt.effect("clears context on continue by requesting a resetContext session
       (event) => event.type === "thread.session-stop-requested",
     );
     assert.strictEqual(stopRequests.length, 1);
-    assert.strictEqual(
-      (stopRequests[0]?.payload as { resetContext?: boolean }).resetContext,
-      true,
-    );
+    assert.strictEqual((stopRequests[0]?.payload as { resetContext?: boolean }).resetContext, true);
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 
-effectIt.effect("pauses with no-sentinel when a turn ends without the wrap sentinel", () =>
+// A mid-run turn that ends without the sentinel no longer pauses: the agent may
+// simply be letting background work it started run to completion. The run stays
+// running and idle, holding its iteration, until the agent emits the sentinel
+// (to advance) or the user pauses/stops.
+effectIt.effect("stays running when a mid-run turn ends without the wrap sentinel", () =>
   Effect.gen(function* () {
     const harness = yield* setupHarness();
     yield* harness.startUnattendedRun(2);
 
-    yield* harness.driveTurnEnd("nosentinel", "I need a human decision here.");
+    yield* harness.driveTurnEnd(
+      "nosentinel",
+      "Kicked off a subagent; ending my turn to let it run.",
+    );
 
     const thread = yield* harness.readThread;
-    assert.strictEqual(thread?.unattendedRun?.status, "paused");
-    assert.strictEqual(thread?.unattendedRun?.pauseReason, "no-sentinel");
+    assert.strictEqual(thread?.unattendedRun?.status, "running");
+    assert.strictEqual(thread?.unattendedRun?.pauseReason ?? null, null);
+    assert.strictEqual(thread?.unattendedRun?.currentIteration, 1);
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 
@@ -538,12 +557,12 @@ effectIt.effect("completes when the final iteration ends without the wrap sentin
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 
-// The agent asks the human a question via an interactive tool (AskUserQuestion)
-// instead of wrapping. That surfaces as a `user-input.requested` activity and
-// SUSPENDS the turn — no turn-end (idle/ready) ever fires, so the run cannot
-// rely on the no-sentinel turn-end path to pause. The reactor must pause the
-// run on the activity itself, otherwise it hangs until a human intervenes.
-effectIt.effect("pauses with awaiting-input when the agent requests user input mid-run", () =>
+// The agent asks the human a question via an interactive tool (AskUserQuestion),
+// which surfaces as a `user-input.requested` activity and SUSPENDS the turn. The
+// reactor must NOT pause: the run stays running while the turn waits in place for
+// the human, who answers when they return (the agent then emits the sentinel to
+// advance, or the user pauses/stops). The reactor never auto-pauses.
+effectIt.effect("stays running when the agent requests user input mid-run (no auto-pause)", () =>
   Effect.gen(function* () {
     const harness = yield* setupHarness();
     yield* harness.startUnattendedRun(3);
@@ -552,8 +571,25 @@ effectIt.effect("pauses with awaiting-input when the agent requests user input m
     yield* harness.emitUserInputRequested("ask1");
 
     const thread = yield* harness.readThread;
-    assert.strictEqual(thread?.unattendedRun?.status, "paused");
-    assert.strictEqual(thread?.unattendedRun?.pauseReason, "awaiting-input");
+    assert.strictEqual(thread?.unattendedRun?.status, "running");
+    assert.strictEqual(thread?.unattendedRun?.pauseReason ?? null, null);
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);
+
+// The user interrupts the streaming turn (the chat Stop button, which is distinct
+// from the unattended Pause button). That exits unattended mode altogether: the
+// run terminates (stopped) rather than pausing, leaving an ordinary thread the
+// user can drive directly or restart unattended afresh.
+effectIt.effect("stops the run when the user interrupts the turn (exits unattended mode)", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(3);
+
+    yield* harness.emitSessionStatus("running", "running");
+    yield* harness.emitTurnInterrupt("stop1");
+
+    const thread = yield* harness.readThread;
+    assert.strictEqual(thread?.unattendedRun?.status, "stopped");
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 
@@ -611,68 +647,66 @@ effectIt.effect("ignores user-input.requested when no unattended run is active",
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 
-effectIt.effect(
-  "rehydrates a running unattended run with idle session when reactor starts",
-  () =>
-    Effect.gen(function* () {
-      const engine = yield* OrchestrationEngineService;
-      const snapshotQuery = yield* ProjectionSnapshotQuery;
-      const reactor = yield* UnattendedRunReactor;
+effectIt.effect("rehydrates a running unattended run with idle session when reactor starts", () =>
+  Effect.gen(function* () {
+    const engine = yield* OrchestrationEngineService;
+    const snapshotQuery = yield* ProjectionSnapshotQuery;
+    const reactor = yield* UnattendedRunReactor;
 
-      // Seed persistence: create project + thread + start an unattended run.
-      // The reactor has NOT started yet, so no preamble turn is issued and no
-      // session is created — the thread has unattendedRun.status === "running"
-      // with session === null.
-      yield* engine.dispatch({
-        type: "project.create",
-        commandId: CommandId.make("cmd-rehydrate-project"),
-        projectId,
-        title: "Rehydrate Project",
-        workspaceRoot: "/tmp/rehydrate-project",
-        defaultModelSelection: modelSelection,
-        createdAt: now,
-      });
-      yield* engine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.make("cmd-rehydrate-thread"),
-        threadId,
-        projectId,
-        title: "Rehydrate Thread",
-        modelSelection,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "full-access",
-        branch: null,
-        worktreePath: null,
-        createdAt: now,
-      });
-      yield* engine.dispatch({
-        type: "thread.unattended-run.start",
-        commandId: CommandId.make("cmd-rehydrate-run-start"),
-        threadId,
-        totalIterations: 2,
-        createdAt: now,
-      });
+    // Seed persistence: create project + thread + start an unattended run.
+    // The reactor has NOT started yet, so no preamble turn is issued and no
+    // session is created — the thread has unattendedRun.status === "running"
+    // with session === null.
+    yield* engine.dispatch({
+      type: "project.create",
+      commandId: CommandId.make("cmd-rehydrate-project"),
+      projectId,
+      title: "Rehydrate Project",
+      workspaceRoot: "/tmp/rehydrate-project",
+      defaultModelSelection: modelSelection,
+      createdAt: now,
+    });
+    yield* engine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("cmd-rehydrate-thread"),
+      threadId,
+      projectId,
+      title: "Rehydrate Thread",
+      modelSelection,
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "full-access",
+      branch: null,
+      worktreePath: null,
+      createdAt: now,
+    });
+    yield* engine.dispatch({
+      type: "thread.unattended-run.start",
+      commandId: CommandId.make("cmd-rehydrate-run-start"),
+      threadId,
+      totalIterations: 2,
+      createdAt: now,
+    });
 
-      // Confirm the thread has a running unattended run with no active session.
-      const beforeStart = yield* snapshotQuery
-        .getThreadDetailById(threadId)
-        .pipe(Effect.map(Option.getOrUndefined));
-      assert.strictEqual(beforeStart?.unattendedRun?.status, "running");
-      assert.isNull(beforeStart?.session ?? null);
+    // Confirm the thread has a running unattended run with no active session.
+    const beforeStart = yield* snapshotQuery
+      .getThreadDetailById(threadId)
+      .pipe(Effect.map(Option.getOrUndefined));
+    assert.strictEqual(beforeStart?.unattendedRun?.status, "running");
+    assert.isNull(beforeStart?.session ?? null);
 
-      // Now start the reactor — rehydration should issue a continue turn.
-      yield* reactor.start();
-      yield* reactor.drain;
+    // Now start the reactor — rehydration should issue a continue turn.
+    yield* reactor.start();
+    yield* reactor.drain;
 
-      const afterStart = yield* snapshotQuery
-        .getThreadDetailById(threadId)
-        .pipe(Effect.map(Option.getOrUndefined));
-      const userMessages = afterStart?.messages.filter((m) => m.role === "user") ?? [];
-      assert.ok(
-        userMessages.some((m) => m.text === CONTINUE_MESSAGE),
-        `expected a continue turn; got ${userMessages.length} user message(s)`,
-      );
-    }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+    const afterStart = yield* snapshotQuery
+      .getThreadDetailById(threadId)
+      .pipe(Effect.map(Option.getOrUndefined));
+    const userMessages = afterStart?.messages.filter((m) => m.role === "user") ?? [];
+    assert.ok(
+      userMessages.some((m) => m.text === CONTINUE_MESSAGE),
+      `expected a continue turn; got ${userMessages.length} user message(s)`,
+    );
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );
 
 const threadId2 = ThreadId.make("thread-2");

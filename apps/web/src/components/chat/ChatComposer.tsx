@@ -335,17 +335,17 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
                   type="button"
                   onClick={props.onStartUnattendedRun}
                   disabled={!props.canStartUnattendedRun}
-                  aria-label="Start unattended run"
+                  aria-label="Start looping run"
                 />
               }
             >
               <PlayIcon />
-              <span className="sr-only sm:not-sr-only">Unattended</span>
+              <span className="sr-only sm:not-sr-only">Looping</span>
             </TooltipTrigger>
             <TooltipPopup side="top">
               {props.canStartUnattendedRun
-                ? "Start unattended run"
-                : "Finish the current turn to start an unattended run"}
+                ? "Start looping run"
+                : "Finish the current turn to start a looping run"}
             </TooltipPopup>
           </Tooltip>
         </>

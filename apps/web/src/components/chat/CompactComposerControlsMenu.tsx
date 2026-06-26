@@ -89,7 +89,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         <MenuDivider />
         <MenuItem onClick={props.onStartUnattendedRun} disabled={!props.canStartUnattendedRun}>
           <PlayIcon className="size-4 shrink-0" />
-          Start unattended run…
+          Start looping run…
         </MenuItem>
       </MenuPopup>
     </Menu>

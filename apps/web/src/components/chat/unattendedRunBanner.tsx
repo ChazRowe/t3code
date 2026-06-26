@@ -32,7 +32,7 @@ export function buildUnattendedRunBannerItem(input: {
   }
 
   const isRunning = run.status === "running";
-  const title = `Unattended run · iteration ${run.currentIteration} of ${run.totalIterations} · ${run.status}`;
+  const title = `Looping run · iteration ${run.currentIteration} of ${run.totalIterations} · ${run.status}`;
 
   return {
     id: "unattended-run",

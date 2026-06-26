@@ -33,13 +33,13 @@ function notifyUnattendedRunActionFailed(action: UnattendedRunAction, error: unk
   const detail = error instanceof Error && error.message ? error.message : undefined;
   const hint =
     action === "start"
-      ? "An unattended run may already be active on this thread — stop or resume the current one first."
+      ? "A looping run may already be active on this thread — stop or resume the current one first."
       : "Please try again.";
   console.error(`Failed to ${action} unattended run`, error);
   toastManager.add(
     stackedThreadToast({
       type: "error",
-      title: `Couldn't ${action} the unattended run`,
+      title: `Couldn't ${action} the looping run`,
       description: detail ? `${hint} (${detail})` : hint,
     }),
   );

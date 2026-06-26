@@ -44,7 +44,7 @@ export function UnattendedRunDialog({ open, onOpenChange, onConfirm }: Unattende
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogPopup>
         <AlertDialogHeader>
-          <AlertDialogTitle>Start unattended run</AlertDialogTitle>
+          <AlertDialogTitle>Start looping run</AlertDialogTitle>
           <AlertDialogDescription>
             T3 will run the agent repeatedly up to the number of iterations you choose. The agent
             must end each wrap with the sentinel token so T3 can clear context and continue.

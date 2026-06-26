@@ -7,6 +7,7 @@ import {
   formatUsagePercent,
 } from "~/lib/accountUsage";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -44,8 +45,14 @@ function AccountUsageBreakdown(props: { accountUsage: AccountUsageSnapshot }) {
         {planLabel ? <div className="text-[11px] text-muted-foreground/70">{planLabel}</div> : null}
       </div>
       {accountUsage.accountEmail ? (
-        <div className="-mt-1 truncate text-[11px] text-muted-foreground/60" title={accountUsage.accountEmail}>
-          {accountUsage.accountEmail}
+        <div className="-mt-1 flex min-w-0">
+          <RedactedSensitiveText
+            value={accountUsage.accountEmail}
+            ariaLabel="Toggle account email visibility"
+            revealTooltip="Click to reveal email"
+            hideTooltip="Click to hide email"
+            className="truncate text-muted-foreground/60"
+          />
         </div>
       ) : null}
       <div className="flex flex-col gap-1.5">

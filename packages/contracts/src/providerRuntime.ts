@@ -586,6 +586,9 @@ export type AccountUsageExtraWindow = typeof AccountUsageExtraWindow.Type;
 // the Claude adapter fetches this and re-emits it at turn boundaries.
 const AccountUsageUpdatedPayload = Schema.Struct({
   subscriptionType: Schema.NullOr(Schema.String),
+  // Logged-in claude.ai account email. Optional for backward compatibility with
+  // activities persisted before this field existed.
+  accountEmail: Schema.optional(Schema.NullOr(Schema.String)),
   rateLimitsAvailable: Schema.Boolean,
   windows: Schema.Struct({
     fiveHour: Schema.optional(Schema.NullOr(AccountUsageWindow)),

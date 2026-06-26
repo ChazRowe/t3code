@@ -43,6 +43,11 @@ function AccountUsageBreakdown(props: { accountUsage: AccountUsageSnapshot }) {
         <div className="font-medium text-muted-foreground text-xs">Usage limits</div>
         {planLabel ? <div className="text-[11px] text-muted-foreground/70">{planLabel}</div> : null}
       </div>
+      {accountUsage.accountEmail ? (
+        <div className="-mt-1 truncate text-[11px] text-muted-foreground/60" title={accountUsage.accountEmail}>
+          {accountUsage.accountEmail}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-1.5">
         {accountUsage.windows.map((window) => {
           const percent = formatUsagePercent(window.utilization);

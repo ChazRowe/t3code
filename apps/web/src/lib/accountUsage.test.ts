@@ -31,6 +31,7 @@ describe("accountUsage", () => {
       makeActivity("activity-2", "tool.started", {}),
       makeActivity("activity-3", "account.usage.updated", {
         subscriptionType: "max",
+        accountEmail: "person@example.com",
         rateLimitsAvailable: true,
         windows: {
           fiveHour: { utilization: 42, resetsAt: "2026-03-23T05:00:00.000Z" },
@@ -42,6 +43,7 @@ describe("accountUsage", () => {
 
     expect(snapshot).not.toBeNull();
     expect(snapshot?.subscriptionType).toBe("max");
+    expect(snapshot?.accountEmail).toBe("person@example.com");
     expect(snapshot?.rateLimitsAvailable).toBe(true);
     // Latest activity wins; windows follow the session → weekly → per-model order.
     expect(snapshot?.windows.map((w) => w.label)).toEqual(["Session", "Week", "Sonnet"]);
@@ -68,6 +70,8 @@ describe("accountUsage", () => {
     ]);
 
     expect(snapshot?.windows.map((w) => w.label)).toEqual(["Week"]);
+    // Email absent from the payload derives to null rather than undefined.
+    expect(snapshot?.accountEmail).toBeNull();
   });
 
   it("includes enabled extra usage and ignores disabled extra usage", () => {

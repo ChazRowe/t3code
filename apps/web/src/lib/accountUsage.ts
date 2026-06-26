@@ -29,6 +29,8 @@ export type AccountUsageWindowRow = {
 export type AccountUsageSnapshot = {
   /** claude.ai plan ("pro" | "max" | …) or null for API-key sessions. */
   readonly subscriptionType: string | null;
+  /** Logged-in account email, or null when unavailable. */
+  readonly accountEmail: string | null;
   /** False when plan limits do not apply (rows will be empty). */
   readonly rateLimitsAvailable: boolean;
   /** Ordered, present-only windows to render. */
@@ -122,6 +124,7 @@ export function deriveLatestAccountUsageSnapshot(
 
     return {
       subscriptionType: asNonEmptyString(payload.subscriptionType),
+      accountEmail: asNonEmptyString(payload.accountEmail),
       rateLimitsAvailable: payload.rateLimitsAvailable === true,
       windows: rows,
       updatedAt: activity.createdAt,

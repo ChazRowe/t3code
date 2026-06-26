@@ -76,6 +76,13 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
       return this.usageResponse;
     };
 
+  // Logged-in account identity the adapter pulls alongside the usage snapshot.
+  public accountEmail: string | undefined;
+
+  readonly accountInfo = async (): Promise<{ readonly email?: string | undefined }> => ({
+    ...(this.accountEmail !== undefined ? { email: this.accountEmail } : {}),
+  });
+
   emit(message: SDKMessage): void {
     if (this.done) {
       return;
@@ -2447,6 +2454,7 @@ describe("ClaudeAdapterLive", () => {
 
   it.effect("emits account.usage.updated from the experimental usage snapshot", () => {
     const harness = makeHarness();
+    harness.query.accountEmail = "person@example.com";
     harness.query.usageResponse = {
       session: {
         total_cost_usd: 0,
@@ -2516,6 +2524,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(usageEvent?.type, "account.usage.updated");
       if (usageEvent?.type === "account.usage.updated") {
         assert.equal(usageEvent.payload.subscriptionType, "max");
+        assert.equal(usageEvent.payload.accountEmail, "person@example.com");
         assert.equal(usageEvent.payload.rateLimitsAvailable, true);
         assert.deepEqual(usageEvent.payload.windows.fiveHour, {
           utilization: 42,

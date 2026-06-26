@@ -247,6 +247,8 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   // session %, weekly %, per-model weekly %). Experimental SDK surface — optional
   // and always called defensively.
   readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<SDKControlGetUsageResponse>;
+  // Logged-in account identity (email/plan), resolved from session init.
+  readonly accountInfo?: () => Promise<{ readonly email?: string | undefined }>;
   readonly close: () => void;
 }
 
@@ -605,6 +607,7 @@ function normalizeClaudeUsageWindow(
 // renderable (e.g. API-key sessions where plan limits do not apply).
 function normalizeClaudeAccountUsageApiSnapshot(
   value: SDKControlGetUsageResponse,
+  accountEmail: string | null,
 ): AccountUsageUpdatedPayload | undefined {
   const rateLimits = value.rate_limits ?? undefined;
   const fiveHour = normalizeClaudeUsageWindow(rateLimits?.five_hour);
@@ -639,6 +642,7 @@ function normalizeClaudeAccountUsageApiSnapshot(
 
   return {
     subscriptionType: typeof value.subscription_type === "string" ? value.subscription_type : null,
+    ...(accountEmail !== null ? { accountEmail } : {}),
     rateLimitsAvailable: value.rate_limits_available === true,
     windows,
   };
@@ -2020,7 +2024,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
-    const payload = normalizeClaudeAccountUsageApiSnapshot(usage);
+    // Resolve the logged-in account email. Best-effort and called on the query
+    // object directly to keep its `this` binding (same caveat as the usage call).
+    const accountEmail = yield* Effect.promise(async () => {
+      try {
+        const info = await context.query.accountInfo?.();
+        return typeof info?.email === "string" && info.email.trim().length > 0 ? info.email : null;
+      } catch {
+        return null;
+      }
+    });
+
+    const payload = normalizeClaudeAccountUsageApiSnapshot(usage, accountEmail);
     if (!payload) {
       return;
     }

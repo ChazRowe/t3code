@@ -192,6 +192,7 @@ describe("ProviderRuntimeEvent", () => {
       turnId: "turn-1",
       payload: {
         subscriptionType: "max",
+        accountEmail: "person@example.com",
         rateLimitsAvailable: true,
         windows: {
           fiveHour: { utilization: 42, resetsAt: "2026-02-28T05:00:00.000Z" },
@@ -213,6 +214,7 @@ describe("ProviderRuntimeEvent", () => {
       throw new Error("expected account.usage.updated");
     }
     expect(parsed.payload.subscriptionType).toBe("max");
+    expect(parsed.payload.accountEmail).toBe("person@example.com");
     expect(parsed.payload.rateLimitsAvailable).toBe(true);
     expect(parsed.payload.windows.fiveHour?.utilization).toBe(42);
     expect(parsed.payload.windows.sevenDay?.resetsAt).toBeNull();

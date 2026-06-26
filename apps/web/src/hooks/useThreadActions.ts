@@ -23,6 +23,28 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
 
+type UnattendedRunAction = "start" | "pause" | "resume" | "stop";
+
+// Command dispatch rejections (e.g. "thread already has an active unattended run")
+// reject the dispatch promise but carry no actionable detail to the client, so a
+// silent failure looks like "nothing happened". Surface a toast so the action
+// always produces visible feedback.
+function notifyUnattendedRunActionFailed(action: UnattendedRunAction, error: unknown): void {
+  const detail = error instanceof Error && error.message ? error.message : undefined;
+  const hint =
+    action === "start"
+      ? "An unattended run may already be active on this thread — stop or resume the current one first."
+      : "Please try again.";
+  console.error(`Failed to ${action} unattended run`, error);
+  toastManager.add(
+    stackedThreadToast({
+      type: "error",
+      title: `Couldn't ${action} the unattended run`,
+      description: detail ? `${hint} (${detail})` : hint,
+    }),
+  );
+}
+
 export function useThreadActions() {
   const sidebarThreadSortOrder = useSettings((settings) => settings.sidebarThreadSortOrder);
   const confirmThreadDelete = useSettings((settings) => settings.confirmThreadDelete);
@@ -286,46 +308,62 @@ export function useThreadActions() {
   const startUnattendedRun = useCallback(async (target: ScopedThreadRef, totalIterations: number) => {
     const api = readEnvironmentApi(target.environmentId);
     if (!api) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.unattended-run.start",
-      commandId: newCommandId(),
-      threadId: target.threadId,
-      totalIterations,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.unattended-run.start",
+        commandId: newCommandId(),
+        threadId: target.threadId,
+        totalIterations,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      notifyUnattendedRunActionFailed("start", error);
+    }
   }, []);
 
   const pauseUnattendedRun = useCallback(async (target: ScopedThreadRef) => {
     const api = readEnvironmentApi(target.environmentId);
     if (!api) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.unattended-run.pause",
-      commandId: newCommandId(),
-      threadId: target.threadId,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.unattended-run.pause",
+        commandId: newCommandId(),
+        threadId: target.threadId,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      notifyUnattendedRunActionFailed("pause", error);
+    }
   }, []);
 
   const resumeUnattendedRun = useCallback(async (target: ScopedThreadRef) => {
     const api = readEnvironmentApi(target.environmentId);
     if (!api) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.unattended-run.resume",
-      commandId: newCommandId(),
-      threadId: target.threadId,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.unattended-run.resume",
+        commandId: newCommandId(),
+        threadId: target.threadId,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      notifyUnattendedRunActionFailed("resume", error);
+    }
   }, []);
 
   const stopUnattendedRun = useCallback(async (target: ScopedThreadRef) => {
     const api = readEnvironmentApi(target.environmentId);
     if (!api) return;
-    await api.orchestration.dispatchCommand({
-      type: "thread.unattended-run.stop",
-      commandId: newCommandId(),
-      threadId: target.threadId,
-      createdAt: new Date().toISOString(),
-    });
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.unattended-run.stop",
+        commandId: newCommandId(),
+        threadId: target.threadId,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      notifyUnattendedRunActionFailed("stop", error);
+    }
   }, []);
 
   return {

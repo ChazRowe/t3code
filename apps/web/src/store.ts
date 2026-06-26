@@ -294,7 +294,7 @@ function mapThreadShell(
     updatedAt: thread.updatedAt,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
-    unattendedRun: null,
+    unattendedRun: thread.unattendedRun ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -1882,18 +1882,12 @@ function applyEnvironmentShellEvent(
       };
     }
     case "thread-upserted": {
-      const mapped = mapThreadShell(event.thread, environmentId);
-      // The live shell wire format (OrchestrationThreadShell) does not carry
-      // unattendedRun, so mapThreadShell hardcodes null.  Preserve whatever the
-      // store already holds so that the unattended-run banner is not cleared by
-      // incidental thread activity.  Authoritative updates still arrive through
-      // applyUnattendedRunEvent (writeThreadState / toThreadShell path), which
-      // writes directly into threadShellById and therefore always wins.
-      const previousUnattendedRun = state.threadShellById[event.thread.id]?.unattendedRun ?? null;
-      return writeThreadShellState(state, {
-        ...mapped,
-        shell: { ...mapped.shell, unattendedRun: previousUnattendedRun },
-      });
+      // The live shell wire format (OrchestrationThreadShell) carries the current
+      // unattendedRun, and the server re-reads the fresh projection shell on every
+      // thread event (including thread.unattended-run-*), so mapThreadShell maps it
+      // through directly. This is what keeps the unattended-run banner reactive —
+      // start/pause/resume/stop update it live instead of only after a refresh.
+      return writeThreadShellState(state, mapThreadShell(event.thread, environmentId));
     }
     case "thread-removed":
       return removeThreadState(state, event.threadId);

@@ -31,6 +31,11 @@ export const buildUnattendedPreamble = (totalIterations: number): string =>
     ``,
     `If you instead need a human decision, STOP and ask your question WITHOUT the`,
     `sentinel line — the run will pause for me.`,
+    ``,
+    `Never end your turn just to wait on a background task you started (a review, a`,
+    `subagent, a CI run): ending without the sentinel pauses the run. Either wait for`,
+    `the result within this turn (poll or monitor it), or invoke your wrap skill and`,
+    `emit the sentinel so the next iteration resumes and picks the result up.`,
   ].join("\n");
 
 /** Message sent for iterations 2..N after the context is cleared. */

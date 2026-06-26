@@ -1137,59 +1137,50 @@ describe("unattendedRun preservation across live shell upserts", () => {
         hasPendingApprovals: false,
         hasPendingUserInput: false,
         hasActionableProposedPlan: false,
-        unattendedRun: null,
+        // The live shell wire format (OrchestrationThreadShell) carries the
+        // current unattendedRun; the server re-reads the fresh projection shell
+        // on every thread event. Mirror that here.
+        unattendedRun: thread.unattendedRun ?? null,
         hasSubagents: false,
         liveSubagentCount: 0,
       },
     };
   }
 
-  it("preserves stored unattendedRun when a live thread-upserted shell event arrives", () => {
-    const thread = makeThread({ unattendedRun: activeUnattendedRun });
+  it("applies unattendedRun from a live thread-upserted shell event (banner appears live)", () => {
+    // Thread starts with no run; the unattended run begins on the server and the
+    // updated shell arrives over the live stream. The store must reflect it without
+    // waiting for a snapshot refresh.
+    const thread = makeThread({ unattendedRun: null });
     const initialState = makeState(thread);
+    expect(localEnvironmentStateOf(initialState).threadShellById[thread.id]?.unattendedRun).toBeNull();
 
-    // Confirm the initial state has the active run
-    const envBefore = localEnvironmentStateOf(initialState);
-    expect(envBefore.threadShellById[thread.id]?.unattendedRun).toEqual(activeUnattendedRun);
-
-    // Apply a live shell upsert (which carries no unattendedRun)
-    const shellEvent = makeThreadUpsertedShellEvent(thread);
+    const shellEvent = makeThreadUpsertedShellEvent({
+      ...thread,
+      unattendedRun: activeUnattendedRun,
+    });
     const nextState = applyShellEvent(initialState, shellEvent, localEnvironmentId);
 
-    const envAfter = localEnvironmentStateOf(nextState);
-    // The stored unattendedRun must NOT be clobbered by the null from the shell wire format
-    expect(envAfter.threadShellById[thread.id]?.unattendedRun).toEqual(activeUnattendedRun);
+    expect(localEnvironmentStateOf(nextState).threadShellById[thread.id]?.unattendedRun).toEqual(
+      activeUnattendedRun,
+    );
   });
 
-  it("allows a genuine unattended-run event to update/clear unattendedRun even after shell upserts", () => {
+  it("clears unattendedRun when a thread-upserted shell event reports the run ended (stop reflects live)", () => {
     const thread = makeThread({ unattendedRun: activeUnattendedRun });
-    let state = makeState(thread);
+    const initialState = makeState(thread);
+    expect(
+      localEnvironmentStateOf(initialState).threadShellById[thread.id]?.unattendedRun?.status,
+    ).toBe("running");
 
-    // Apply a shell upsert first (simulating live activity)
-    const shellEvent = makeThreadUpsertedShellEvent(thread);
-    state = applyShellEvent(state, shellEvent, localEnvironmentId);
+    // The run is stopped server-side; the next shell upsert carries the cleared
+    // state. The banner reads this, so it must update live rather than stay frozen.
+    const shellEvent = makeThreadUpsertedShellEvent({ ...thread, unattendedRun: null });
+    const nextState = applyShellEvent(initialState, shellEvent, localEnvironmentId);
 
-    // Confirm preserved
-    expect(localEnvironmentStateOf(state).threadShellById[thread.id]?.unattendedRun?.status).toBe(
-      "running",
-    );
-
-    // Now apply a genuine unattended-run-finished event
-    state = applyOrchestrationEvent(
-      state,
-      makeEvent("thread.unattended-run-finished", {
-        threadId: thread.id,
-        outcome: "completed",
-        iteration: 1,
-        updatedAt: "2026-06-19T00:01:00.000Z",
-      }),
-      localEnvironmentId,
-    );
-
-    // The unattendedRun should now reflect the finished state (not frozen at "running")
-    const finalUnattendedRun =
-      localEnvironmentStateOf(state).threadShellById[thread.id]?.unattendedRun;
-    expect(finalUnattendedRun?.status).toBe("completed");
+    expect(
+      localEnvironmentStateOf(nextState).threadShellById[thread.id]?.unattendedRun,
+    ).toBeNull();
   });
 });
 

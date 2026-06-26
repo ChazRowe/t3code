@@ -181,6 +181,43 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
   });
+
+  it("decodes account.usage.updated plan-utilization snapshots", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "account.usage.updated",
+      eventId: "event-account-usage-1",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:05.000Z",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      payload: {
+        subscriptionType: "max",
+        rateLimitsAvailable: true,
+        windows: {
+          fiveHour: { utilization: 42, resetsAt: "2026-02-28T05:00:00.000Z" },
+          sevenDay: { utilization: 71, resetsAt: null },
+          sevenDaySonnet: { utilization: 88, resetsAt: null },
+          extraUsage: {
+            isEnabled: true,
+            utilization: 12,
+            monthlyLimit: 100,
+            usedCredits: 12,
+            currency: "USD",
+          },
+        },
+      },
+    });
+
+    expect(parsed.type).toBe("account.usage.updated");
+    if (parsed.type !== "account.usage.updated") {
+      throw new Error("expected account.usage.updated");
+    }
+    expect(parsed.payload.subscriptionType).toBe("max");
+    expect(parsed.payload.rateLimitsAvailable).toBe(true);
+    expect(parsed.payload.windows.fiveHour?.utilization).toBe(42);
+    expect(parsed.payload.windows.sevenDay?.resetsAt).toBeNull();
+    expect(parsed.payload.windows.extraUsage?.currency).toBe("USD");
+  });
 });
 
 describe("ItemLifecyclePayload", () => {

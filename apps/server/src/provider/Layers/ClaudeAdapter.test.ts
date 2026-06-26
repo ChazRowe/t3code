@@ -8,6 +8,7 @@ import type {
   Options as ClaudeQueryOptions,
   PermissionMode,
   PermissionResult,
+  SDKControlGetUsageResponse,
   SDKMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -59,6 +60,21 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public closeCalls = 0;
+
+  // The experimental `/usage` snapshot the adapter pulls at turn end. When no
+  // response is configured the method rejects, which the adapter swallows — so
+  // existing tests emit no account.usage.updated event.
+  public usageResponse: SDKControlGetUsageResponse | undefined;
+  public usageCalls = 0;
+
+  readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET =
+    async (): Promise<SDKControlGetUsageResponse> => {
+      this.usageCalls += 1;
+      if (!this.usageResponse) {
+        throw new Error("usage response not configured");
+      }
+      return this.usageResponse;
+    };
 
   emit(message: SDKMessage): void {
     if (this.done) {
@@ -1364,7 +1380,11 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
-      yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "orchestrate",
+        attachments: [],
+      });
 
       harness.query.emit({
         type: "stream_event",
@@ -1429,8 +1449,22 @@ describe("ClaudeAdapterLive", () => {
         summary: "two-agent review",
         workflowProgress: [
           { type: "workflow_phase", index: 1, title: "Review" },
-          { type: "workflow_agent", index: 1, label: "alpha", agentId: "agentAAA", model: "claude-opus-4-8[1m]", tokens: 100 },
-          { type: "workflow_agent", index: 2, label: "beta", agentId: "agentBBB", model: "claude-opus-4-8[1m]", tokens: 200 },
+          {
+            type: "workflow_agent",
+            index: 1,
+            label: "alpha",
+            agentId: "agentAAA",
+            model: "claude-opus-4-8[1m]",
+            tokens: 100,
+          },
+          {
+            type: "workflow_agent",
+            index: 2,
+            label: "beta",
+            agentId: "agentBBB",
+            model: "claude-opus-4-8[1m]",
+            tokens: 200,
+          },
         ],
       }),
     );
@@ -1462,7 +1496,11 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
-      yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "orchestrate",
+        attachments: [],
+      });
 
       harness.query.emit({
         type: "stream_event",
@@ -1472,7 +1510,12 @@ describe("ClaudeAdapterLive", () => {
         event: {
           type: "content_block_start",
           index: 0,
-          content_block: { type: "tool_use", id: "wf-tool-2", name: "Workflow", input: { scriptPath: "/tmp/x.js" } },
+          content_block: {
+            type: "tool_use",
+            id: "wf-tool-2",
+            name: "Workflow",
+            input: { scriptPath: "/tmp/x.js" },
+          },
         },
       } as unknown as SDKMessage);
 
@@ -2395,6 +2438,97 @@ describe("ClaudeAdapterLive", () => {
             maxTokens: 200000,
           },
         });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("emits account.usage.updated from the experimental usage snapshot", () => {
+    const harness = makeHarness();
+    harness.query.usageResponse = {
+      session: {
+        total_cost_usd: 0,
+        total_api_duration_ms: 0,
+        total_duration_ms: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+        model_usage: {},
+      },
+      subscription_type: "max",
+      rate_limits_available: true,
+      rate_limits: {
+        five_hour: { utilization: 42, resets_at: "2026-02-28T05:00:00.000Z" },
+        seven_day: { utilization: 71, resets_at: null },
+        seven_day_sonnet: { utilization: 88, resets_at: null },
+        extra_usage: {
+          is_enabled: true,
+          monthly_limit: 100,
+          used_credits: 12,
+          utilization: 12,
+          currency: "USD",
+        },
+      },
+    } as unknown as SDKControlGetUsageResponse;
+
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.takeUntil(
+        adapter.streamEvents,
+        (event) => event.type === "thread.token-usage.updated",
+      ).pipe(Stream.runCollect, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        duration_api_ms: 1200,
+        num_turns: 1,
+        result: "done",
+        stop_reason: "end_turn",
+        session_id: "sdk-session-account-usage",
+        usage: {
+          input_tokens: 4,
+          output_tokens: 679,
+        },
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      assert.equal(harness.query.usageCalls, 1);
+
+      const usageEvent = runtimeEvents.find((event) => event.type === "account.usage.updated");
+      assert.equal(usageEvent?.type, "account.usage.updated");
+      if (usageEvent?.type === "account.usage.updated") {
+        assert.equal(usageEvent.payload.subscriptionType, "max");
+        assert.equal(usageEvent.payload.rateLimitsAvailable, true);
+        assert.deepEqual(usageEvent.payload.windows.fiveHour, {
+          utilization: 42,
+          resetsAt: "2026-02-28T05:00:00.000Z",
+        });
+        assert.deepEqual(usageEvent.payload.windows.sevenDay, {
+          utilization: 71,
+          resetsAt: null,
+        });
+        assert.equal(usageEvent.payload.windows.sevenDayOpus, undefined);
+        assert.equal(usageEvent.payload.windows.sevenDaySonnet?.utilization, 88);
+        assert.equal(usageEvent.payload.windows.extraUsage?.isEnabled, true);
+        assert.equal(usageEvent.payload.windows.extraUsage?.currency, "USD");
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

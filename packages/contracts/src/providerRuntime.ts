@@ -187,6 +187,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "auth.status",
   "account.updated",
   "account.rate-limits.updated",
+  "account.usage.updated",
   "mcp.status.updated",
   "mcp.oauth.completed",
   "model.rerouted",
@@ -239,6 +240,7 @@ const ToolSummaryType = Schema.Literal("tool.summary");
 const AuthStatusType = Schema.Literal("auth.status");
 const AccountUpdatedType = Schema.Literal("account.updated");
 const AccountRateLimitsUpdatedType = Schema.Literal("account.rate-limits.updated");
+const AccountUsageUpdatedType = Schema.Literal("account.usage.updated");
 const McpStatusUpdatedType = Schema.Literal("mcp.status.updated");
 const McpOauthCompletedType = Schema.Literal("mcp.oauth.completed");
 const ModelReroutedType = Schema.Literal("model.rerouted");
@@ -558,6 +560,43 @@ const AccountRateLimitsUpdatedPayload = Schema.Struct({
   rateLimits: Schema.Unknown,
 });
 export type AccountRateLimitsUpdatedPayload = typeof AccountRateLimitsUpdatedPayload.Type;
+
+// A single plan rate-limit window (e.g. the 5-hour session or a 7-day window),
+// mirroring what the Claude Code `/usage` dialog renders. `utilization` is a
+// 0-100 percentage; `resetsAt` is an ISO-8601 instant. Either may be null when
+// the upstream usage endpoint omits it.
+const AccountUsageWindow = Schema.Struct({
+  utilization: Schema.NullOr(Schema.Number),
+  resetsAt: Schema.NullOr(Schema.String),
+});
+export type AccountUsageWindow = typeof AccountUsageWindow.Type;
+
+// Pay-as-you-go "extra usage" allowance, when the account has it enabled.
+const AccountUsageExtraWindow = Schema.Struct({
+  isEnabled: Schema.Boolean,
+  utilization: Schema.NullOr(Schema.Number),
+  monthlyLimit: Schema.NullOr(Schema.Number),
+  usedCredits: Schema.NullOr(Schema.Number),
+  currency: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type AccountUsageExtraWindow = typeof AccountUsageExtraWindow.Type;
+
+// Full plan-utilization snapshot — the same data the `/usage` slash command
+// shows (session %, weekly %, per-model weekly %). Provider-pull, not reactive:
+// the Claude adapter fetches this and re-emits it at turn boundaries.
+const AccountUsageUpdatedPayload = Schema.Struct({
+  subscriptionType: Schema.NullOr(Schema.String),
+  rateLimitsAvailable: Schema.Boolean,
+  windows: Schema.Struct({
+    fiveHour: Schema.optional(Schema.NullOr(AccountUsageWindow)),
+    sevenDay: Schema.optional(Schema.NullOr(AccountUsageWindow)),
+    sevenDayOauthApps: Schema.optional(Schema.NullOr(AccountUsageWindow)),
+    sevenDayOpus: Schema.optional(Schema.NullOr(AccountUsageWindow)),
+    sevenDaySonnet: Schema.optional(Schema.NullOr(AccountUsageWindow)),
+    extraUsage: Schema.optional(Schema.NullOr(AccountUsageExtraWindow)),
+  }),
+});
+export type AccountUsageUpdatedPayload = typeof AccountUsageUpdatedPayload.Type;
 
 const McpStatusUpdatedPayload = Schema.Struct({
   status: Schema.Unknown,
@@ -936,6 +975,14 @@ const ProviderRuntimeAccountRateLimitsUpdatedEvent = Schema.Struct({
 export type ProviderRuntimeAccountRateLimitsUpdatedEvent =
   typeof ProviderRuntimeAccountRateLimitsUpdatedEvent.Type;
 
+const ProviderRuntimeAccountUsageUpdatedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: AccountUsageUpdatedType,
+  payload: AccountUsageUpdatedPayload,
+});
+export type ProviderRuntimeAccountUsageUpdatedEvent =
+  typeof ProviderRuntimeAccountUsageUpdatedEvent.Type;
+
 const ProviderRuntimeMcpStatusUpdatedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: McpStatusUpdatedType,
@@ -978,8 +1025,7 @@ const ProviderRuntimeCommandsChangedEvent = Schema.Struct({
   type: CommandsChangedType,
   payload: CommandsChangedPayload,
 });
-export type ProviderRuntimeCommandsChangedEvent =
-  typeof ProviderRuntimeCommandsChangedEvent.Type;
+export type ProviderRuntimeCommandsChangedEvent = typeof ProviderRuntimeCommandsChangedEvent.Type;
 
 const ProviderRuntimeFilesPersistedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
@@ -1050,6 +1096,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeAuthStatusEvent,
   ProviderRuntimeAccountUpdatedEvent,
   ProviderRuntimeAccountRateLimitsUpdatedEvent,
+  ProviderRuntimeAccountUsageUpdatedEvent,
   ProviderRuntimeMcpStatusUpdatedEvent,
   ProviderRuntimeMcpOauthCompletedEvent,
   ProviderRuntimeModelReroutedEvent,

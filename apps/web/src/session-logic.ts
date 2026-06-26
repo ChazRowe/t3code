@@ -695,6 +695,8 @@ export function deriveWorkLogEntries(
     )
       continue;
     if (activity.kind === "context-window.updated") continue;
+    // Per-turn plan-usage telemetry; consumed only by the gauge tooltip.
+    if (activity.kind === "account.usage.updated") continue;
     if (activity.summary === "Checkpoint captured") continue;
     if (isPlanBoundaryToolActivity(activity)) continue;
     entries.push(toDerivedWorkLogEntry(activity));

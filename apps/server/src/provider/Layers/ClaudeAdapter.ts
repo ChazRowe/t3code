@@ -15,6 +15,7 @@ import {
   type PermissionUpdate,
   type SDKMessage,
   type SDKControlGetContextUsageResponse,
+  type SDKControlGetUsageResponse,
   type SDKResultMessage,
   type SettingSource,
   type SDKUserMessage,
@@ -22,6 +23,8 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
 import {
+  type AccountUsageUpdatedPayload,
+  type AccountUsageWindow,
   ApprovalRequestId,
   type CanonicalItemType,
   type CanonicalRequestType,
@@ -240,6 +243,10 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
+  // Pull the full plan-utilization snapshot (the data behind the `/usage` dialog:
+  // session %, weekly %, per-model weekly %). Experimental SDK surface — optional
+  // and always called defensively.
+  readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: () => Promise<SDKControlGetUsageResponse>;
   readonly close: () => void;
 }
 
@@ -568,6 +575,73 @@ function normalizeClaudeContextUsageApiSnapshot(
     ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
     compactsAutomatically: value.isAutoCompactEnabled,
   });
+}
+
+function finiteNumberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+// Map one SDK plan-usage window to the contract shape, dropping windows that
+// carry neither a utilization nor a reset instant (nothing worth rendering).
+function normalizeClaudeUsageWindow(
+  value:
+    | { readonly utilization?: number | null; readonly resets_at?: string | null }
+    | null
+    | undefined,
+): AccountUsageWindow | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const utilization = finiteNumberOrNull(value.utilization);
+  const resetsAt = typeof value.resets_at === "string" ? value.resets_at : null;
+  if (utilization === null && resetsAt === null) {
+    return undefined;
+  }
+  return { utilization, resetsAt };
+}
+
+// Translate the experimental `/usage` snapshot into the canonical
+// account.usage.updated payload. Returns undefined when there is nothing
+// renderable (e.g. API-key sessions where plan limits do not apply).
+function normalizeClaudeAccountUsageApiSnapshot(
+  value: SDKControlGetUsageResponse,
+): AccountUsageUpdatedPayload | undefined {
+  const rateLimits = value.rate_limits ?? undefined;
+  const fiveHour = normalizeClaudeUsageWindow(rateLimits?.five_hour);
+  const sevenDay = normalizeClaudeUsageWindow(rateLimits?.seven_day);
+  const sevenDayOauthApps = normalizeClaudeUsageWindow(rateLimits?.seven_day_oauth_apps);
+  const sevenDayOpus = normalizeClaudeUsageWindow(rateLimits?.seven_day_opus);
+  const sevenDaySonnet = normalizeClaudeUsageWindow(rateLimits?.seven_day_sonnet);
+  const extra = rateLimits?.extra_usage ?? undefined;
+
+  const windows: AccountUsageUpdatedPayload["windows"] = {
+    ...(fiveHour ? { fiveHour } : {}),
+    ...(sevenDay ? { sevenDay } : {}),
+    ...(sevenDayOauthApps ? { sevenDayOauthApps } : {}),
+    ...(sevenDayOpus ? { sevenDayOpus } : {}),
+    ...(sevenDaySonnet ? { sevenDaySonnet } : {}),
+    ...(extra
+      ? {
+          extraUsage: {
+            isEnabled: extra.is_enabled === true,
+            utilization: finiteNumberOrNull(extra.utilization),
+            monthlyLimit: finiteNumberOrNull(extra.monthly_limit),
+            usedCredits: finiteNumberOrNull(extra.used_credits),
+            ...(typeof extra.currency === "string" ? { currency: extra.currency } : {}),
+          },
+        }
+      : {}),
+  };
+
+  if (Object.keys(windows).length === 0) {
+    return undefined;
+  }
+
+  return {
+    subscriptionType: typeof value.subscription_type === "string" ? value.subscription_type : null,
+    rateLimitsAvailable: value.rate_limits_available === true,
+    windows,
+  };
 }
 
 function compactBoundaryTokenUsageSnapshot(
@@ -1924,6 +1998,45 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     return normalizeClaudeContextUsageApiSnapshot(usage, totalProcessedTokens);
   });
 
+  // Pull the full plan-utilization snapshot (the `/usage` data) and re-emit it as
+  // an account.usage.updated event. Fired at turn boundaries — best-effort and
+  // never allowed to disrupt the turn, mirroring queryCurrentContextUsage.
+  const emitAccountUsage = Effect.fn("emitAccountUsage")(function* (context: ClaudeSessionContext) {
+    const fetchUsage = context.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+    if (!fetchUsage) {
+      return;
+    }
+
+    const usage = yield* Effect.promise(async () => {
+      try {
+        return await fetchUsage();
+      } catch {
+        return undefined;
+      }
+    });
+    if (!usage) {
+      return;
+    }
+
+    const payload = normalizeClaudeAccountUsageApiSnapshot(usage);
+    if (!payload) {
+      return;
+    }
+
+    const turnState = context.turnState;
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "account.usage.updated",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(turnState ? { turnId: turnState.turnId } : {}),
+      payload,
+      providerRefs: nativeProviderRefs(context),
+    });
+  });
+
   const emitProposedPlanCompleted = Effect.fn("emitProposedPlanCompleted")(function* (
     context: ClaudeSessionContext,
     input: {
@@ -2028,6 +2141,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       context,
       accumulatedTotalProcessedTokens ?? context.lastKnownTotalProcessedTokens,
     );
+    // Refresh the account-level plan usage (`/usage`) alongside context usage so
+    // the gauge tooltip stays current after each turn.
+    yield* emitAccountUsage(context);
     const resultUsageRecord =
       result?.usage && typeof result.usage === "object" && !Array.isArray(result.usage)
         ? (result.usage as Record<string, unknown>)
@@ -2795,7 +2911,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   // rendering works unchanged; phase/model/tokens ride along for v2 badge work.
   const workflowAgentItemData = (
     runId: string,
-    agent: { info: { agentId: string; label: string; model: string | undefined; tokens: number | undefined; phase: string | undefined }; resultSummary: string | undefined },
+    agent: {
+      info: {
+        agentId: string;
+        label: string;
+        model: string | undefined;
+        tokens: number | undefined;
+        phase: string | undefined;
+      };
+      resultSummary: string | undefined;
+    },
     includeResult: boolean,
   ): Record<string, unknown> => ({
     toolName: "Workflow",

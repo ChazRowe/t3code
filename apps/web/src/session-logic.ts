@@ -519,12 +519,30 @@ export function derivePendingUserInputs(
   );
 }
 
+// Activity kinds that mark a context-clear boundary — a looping-run iteration reset
+// (`unattended.context-cleared`) or a user `/clear`/`/new` (`context.cleared`). Kept in
+// sync with apps/server/src/orchestration/contextClearMarker.ts; the web app can't import
+// server modules, and activity kinds are already plain strings on this side.
+const CONTEXT_CLEARED_ACTIVITY_KINDS: ReadonlyArray<string> = [
+  "unattended.context-cleared",
+  "context.cleared",
+];
+
 export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
+  // A context clear starts a fresh context window, so the prior context's task list must
+  // drop out — mirroring how the subagent tree rebases to the latest clear marker. Consider
+  // only plan updates recorded after the most recent context-clear boundary.
+  const lastClearIndex = Arr.findLastIndex(ordered, (activity) =>
+    CONTEXT_CLEARED_ACTIVITY_KINDS.includes(activity.kind),
+  ).pipe(Option.getOrElse(() => -1));
+  const scopedActivities = lastClearIndex >= 0 ? ordered.slice(lastClearIndex + 1) : ordered;
+  const allPlanActivities = scopedActivities.filter(
+    (activity) => activity.kind === "turn.plan.updated",
+  );
   // Prefer plan from the current turn; fall back to the most recent plan from any turn
   // so that TodoWrite tasks persist across follow-up messages.
   const latest = Option.firstSomeOf([

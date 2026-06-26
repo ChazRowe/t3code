@@ -410,6 +410,69 @@ describe("deriveActivePlanState", () => {
       steps: [{ step: "Write tests", status: "completed" }],
     });
   });
+
+  it.each([
+    ["a looping-run iteration clear", "unattended.context-cleared"],
+    ["a user /clear or /new", "context.cleared"],
+  ])("drops the prior context's task list after %s", (_label, clearKind) => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "plan-before-clear",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-1",
+        payload: { plan: [{ step: "Old task", status: "inProgress" }] },
+      }),
+      makeActivity({
+        id: "context-clear",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: clearKind,
+        summary: "Context cleared",
+        tone: "info",
+      }),
+    ];
+
+    // No plan emitted in the fresh context yet — the prior task list must not linger.
+    expect(deriveActivePlanState(activities, TurnId.make("turn-2"))).toBeNull();
+  });
+
+  it("shows the new task list once a plan is emitted in the fresh context", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "plan-before-clear",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-1",
+        payload: { plan: [{ step: "Old task", status: "inProgress" }] },
+      }),
+      makeActivity({
+        id: "context-clear",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "unattended.context-cleared",
+        summary: "Context cleared",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "plan-after-clear",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-2",
+        payload: { plan: [{ step: "New task", status: "pending" }] },
+      }),
+    ];
+
+    expect(deriveActivePlanState(activities, TurnId.make("turn-2"))).toEqual({
+      createdAt: "2026-02-23T00:00:03.000Z",
+      turnId: "turn-2",
+      steps: [{ step: "New task", status: "pending" }],
+    });
+  });
 });
 
 describe("findLatestProposedPlan", () => {

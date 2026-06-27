@@ -375,7 +375,10 @@ const make = Effect.gen(function* () {
             message: {
               messageId: yield* freshMessageId,
               role: "user",
-              text: buildUnattendedPreamble(event.payload.totalIterations),
+              text: buildUnattendedPreamble(
+                event.payload.totalIterations,
+                thread.modelSelection.model,
+              ),
               attachments: [],
             },
             runtimeMode: thread.runtimeMode,

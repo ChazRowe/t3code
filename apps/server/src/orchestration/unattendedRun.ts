@@ -4,9 +4,31 @@ export const WRAP_SENTINEL = "<<WRAP_COMPLETE>>";
 /** True when the agent's final message signals a completed wrap. */
 export const messageHasWrapSentinel = (text: string): boolean => text.includes(WRAP_SENTINEL);
 
+const STANDARD_WRAP_CEILING_PERCENT = 35;
+// 15% of a 1M window is ~150k tokens — the empirically good wrap point. (Not 20%:
+// 20% would be 200k, past the sweet spot.)
+const ONE_MILLION_CONTEXT_WRAP_CEILING_PERCENT = 15;
+
+/** True for model ids that explicitly advertise a 1M token context window. */
+export const isOneMillionContextModel = (model: string | null | undefined): boolean => {
+  if (typeof model !== "string") return false;
+  const normalized = model.trim().toLowerCase();
+  if (!normalized) return false;
+  return /(?:^|[\W_])1m(?:$|[\W_])/.test(normalized) || /context\s*=\s*1m\b/.test(normalized);
+};
+
+export const resolveUnattendedWrapCeilingPercent = (model: string | null | undefined): number =>
+  isOneMillionContextModel(model)
+    ? ONE_MILLION_CONTEXT_WRAP_CEILING_PERCENT
+    : STANDARD_WRAP_CEILING_PERCENT;
+
 /** Message that opens iteration 1 and sets the unattended contract. */
-export const buildUnattendedPreamble = (totalIterations: number): string =>
-  [
+export const buildUnattendedPreamble = (
+  totalIterations: number,
+  model: string | null | undefined = null,
+): string => {
+  const wrapCeilingPercent = resolveUnattendedWrapCeilingPercent(model);
+  return [
     `This is an UNATTENDED run of ${totalIterations} iteration(s). No human will`,
     `respond between iterations.`,
     ``,
@@ -20,10 +42,13 @@ export const buildUnattendedPreamble = (totalIterations: number): string =>
     `it, I clear the context and send you a "continue" so you resume from the`,
     `handoff.`,
     ``,
-    `Treat about 35% of your context window as your wrap ceiling. When you cross`,
-    `it, finish your current step, invoke your wrap skill, and emit the sentinel —`,
-    `don't keep going to a "natural" stopping point. Wrapping early and often is`,
-    `correct here.`,
+    `Your wrap ceiling is about ${wrapCeilingPercent}% of the context window. Do NOT`,
+    `estimate this from your own sense of the window size — it is unreliable here.`,
+    `Read the real figure from the MCP context server's context_usage tool, which`,
+    `reports the live percentage used against the true window. When it reaches`,
+    `~${wrapCeilingPercent}%, finish your current step, invoke your wrap skill, and`,
+    `emit the sentinel — don't keep going to a "natural" stopping point. Wrapping`,
+    `early and often is correct here.`,
     ``,
     `Ending a turn WITHOUT the sentinel never pauses the run — it just stays`,
     `running and idle until you emit the sentinel or something starts your next`,
@@ -41,6 +66,7 @@ export const buildUnattendedPreamble = (totalIterations: number): string =>
     `AskUserQuestion) WITHOUT the sentinel. The run stays running and I'll answer`,
     `when I'm back. Only I pause or stop the run.`,
   ].join("\n");
+};
 
 /** Message sent for iterations 2..N after the context is cleared. */
 export const CONTINUE_MESSAGE =

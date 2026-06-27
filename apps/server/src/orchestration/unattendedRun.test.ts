@@ -7,7 +7,9 @@ import {
   CONTINUE_MESSAGE,
   CONTEXT_CLEARED_ACTIVITY_KIND,
   CONTEXT_FRESH_ACTIVITY_KIND,
+  isOneMillionContextModel,
   messageHasWrapSentinel,
+  resolveUnattendedWrapCeilingPercent,
   WRAP_SENTINEL,
 } from "./unattendedRun.ts";
 
@@ -28,10 +30,30 @@ describe("unattended run constants", () => {
     expect(preamble).toContain(WRAP_SENTINEL);
   });
 
-  it("preamble states a ~35% wrap-budget ceiling", () => {
-    const preamble = buildUnattendedPreamble(5);
+  it("preamble states a ~35% wrap-budget ceiling for standard models", () => {
+    const preamble = buildUnattendedPreamble(5, "gpt-5-codex");
     expect(preamble).toContain("35%");
     expect(preamble.toLowerCase()).toContain("ceiling");
+    expect(preamble).toContain("context_usage");
+    expect(preamble).toContain("MCP context server");
+  });
+
+  it("preamble states a ~15% wrap-budget ceiling for 1M-context models", () => {
+    const preamble = buildUnattendedPreamble(5, "claude-opus-4-8[1m]");
+    expect(preamble).toContain("15%");
+    expect(preamble).not.toContain("35%");
+    // The ceiling is anchored to the authoritative tool, not the agent's own
+    // (unreliable) sense of the window size.
+    expect(preamble).toContain("context_usage");
+    expect(preamble.toLowerCase()).toContain("do not");
+  });
+
+  it("detects explicit 1M context model identifiers", () => {
+    expect(isOneMillionContextModel("claude-opus-4-8[1m]")).toBe(true);
+    expect(isOneMillionContextModel("gpt-5.4-medium-fast[reasoning=medium,context=1m]")).toBe(true);
+    expect(isOneMillionContextModel("gpt-5-codex")).toBe(false);
+    expect(resolveUnattendedWrapCeilingPercent("claude-opus-4-8[1m]")).toBe(15);
+    expect(resolveUnattendedWrapCeilingPercent("gpt-5-codex")).toBe(35);
   });
 
   it("has a non-empty continue message", () => {

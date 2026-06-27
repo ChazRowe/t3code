@@ -958,6 +958,47 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("flushes the live resume cursor into the binding when stopping a session", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = asThreadId("thread-flush-on-stop");
+
+      const initial = yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/project-flush-on-stop",
+        runtimeMode: "full-access",
+      });
+
+      // Synthetic loop turns advance the adapter's in-memory cursor past
+      // whatever the durable binding last recorded at startSession time.
+      const advancedCursor = {
+        threadId: String(threadId),
+        resume: "550e8400-e29b-41d4-a716-446655440000",
+        resumeSessionAt: "assistant-message-7",
+        turnCount: 7,
+      };
+      routing.codex.updateSession(threadId, (existing) => ({
+        ...existing,
+        resumeCursor: advancedCursor,
+        updatedAt: "2026-01-01T00:00:05.000Z",
+      }));
+
+      yield* provider.stopSession({ threadId });
+
+      const persisted = yield* runtimeRepository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(persisted), true);
+      if (Option.isSome(persisted)) {
+        assert.equal(persisted.value.status, "stopped");
+        // Without the flush this would still be the start-time cursor.
+        assert.deepEqual(persisted.value.resumeCursor, advancedCursor);
+        assert.notDeepEqual(persisted.value.resumeCursor, initial.resumeCursor);
+      }
+    }),
+  );
+
   it.effect("clearResumeCursor drops the persisted cursor so the next start is fresh", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;

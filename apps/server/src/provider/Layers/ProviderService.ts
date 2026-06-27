@@ -855,6 +855,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.thread_id": input.threadId,
         });
         if (routed.isActive) {
+          // Flush the adapter's live resume cursor into the durable binding
+          // BEFORE teardown discards the in-memory session. Loop iterations are
+          // synthetic turns internal to the adapter, so the durable cursor lags
+          // the live one; without this flush a reaped session resumes from a
+          // stale (often resume-id-less) cursor and silently resets context.
+          // Mirrors `runStopAll`, which does the same listSessions -> upsert
+          // flush before `adapter.stopAll()`.
+          const activeSessions = yield* routed.adapter.listSessions();
+          const liveSession = activeSessions.find(
+            (session) => session.threadId === routed.threadId,
+          );
+          if (liveSession !== undefined) {
+            yield* upsertSessionBinding(
+              { ...liveSession, providerInstanceId: routed.instanceId },
+              input.threadId,
+            );
+          }
           yield* routed.adapter.stopSession(routed.threadId);
         }
         yield* clearMcpSession(input.threadId);

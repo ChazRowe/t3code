@@ -870,7 +870,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           // the live one; without this flush a reaped session resumes from a
           // stale (often resume-id-less) cursor and silently resets context.
           // Mirrors `runStopAll`, which does the same listSessions -> upsert
-          // flush before `adapter.stopAll()`.
+          // flush before `adapter.stopAll()`. The flush only ever advances the
+          // binding: the live cursor is the durable one plus any synthetic
+          // turns since, so it never regresses below what's persisted and can't
+          // downgrade a resumable cursor.
           const activeSessions = yield* routed.adapter.listSessions();
           const liveSession = activeSessions.find(
             (session) => session.threadId === routed.threadId,

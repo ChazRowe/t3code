@@ -375,6 +375,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const adapter = yield* registry.getByInstance(bindingInstanceId);
       const hasResumeCursor =
         input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined;
+      // A non-null cursor is not necessarily *resumable*: a Claude binding can
+      // carry a resume-id-less cursor (e.g. `{ turnCount: 0 }`) flushed when a
+      // loop is torn down before its first durable session id lands. Adapters
+      // that can tell the difference implement `isResumableCursor`; those that
+      // don't keep the historical non-null behavior.
+      const isResumable =
+        adapter.isResumableCursor === undefined
+          ? hasResumeCursor
+          : hasResumeCursor && (yield* adapter.isResumableCursor(input.binding.resumeCursor));
       const hasActiveSession = yield* adapter.hasSession(input.binding.threadId);
       if (hasActiveSession) {
         const activeSessions = yield* adapter.listSessions();
@@ -395,7 +404,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
       }
 
-      if (!hasResumeCursor) {
+      if (!isResumable) {
         return yield* toValidationError(
           input.operation,
           `Cannot recover thread '${input.binding.threadId}' because no provider resume state is persisted.`,

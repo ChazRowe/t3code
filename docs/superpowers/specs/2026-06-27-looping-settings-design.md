@@ -140,12 +140,26 @@ unattendedRun: {
   - Append toggle → `Switch`.
   - Per-field `SettingResetButton` that clears the field to `""` (shown when the field
     differs from its default).
-- **Placeholders:** each empty text field shows its built-in default as placeholder
-  text, making "empty = using default X" visible.
+- **Placeholders:** empty fields show what the default is, but the strategy differs by
+  field because of where the default lives:
+  - **Sentinel** and **Continue message** are *static* defaults — show the literal
+    default text as the placeholder.
+  - **Preamble** is *server-generated and model-aware* (built by `buildUnattendedPreamble`
+    from the iteration count + model), so the web cannot reproduce the exact text. Show a
+    descriptive placeholder instead, e.g. "Leave empty to use the built-in, model-aware
+    preamble." The warning below does not need the default preamble text (it only
+    inspects a *custom* preamble), so this gap is cosmetic only.
+- **Shared default constants:** so the web and server agree on the static defaults,
+  relocate the existing `WRAP_SENTINEL` (`"<<WRAP_COMPLETE>>"`) and `CONTINUE_MESSAGE`
+  constants from `apps/server/.../unattendedRun.ts` to a place importable by both — e.g.
+  `packages/contracts/src/settings.ts` (next to the schema) — and have `unattendedRun.ts`
+  re-export/import them so there is one source of truth. The web imports them for the
+  placeholders and the warning.
 - **Non-blocking warning:** under the Preamble field, if a *custom* (non-empty) preamble
-  does not contain the effective sentinel string, show inline warning text. This is the
-  one mismatch raw-text makes easy (the reactor watches the sentinel; the preamble tells
-  the agent to emit it). Client-side only; never blocks saving.
+  does not contain the **effective sentinel** (the sentinel field's value, or
+  `WRAP_SENTINEL` when that field is empty), show inline warning text. This is the one
+  mismatch raw-text makes easy (the reactor watches the sentinel; the preamble tells the
+  agent to emit it). Client-side only; never blocks saving.
 - **Persistence:** read via `useSettings()`, write via
   `updateSettings({ unattendedRun: { ... } })`. Confirm `splitPatch`
   (`src/hooks/useSettings.ts`) routes the new `unattendedRun` key to the **server**

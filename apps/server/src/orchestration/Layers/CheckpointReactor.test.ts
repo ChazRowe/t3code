@@ -112,6 +112,7 @@ function createProviderServiceHarness(
     stopSession: () => unsupported(),
     clearResumeCursor: () => unsupported(),
     listSessions,
+    hasPendingBackgroundWork: () => Effect.succeed(false),
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     getInstanceInfo: (instanceId) =>
       Effect.succeed({

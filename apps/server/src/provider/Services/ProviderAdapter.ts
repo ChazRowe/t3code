@@ -102,6 +102,18 @@ export interface ProviderAdapterShape<TError> {
   readonly hasSession: (threadId: ThreadId) => Effect.Effect<boolean>;
 
   /**
+   * Whether this thread's live session is hosting work that outlives the active
+   * turn — currently a backgrounded `Workflow` run the agent launched and is
+   * waiting on. The idle reaper consults this so it never tears down a session
+   * whose background work would be orphaned (and whose completion would
+   * otherwise re-invoke the agent).
+   *
+   * Optional: adapters with no concept of post-turn background work may omit it,
+   * and callers MUST treat an absent implementation as `false`.
+   */
+  readonly hasPendingBackgroundWork?: (threadId: ThreadId) => Effect.Effect<boolean>;
+
+  /**
    * Read a provider thread snapshot.
    */
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;

@@ -70,6 +70,23 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
+        // A session with no active turn can still be hosting a backgrounded
+        // `Workflow` the agent launched and is waiting on. `lastSeenAt` does not
+        // advance for that work, so without this guard the reaper tears the
+        // session down, orphaning the workflow and losing the completion that
+        // would have re-invoked the agent.
+        const hasPendingBackgroundWork = yield* providerService
+          .hasPendingBackgroundWork({ threadId: binding.threadId })
+          .pipe(Effect.orElseSucceed(() => false));
+        if (hasPendingBackgroundWork) {
+          yield* Effect.logDebug("provider.session.reaper.skipped-pending-background-work", {
+            threadId: binding.threadId,
+            provider: binding.provider,
+            idleDurationMs,
+          });
+          continue;
+        }
+
         const reaped = yield* providerService.stopSession({ threadId: binding.threadId }).pipe(
           Effect.tap(() =>
             Effect.logInfo("provider.session.reaped", {

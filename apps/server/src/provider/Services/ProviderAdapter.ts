@@ -114,6 +114,20 @@ export interface ProviderAdapterShape<TError> {
   readonly hasPendingBackgroundWork?: (threadId: ThreadId) => Effect.Effect<boolean>;
 
   /**
+   * Whether a persisted resume cursor can actually be resumed by this adapter.
+   * A non-null cursor is not necessarily resumable — e.g. a Claude binding can
+   * carry a resume-id-less `{ turnCount: 0 }` cursor that cannot resurrect the
+   * prior conversation. Cursor shapes are provider-specific (Claude needs a
+   * `resume` uuid; Codex's valid cursor is just `{ threadId }`), so only the
+   * owning adapter can judge resumability.
+   *
+   * Optional: adapters that omit it are treated by callers as "any non-null
+   * cursor is resumable" (the historical behavior), so omitting it changes
+   * nothing for them.
+   */
+  readonly isResumableCursor?: (resumeCursor: unknown) => Effect.Effect<boolean>;
+
+  /**
    * Read a provider thread snapshot.
    */
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;

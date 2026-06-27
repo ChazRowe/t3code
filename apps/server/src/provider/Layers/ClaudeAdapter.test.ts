@@ -4788,4 +4788,38 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect("isResumableCursor is true for a cursor carrying a resume uuid", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const resumable = yield* adapter.isResumableCursor!({
+        threadId: "thread-resumable",
+        resume: "550e8400-e29b-41d4-a716-446655440000",
+        resumeSessionAt: "assistant-message-3",
+        turnCount: 3,
+      });
+      assert.equal(resumable, true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("isResumableCursor is false for a resume-id-less or empty cursor", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      // No `resume` field at all (the loop-teardown cursor shape).
+      assert.equal(yield* adapter.isResumableCursor!({ turnCount: 0 }), false);
+      // `resume` present but not a uuid -> readClaudeResumeState drops it.
+      assert.equal(yield* adapter.isResumableCursor!({ resume: "not-a-uuid" }), false);
+      // Null / non-object cursors.
+      assert.equal(yield* adapter.isResumableCursor!(null), false);
+      assert.equal(yield* adapter.isResumableCursor!(undefined), false);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
 });

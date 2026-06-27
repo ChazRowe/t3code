@@ -4611,6 +4611,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return context !== undefined && !context.stopped && context.workflowWatchers.size > 0;
     });
 
+  // A persisted Claude cursor is resumable only when it carries a real session
+  // `resume` uuid; `readClaudeResumeState` validates that. A resume-id-less
+  // cursor (e.g. `{ turnCount: 0 }`, which is what a loop torn down before its
+  // first durable session id flushes) is NOT resumable, so recovery must fail
+  // visibly rather than silently start a fresh conversation.
+  const isResumableCursor: NonNullable<ClaudeAdapterShape["isResumableCursor"]> = (
+    resumeCursor,
+  ) => Effect.sync(() => readClaudeResumeState(resumeCursor)?.resume !== undefined);
+
   const stopAll: ClaudeAdapterShape["stopAll"] = () =>
     Effect.forEach(
       sessions,
@@ -4653,6 +4662,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     listSessions,
     hasSession,
     hasPendingBackgroundWork,
+    isResumableCursor,
     stopAll,
     get streamEvents() {
       return Stream.fromQueue(runtimeEventQueue);

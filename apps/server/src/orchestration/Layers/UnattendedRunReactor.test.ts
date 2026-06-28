@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,8 +19,10 @@ import * as Stream from "effect/Stream";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it as effectIt } from "@effect/vitest";
 import { describe, expect, it } from "vite-plus/test";
+import type { DeepPartial } from "@t3tools/shared/Struct";
 
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -222,7 +225,7 @@ const modelSelection: ModelSelection = {
   model: "gpt-5-codex",
 };
 
-const makeTestLayer = () => {
+const makeTestLayer = (unattendedRun: DeepPartial<ServerSettings["unattendedRun"]> = {}) => {
   // Hoist the event store onto a single layer reference so the engine writes to
   // it AND the test can read it back (Effect memoizes by reference, the same way
   // the projection below shares the engine's persistence).
@@ -244,6 +247,7 @@ const makeTestLayer = () => {
     Layer.provideMerge(projectionSnapshotLayer),
     Layer.provideMerge(eventStoreLayer.pipe(Layer.provide(SqlitePersistenceMemory))),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerSettingsService.layerTest({ unattendedRun })),
     Layer.provideMerge(NodeServices.layer),
   );
 };
@@ -780,6 +784,7 @@ const makeTestLayerWithGhostThread = () => {
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(wrappedSnapshotLayer),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerSettingsService.layerTest({})),
     Layer.provideMerge(NodeServices.layer),
   );
 };
@@ -848,4 +853,41 @@ effectIt.effect(
         `expected thread-2 to receive a continue turn despite ghost thread failure; got ${userMessages2.length} user message(s)`,
       );
     }).pipe(Effect.provide(Layer.fresh(makeTestLayerWithGhostThread()))),
+);
+
+effectIt.effect("uses a custom preamble verbatim when one is configured", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    const thread = yield* harness.readThread;
+    const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
+    assert.strictEqual(userMessages.length, 1);
+    assert.strictEqual(userMessages[0]?.text, "CUSTOM PREAMBLE");
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ preamble: "CUSTOM PREAMBLE" })))),
+);
+
+effectIt.effect("advances on a configured custom sentinel (not the default)", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    yield* harness.driveTurnEnd("custom", "work done\n<<DONE>>");
+
+    const thread = yield* harness.readThread;
+    assert.strictEqual(thread?.unattendedRun?.currentIteration, 2);
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ sentinel: "<<DONE>>" })))),
+);
+
+effectIt.effect("does not advance on the default sentinel when a custom one is configured", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    yield* harness.driveTurnEnd("default", `work done\n${WRAP_SENTINEL}`);
+
+    const thread = yield* harness.readThread;
+    assert.strictEqual(thread?.unattendedRun?.currentIteration, 1);
+    assert.strictEqual(thread?.unattendedRun?.status, "running");
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ sentinel: "<<DONE>>" })))),
 );

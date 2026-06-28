@@ -24,7 +24,10 @@ import {
   CONTEXT_FRESH_ACTIVITY_KIND,
   CONTINUE_MESSAGE,
   messageHasWrapSentinel,
+  WRAP_SENTINEL,
 } from "../unattendedRun.ts";
+import { DEFAULT_SERVER_SETTINGS, type UnattendedRunSettings } from "@t3tools/contracts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -71,14 +74,17 @@ export const decideTurnEndAction = (input: {
  * sentinel. Scoped to the thread's latest turn so a sentinel from a previous
  * iteration can never be mistaken for the current one.
  */
-const projectionTurnHasWrapSentinel = (thread: OrchestrationThread): boolean => {
+const projectionTurnHasWrapSentinel = (
+  thread: OrchestrationThread,
+  sentinel: string = WRAP_SENTINEL,
+): boolean => {
   const turnId = thread.latestTurn?.turnId;
   if (!turnId) return false;
   return thread.messages.some(
     (message) =>
       message.role === "assistant" &&
       message.turnId === turnId &&
-      messageHasWrapSentinel(message.text),
+      messageHasWrapSentinel(message.text, sentinel),
   );
 };
 
@@ -93,6 +99,17 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const serverSettingsService = yield* ServerSettingsService;
+
+  // Read the unattended-run config fresh; fall back to built-in defaults if the
+  // settings read ever fails so a config error never faults a running loop.
+  const readUnattendedConfig: Effect.Effect<UnattendedRunSettings> =
+    serverSettingsService.getSettings.pipe(
+      Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+      Effect.map((settings) => settings.unattendedRun),
+    );
+
+  const effectiveSentinel = (cfg: UnattendedRunSettings): string => cfg.sentinel || WRAP_SENTINEL;
 
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
@@ -274,6 +291,9 @@ const make = Effect.gen(function* () {
       sawRunningSinceTurnStart.set(threadId, true);
     }
 
+    const cfg = yield* readUnattendedConfig;
+    const sentinel = effectiveSentinel(cfg);
+
     // Primary signal is the streamed accumulator, which the reactor's serial
     // worker fills from the turn's assistant message-sent events before it ever
     // processes this turn-end. The projection snapshot loaded above is a free
@@ -282,8 +302,8 @@ const make = Effect.gen(function* () {
     // the sentinel. Scoped to the latest turn, so a prior iteration's sentinel
     // can't leak in.
     const hasSentinel =
-      messageHasWrapSentinel(latestAssistantText.get(threadId) ?? "") ||
-      projectionTurnHasWrapSentinel(thread);
+      messageHasWrapSentinel(latestAssistantText.get(threadId) ?? "", sentinel) ||
+      projectionTurnHasWrapSentinel(thread, sentinel);
     const action = decideTurnEndAction({
       status: event.payload.session.status,
       hasSentinel,
@@ -368,6 +388,14 @@ const make = Effect.gen(function* () {
           if (!thread) {
             return;
           }
+          const cfg = yield* readUnattendedConfig;
+          const preambleText =
+            cfg.preamble ||
+            buildUnattendedPreamble(
+              event.payload.totalIterations,
+              thread.modelSelection.model,
+              effectiveSentinel(cfg),
+            );
           yield* orchestrationEngine.dispatch({
             type: "thread.turn.start",
             commandId: yield* serverCommandId("unattended-preamble"),
@@ -375,10 +403,7 @@ const make = Effect.gen(function* () {
             message: {
               messageId: yield* freshMessageId,
               role: "user",
-              text: buildUnattendedPreamble(
-                event.payload.totalIterations,
-                thread.modelSelection.model,
-              ),
+              text: preambleText,
               attachments: [],
             },
             runtimeMode: thread.runtimeMode,

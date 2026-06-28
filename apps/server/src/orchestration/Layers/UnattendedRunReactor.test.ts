@@ -901,7 +901,11 @@ effectIt.effect("uses a custom continue message verbatim when configured", () =>
 
     const thread = yield* harness.readThread;
     const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
-    assert.strictEqual(userMessages[1]?.text, "RESUME NOW");
+    // Positional indexing (userMessages[1]) is avoided because the fixed `now`
+    // constant makes all messages share the same createdAt, so tie-breaking by id
+    // makes preamble vs. continue order nondeterministic across test runs.
+    const continueMessage = userMessages.find((m) => m.text === "RESUME NOW");
+    assert.ok(continueMessage, "expected a continue turn with the custom text");
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ continueMessage: "RESUME NOW" })))),
 );
 
@@ -914,7 +918,7 @@ effectIt.effect("appends the last assistant message (sentinel stripped) when the
 
     const thread = yield* harness.readThread;
     const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
-    const continueText = userMessages[1]?.text ?? "";
+    const continueText = userMessages.find((m) => m.text.includes(CONTINUE_MESSAGE))?.text ?? "";
     assert.ok(continueText.includes(CONTINUE_MESSAGE), continueText);
     assert.ok(continueText.endsWith("\n\ndid real work"), continueText);
     assert.ok(!continueText.includes(WRAP_SENTINEL), continueText);
@@ -930,6 +934,7 @@ effectIt.effect("does not append the last assistant message when the toggle is o
 
     const thread = yield* harness.readThread;
     const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
-    assert.strictEqual(userMessages[1]?.text, CONTINUE_MESSAGE);
+    const continueMessage = userMessages.find((m) => m.text.includes(CONTINUE_MESSAGE));
+    assert.strictEqual(continueMessage?.text, CONTINUE_MESSAGE);
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
 );

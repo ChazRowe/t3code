@@ -1,5 +1,8 @@
-/** Sentinel the agent prints on its own line after wrapping an iteration. */
-export const WRAP_SENTINEL = "<<WRAP_COMPLETE>>";
+import { CONTINUE_MESSAGE, WRAP_SENTINEL } from "@t3tools/contracts";
+
+// Re-exported so existing importers (`./unattendedRun.ts`) keep working and
+// the web/contracts share one source of truth for the defaults.
+export { CONTINUE_MESSAGE, WRAP_SENTINEL };
 
 /** True when the agent's final message signals a completed wrap. */
 export const messageHasWrapSentinel = (text: string): boolean => text.includes(WRAP_SENTINEL);
@@ -67,10 +70,6 @@ export const buildUnattendedPreamble = (
     `when I'm back. Only I pause or stop the run.`,
   ].join("\n");
 };
-
-/** Message sent for iterations 2..N after the context is cleared. */
-export const CONTINUE_MESSAGE =
-  "continue — invoke your continue skill to re-orient from the handoff, then resume the unattended run without waiting for me.";
 
 /** Activity kind for the marker emitted when an iteration's context is cleared. */
 export const CONTEXT_CLEARED_ACTIVITY_KIND = "unattended.context-cleared";

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  CONTINUE_MESSAGE,
+  WRAP_SENTINEL,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
@@ -149,5 +155,51 @@ describe("ServerSettingsPatch string normalization", () => {
 
     expect(encoded.addProjectBaseDirectory).toBe("~/Development");
     expect(encoded.providers?.codex?.binaryPath).toBe("/opt/homebrew/bin/codex");
+  });
+});
+
+describe("ServerSettings.unattendedRun", () => {
+  it("defaults every field to empty/false so legacy configs decode unchanged", () => {
+    expect(DEFAULT_SERVER_SETTINGS.unattendedRun).toEqual({
+      preamble: "",
+      continueMessage: "",
+      sentinel: "",
+      appendLastAgentMessage: false,
+    });
+  });
+
+  it("decodes a fully empty config without the key", () => {
+    const decoded = decodeServerSettings({});
+    expect(decoded.unattendedRun.preamble).toBe("");
+    expect(decoded.unattendedRun.appendLastAgentMessage).toBe(false);
+  });
+
+  it("decodes provided unattendedRun values and trims the strings", () => {
+    const decoded = decodeServerSettings({
+      unattendedRun: {
+        preamble: "  custom preamble  ",
+        continueMessage: "  resume  ",
+        sentinel: "  <<DONE>>  ",
+        appendLastAgentMessage: true,
+      },
+    });
+    expect(decoded.unattendedRun).toEqual({
+      preamble: "custom preamble",
+      continueMessage: "resume",
+      sentinel: "<<DONE>>",
+      appendLastAgentMessage: true,
+    });
+  });
+
+  it("accepts a partial unattendedRun patch", () => {
+    const patch = decodeServerSettingsPatch({
+      unattendedRun: { sentinel: "  <<DONE>>  " },
+    });
+    expect(patch.unattendedRun).toEqual({ sentinel: "<<DONE>>" });
+  });
+
+  it("exposes the shared default constants", () => {
+    expect(WRAP_SENTINEL).toBe("<<WRAP_COMPLETE>>");
+    expect(CONTINUE_MESSAGE.length).toBeGreaterThan(0);
   });
 });

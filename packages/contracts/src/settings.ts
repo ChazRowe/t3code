@@ -361,6 +361,28 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+// ── Unattended-run (looping) settings ──────────────────────────
+
+/** Sentinel the agent prints on its own line after wrapping an iteration. */
+export const WRAP_SENTINEL = "<<WRAP_COMPLETE>>";
+
+/** Message sent for iterations 2..N after the context is cleared. */
+export const CONTINUE_MESSAGE =
+  "continue — invoke your continue skill to re-orient from the handoff, then resume the unattended run without waiting for me.";
+
+/**
+ * User-tunable unattended-run prompts. Each text field is RAW TEXT sent
+ * verbatim; an EMPTY field means "use the built-in default" (model-aware
+ * preamble / `CONTINUE_MESSAGE` / `WRAP_SENTINEL`).
+ */
+export const UnattendedRunSettings = Schema.Struct({
+  preamble: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  continueMessage: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  sentinel: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  appendLastAgentMessage: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type UnattendedRunSettings = typeof UnattendedRunSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 
 export const ServerSettings = Schema.Struct({
@@ -405,6 +427,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  unattendedRun: UnattendedRunSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -503,6 +526,14 @@ export const ServerSettingsPatch = Schema.Struct({
   // patches risk leaving driver-specific config in a half-merged state.
   // The web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
+  unattendedRun: Schema.optionalKey(
+    Schema.Struct({
+      preamble: Schema.optionalKey(TrimmedString),
+      continueMessage: Schema.optionalKey(TrimmedString),
+      sentinel: Schema.optionalKey(TrimmedString),
+      appendLastAgentMessage: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

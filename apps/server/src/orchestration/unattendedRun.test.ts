@@ -68,6 +68,21 @@ describe("unattended run constants", () => {
     // Only the user controls pause/stop.
     expect(preamble).toContain("only i pause or stop");
   });
+
+  it("embeds a custom sentinel in the preamble when one is passed", () => {
+    const preamble = buildUnattendedPreamble(5, "gpt-5-codex", "<<DONE>>");
+    expect(preamble).toContain("<<DONE>>");
+    expect(preamble).not.toContain(WRAP_SENTINEL);
+  });
+
+  it("defaults the preamble sentinel to WRAP_SENTINEL when none is passed", () => {
+    expect(buildUnattendedPreamble(5)).toContain(WRAP_SENTINEL);
+  });
+
+  it("detects a custom sentinel and ignores the default when a custom one is set", () => {
+    expect(messageHasWrapSentinel("all done\n<<DONE>>", "<<DONE>>")).toBe(true);
+    expect(messageHasWrapSentinel(`all done\n${WRAP_SENTINEL}`, "<<DONE>>")).toBe(false);
+  });
 });
 
 describe("context-clear marker formatting", () => {

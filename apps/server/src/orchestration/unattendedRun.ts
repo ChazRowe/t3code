@@ -5,7 +5,8 @@ import { CONTINUE_MESSAGE, WRAP_SENTINEL } from "@t3tools/contracts";
 export { CONTINUE_MESSAGE, WRAP_SENTINEL };
 
 /** True when the agent's final message signals a completed wrap. */
-export const messageHasWrapSentinel = (text: string): boolean => text.includes(WRAP_SENTINEL);
+export const messageHasWrapSentinel = (text: string, sentinel: string = WRAP_SENTINEL): boolean =>
+  text.includes(sentinel);
 
 const STANDARD_WRAP_CEILING_PERCENT = 35;
 // 15% of a 1M window is ~150k tokens — the empirically good wrap point. (Not 20%:
@@ -29,6 +30,7 @@ export const resolveUnattendedWrapCeilingPercent = (model: string | null | undef
 export const buildUnattendedPreamble = (
   totalIterations: number,
   model: string | null | undefined = null,
+  sentinel: string = WRAP_SENTINEL,
 ): string => {
   const wrapCeilingPercent = resolveUnattendedWrapCeilingPercent(model);
   return [
@@ -39,7 +41,7 @@ export const buildUnattendedPreamble = (
     `point, or your context is filling, invoke your wrap skill to write the`,
     `handoff document, then end your message with the line:`,
     ``,
-    WRAP_SENTINEL,
+    sentinel,
     ``,
     `on its own line. That line is the ONLY thing that advances the run: seeing`,
     `it, I clear the context and send you a "continue" so you resume from the`,

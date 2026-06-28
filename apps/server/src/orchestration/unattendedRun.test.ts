@@ -9,7 +9,9 @@ import {
   CONTEXT_FRESH_ACTIVITY_KIND,
   isOneMillionContextModel,
   messageHasWrapSentinel,
+  resolveAppendedLastMessage,
   resolveUnattendedWrapCeilingPercent,
+  stripSentinelLine,
   WRAP_SENTINEL,
 } from "./unattendedRun.ts";
 
@@ -112,5 +114,55 @@ describe("context-clear marker formatting", () => {
     expect(buildContextClearedSummary({ fromIteration: 1, toIteration: 2 })).toBe(
       "Context cleared · iteration 1 → 2 · before usage unknown",
     );
+  });
+});
+
+describe("stripSentinelLine", () => {
+  it("removes a standalone sentinel line and trims the result", () => {
+    expect(stripSentinelLine("did the work\n<<WRAP_COMPLETE>>", "<<WRAP_COMPLETE>>")).toBe(
+      "did the work",
+    );
+  });
+
+  it("removes a sentinel line surrounded by whitespace", () => {
+    expect(stripSentinelLine("  <<WRAP_COMPLETE>>  ", "<<WRAP_COMPLETE>>")).toBe("");
+  });
+
+  it("preserves text on either side of the sentinel line", () => {
+    expect(stripSentinelLine("line a\n<<WRAP_COMPLETE>>\nline b", "<<WRAP_COMPLETE>>")).toBe(
+      "line a\nline b",
+    );
+  });
+
+  it("leaves text without the sentinel unchanged", () => {
+    expect(stripSentinelLine("nothing to strip", "<<WRAP_COMPLETE>>")).toBe("nothing to strip");
+  });
+});
+
+describe("resolveAppendedLastMessage", () => {
+  it("returns the latest message with its sentinel line stripped", () => {
+    expect(
+      resolveAppendedLastMessage(["older", "final summary\n<<WRAP_COMPLETE>>"], "<<WRAP_COMPLETE>>"),
+    ).toBe("final summary");
+  });
+
+  it("falls back to the previous message when the latest is a standalone sentinel", () => {
+    expect(
+      resolveAppendedLastMessage(["substantive work", "<<WRAP_COMPLETE>>"], "<<WRAP_COMPLETE>>"),
+    ).toBe("substantive work");
+  });
+
+  it("returns null when nothing substantive remains", () => {
+    expect(resolveAppendedLastMessage(["<<WRAP_COMPLETE>>", "   "], "<<WRAP_COMPLETE>>")).toBeNull();
+  });
+
+  it("returns null for an empty list", () => {
+    expect(resolveAppendedLastMessage([], "<<WRAP_COMPLETE>>")).toBeNull();
+  });
+
+  it("picks the latest qualifying message from a longer list", () => {
+    expect(
+      resolveAppendedLastMessage(["a", "b", "c\n<<WRAP_COMPLETE>>"], "<<WRAP_COMPLETE>>"),
+    ).toBe("c");
   });
 });

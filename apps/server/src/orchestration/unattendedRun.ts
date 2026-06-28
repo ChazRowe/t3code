@@ -8,6 +8,36 @@ export { CONTINUE_MESSAGE, WRAP_SENTINEL };
 export const messageHasWrapSentinel = (text: string, sentinel: string = WRAP_SENTINEL): boolean =>
   text.includes(sentinel);
 
+/**
+ * Remove any line consisting solely of the sentinel (after trimming),
+ * preserving surrounding text. The overall result is trimmed so a message
+ * that is only a sentinel collapses to "".
+ */
+export const stripSentinelLine = (text: string, sentinel: string): string =>
+  text
+    .split("\n")
+    .filter((line) => line.trim() !== sentinel)
+    .join("\n")
+    .trim();
+
+/**
+ * Walk discrete assistant messages backward and return the first one that is
+ * non-empty after `stripSentinelLine` (so a standalone-sentinel message is
+ * skipped in favor of the prior substantive one). Returns null if none qualify.
+ */
+export const resolveAppendedLastMessage = (
+  messages: readonly string[],
+  sentinel: string,
+): string | null => {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const stripped = stripSentinelLine(messages[index] ?? "", sentinel);
+    if (stripped.length > 0) {
+      return stripped;
+    }
+  }
+  return null;
+};
+
 const STANDARD_WRAP_CEILING_PERCENT = 35;
 // 15% of a 1M window is ~150k tokens — the empirically good wrap point. (Not 20%:
 // 20% would be 200k, past the sweet spot.)

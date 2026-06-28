@@ -891,3 +891,45 @@ effectIt.effect("does not advance on the default sentinel when a custom one is c
     assert.strictEqual(thread?.unattendedRun?.status, "running");
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ sentinel: "<<DONE>>" })))),
 );
+
+effectIt.effect("uses a custom continue message verbatim when configured", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    yield* harness.driveTurnEnd("wrap", `done\n${WRAP_SENTINEL}`);
+
+    const thread = yield* harness.readThread;
+    const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
+    assert.strictEqual(userMessages[1]?.text, "RESUME NOW");
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ continueMessage: "RESUME NOW" })))),
+);
+
+effectIt.effect("appends the last assistant message (sentinel stripped) when the toggle is on", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    yield* harness.driveTurnEnd("wrap", `did real work\n${WRAP_SENTINEL}`);
+
+    const thread = yield* harness.readThread;
+    const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
+    const continueText = userMessages[1]?.text ?? "";
+    assert.ok(continueText.includes(CONTINUE_MESSAGE), continueText);
+    assert.ok(continueText.endsWith("\n\ndid real work"), continueText);
+    assert.ok(!continueText.includes(WRAP_SENTINEL), continueText);
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ appendLastAgentMessage: true })))),
+);
+
+effectIt.effect("does not append the last assistant message when the toggle is off", () =>
+  Effect.gen(function* () {
+    const harness = yield* setupHarness();
+    yield* harness.startUnattendedRun(2);
+
+    yield* harness.driveTurnEnd("wrap", `did real work\n${WRAP_SENTINEL}`);
+
+    const thread = yield* harness.readThread;
+    const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
+    assert.strictEqual(userMessages[1]?.text, CONTINUE_MESSAGE);
+  }).pipe(Effect.provide(Layer.fresh(makeTestLayer()))),
+);

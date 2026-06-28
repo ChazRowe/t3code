@@ -24,6 +24,7 @@ import {
   CONTEXT_FRESH_ACTIVITY_KIND,
   CONTINUE_MESSAGE,
   messageHasWrapSentinel,
+  resolveAppendedLastMessage,
   WRAP_SENTINEL,
 } from "../unattendedRun.ts";
 import { DEFAULT_SERVER_SETTINGS, type UnattendedRunSettings } from "@t3tools/contracts";
@@ -111,6 +112,11 @@ const make = Effect.gen(function* () {
 
   const effectiveSentinel = (cfg: UnattendedRunSettings): string => cfg.sentinel || WRAP_SENTINEL;
 
+  const buildContinueText = (cfg: UnattendedRunSettings, appendedMessage: string | null): string => {
+    const base = cfg.continueMessage || CONTINUE_MESSAGE;
+    return appendedMessage ? `${base}\n\n${appendedMessage}` : base;
+  };
+
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const freshMessageId = crypto.randomUUIDv4.pipe(
@@ -121,6 +127,12 @@ const make = Effect.gen(function* () {
 
   // Per-thread accumulator of the latest assistant text (reset at turn start).
   const latestAssistantText = new Map<string, string>();
+  // Per-thread, per-iteration map of assistant messageId -> accumulated text.
+  // `thread.message-sent` fires per streamed CHUNK reusing a messageId across a
+  // message's chunks; keying by messageId reconstructs discrete messages. Reset
+  // at the ITERATION boundary (run start + context clear), NOT at turn start, so
+  // it captures every assistant message of an iteration that spans turns.
+  const iterationAssistantMessages = new Map<string, Map<string, string>>();
   // Per-thread flag: has the session reported `running` since the current turn
   // started? Distinguishes a real turn end (idle/ready after running) from a
   // freshly recreated session's warm-up status (idle/ready before running).
@@ -137,7 +149,11 @@ const make = Effect.gen(function* () {
       .getThreadDetailById(threadId as OrchestrationThread["id"])
       .pipe(Effect.map(Option.getOrUndefined));
 
-  const issueContinueTurn = Effect.fn("issueContinueTurn")(function* (thread: OrchestrationThread) {
+  const issueContinueTurn = Effect.fn("issueContinueTurn")(function* (
+    thread: OrchestrationThread,
+    options?: { readonly cfg?: UnattendedRunSettings; readonly appendedMessage?: string | null },
+  ) {
+    const cfg = options?.cfg ?? (yield* readUnattendedConfig);
     yield* orchestrationEngine.dispatch({
       type: "thread.turn.start",
       commandId: yield* serverCommandId("unattended-continue"),
@@ -145,7 +161,7 @@ const make = Effect.gen(function* () {
       message: {
         messageId: yield* freshMessageId,
         role: "user",
-        text: CONTINUE_MESSAGE,
+        text: buildContinueText(cfg, options?.appendedMessage ?? null),
         attachments: [],
       },
       runtimeMode: thread.runtimeMode,
@@ -218,7 +234,11 @@ const make = Effect.gen(function* () {
   // Stop the session, wait for it to settle, advance the iteration, then re-arm
   // the loop with a continue turn. Any failure becomes a fault rather than an
   // unhandled defect.
-  const clearAndContinue = Effect.fn("clearAndContinue")(function* (thread: OrchestrationThread) {
+  const clearAndContinue = Effect.fn("clearAndContinue")(function* (
+    thread: OrchestrationThread,
+    cfg: UnattendedRunSettings,
+    appendedMessage: string | null,
+  ) {
     yield* Effect.gen(function* () {
       yield* orchestrationEngine.dispatch({
         type: "thread.session.stop",
@@ -259,6 +279,7 @@ const make = Effect.gen(function* () {
         clearedFields,
       );
       awaitingFreshContextReading.set(thread.id, true);
+      iterationAssistantMessages.set(thread.id, new Map());
 
       yield* orchestrationEngine.dispatch({
         type: "thread.unattended-run.advance",
@@ -267,7 +288,7 @@ const make = Effect.gen(function* () {
         createdAt: yield* nowIso,
       });
 
-      yield* issueContinueTurn(thread);
+      yield* issueContinueTurn(thread, { cfg, appendedMessage });
     }).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
@@ -322,8 +343,15 @@ const make = Effect.gen(function* () {
           threadId,
           createdAt: yield* nowIso,
         });
-      case "clear-continue":
-        return yield* clearAndContinue(thread);
+      case "clear-continue": {
+        const appendedMessage = cfg.appendLastAgentMessage
+          ? resolveAppendedLastMessage(
+              Array.from(iterationAssistantMessages.get(threadId)?.values() ?? []),
+              sentinel,
+            )
+          : null;
+        return yield* clearAndContinue(thread, cfg, appendedMessage);
+      }
     }
   });
 
@@ -342,6 +370,13 @@ const make = Effect.gen(function* () {
           const threadId = event.payload.threadId;
           const previous = latestAssistantText.get(threadId) ?? "";
           latestAssistantText.set(threadId, previous + event.payload.text);
+
+          const byId = iterationAssistantMessages.get(threadId) ?? new Map<string, string>();
+          byId.set(
+            event.payload.messageId,
+            (byId.get(event.payload.messageId) ?? "") + event.payload.text,
+          );
+          iterationAssistantMessages.set(threadId, byId);
           return;
         }
         case "thread.activity-appended": {
@@ -388,6 +423,7 @@ const make = Effect.gen(function* () {
           if (!thread) {
             return;
           }
+          iterationAssistantMessages.set(thread.id, new Map());
           const cfg = yield* readUnattendedConfig;
           const preambleText =
             cfg.preamble ||

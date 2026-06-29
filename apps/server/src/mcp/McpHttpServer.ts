@@ -23,7 +23,13 @@ import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 import { ContextUsageTool } from "./toolkits/context/tools.ts";
 import { resolveContextUsage } from "./toolkits/context/usage.ts";
 import { makeSpawnAgentHandlers } from "./toolkits/spawn/handlers.ts";
-import { ListAgentsTool, SpawnAgentParameters, SpawnAgentTool } from "./toolkits/spawn/tools.ts";
+import {
+  CheckAgentParameters,
+  CheckAgentTool,
+  ListAgentsTool,
+  SpawnAgentParameters,
+  SpawnAgentTool,
+} from "./toolkits/spawn/tools.ts";
 import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
@@ -247,7 +253,8 @@ const registerSpawnToolkit = Effect.fn("McpHttpServer.registerSpawnToolkit")(fun
     snapshotQuery,
     crypto,
   });
-  const decodeParams = Schema.decodeUnknownEffect(SpawnAgentParameters);
+  const decodeSpawnParams = Schema.decodeUnknownEffect(SpawnAgentParameters);
+  const decodeCheckParams = Schema.decodeUnknownEffect(CheckAgentParameters);
 
   yield* server.addTool({
     tool: new McpSchema.Tool({
@@ -263,8 +270,40 @@ const registerSpawnToolkit = Effect.fn("McpHttpServer.registerSpawnToolkit")(fun
           fiber.context,
           McpInvocationContext.McpInvocationContext,
         );
-        return decodeParams(payload).pipe(
+        return decodeSpawnParams(payload).pipe(
           Effect.flatMap((params) => handlers.spawnAgent(params, invocation)),
+          Effect.matchCause({
+            onFailure: (cause) =>
+              new McpSchema.CallToolResult({
+                isError: true,
+                content: [{ type: "text", text: Cause.pretty(cause) }],
+              }),
+            onSuccess: (text) =>
+              new McpSchema.CallToolResult({
+                isError: false,
+                content: [{ type: "text", text }],
+              }),
+          }),
+        );
+      }),
+  });
+
+  yield* server.addTool({
+    tool: new McpSchema.Tool({
+      name: CheckAgentTool.name,
+      description: Tool.getDescription(CheckAgentTool),
+      inputSchema: Tool.getJsonSchema(CheckAgentTool),
+      annotations: mcpToolAnnotations(CheckAgentTool),
+    }),
+    annotations: CheckAgentTool.annotations,
+    handle: (payload) =>
+      Effect.withFiber((fiber) => {
+        const invocation = Context.getUnsafe(
+          fiber.context,
+          McpInvocationContext.McpInvocationContext,
+        );
+        return decodeCheckParams(payload).pipe(
+          Effect.flatMap((params) => handlers.checkAgent(params, invocation)),
           Effect.matchCause({
             onFailure: (cause) =>
               new McpSchema.CallToolResult({

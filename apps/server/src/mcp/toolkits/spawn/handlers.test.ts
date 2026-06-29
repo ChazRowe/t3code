@@ -8,6 +8,7 @@ import type {
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as PubSub from "effect/PubSub";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
@@ -50,6 +51,7 @@ const makeDeps = (options: {
   readonly instance?: ProviderInstance | undefined;
   readonly events?: ReadonlyArray<ProviderRuntimeEvent>;
   readonly sessions?: ReadonlyArray<ProviderSession>;
+  readonly sendTurnFails?: boolean;
   readonly dispatchSink: Array<OrchestrationCommand>;
 }): Parameters<typeof makeSpawnAgentHandlers>[0] => {
   const parentSession = {
@@ -68,15 +70,25 @@ const makeDeps = (options: {
     updatedAt: "2026-06-22T00:00:00.000Z",
   } as unknown as ProviderSession;
 
+  // Mirror production faithfully: events flow through a real PubSub. The watcher subscribes
+  // synchronously (before sending), then `sendTurn` publishes the seeded events — the same
+  // ordering as a real provider streaming after the prompt is sent. This exercises the
+  // `Stream.fromSubscription` path; a plain `Queue` mock would mask the Subscription-vs-Dequeue
+  // bug it was written to catch.
+  const runtimeEvents = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
+
   const providerService = {
     listSessions: () => Effect.succeed(options.sessions ?? [parentSession]),
     startSession: () => Effect.succeed(startedSession),
     sendTurn: () =>
-      Effect.succeed({ threadId: "subagent-id-1", turnId: "turn-1" }) as unknown as ReturnType<
-        typeof ProviderService.Service.sendTurn
-      >,
+      (options.sendTurnFails
+        ? Effect.fail({ message: "provider rejected the prompt" })
+        : PubSub.publishAll(runtimeEvents, options.events ?? []).pipe(
+            Effect.as({ threadId: "subagent-id-1", turnId: "turn-1" }),
+          )) as unknown as ReturnType<typeof ProviderService.Service.sendTurn>,
     stopSession: () => Effect.void,
     streamEvents: Stream.fromIterable(options.events ?? []),
+    subscribeRuntimeEvents: PubSub.subscribe(runtimeEvents),
   } as unknown as typeof ProviderService.Service;
 
   const instanceRegistry = {
@@ -155,6 +167,22 @@ const pollUntilTerminal = (
     return yield* Effect.die("watcher did not reach a terminal state");
   });
 
+type DeliveredTurn = Extract<OrchestrationCommand, { type: "thread.turn.start" }>;
+
+// The watcher dispatches the result-delivery turn right after it marks the job terminal, on
+// its detached fiber — so poll the sink until it lands rather than reading it immediately.
+const waitForDeliveredTurn = (
+  dispatchSink: ReadonlyArray<OrchestrationCommand>,
+): Effect.Effect<DeliveredTurn | undefined> =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const found = dispatchSink.find((c) => c.type === "thread.turn.start");
+      if (found) return found as DeliveredTurn;
+      yield* Effect.sleep(Duration.millis(1));
+    }
+    return undefined;
+  });
+
 // it.live (real clock): spawn_agent watches the turn on a detached fiber and the poll loop
 // sleeps between checks — both need wall-clock time, which the default TestClock would stall.
 it.live("spawns in the background and returns the streamed text once polled", () =>
@@ -185,6 +213,39 @@ it.live("spawns in the background and returns the streamed text once polled", ()
 
     // Node appended as inProgress, then transitioned to completed by the watcher.
     expect(appendedStatuses(dispatchSink)).toEqual(["inProgress", "completed"]);
+
+    // The result is pushed back to the parent thread as a user turn — no polling needed.
+    const delivered = yield* waitForDeliveredTurn(dispatchSink);
+    expect(delivered?.threadId).toBe(PARENT_THREAD_ID);
+    expect(delivered?.message.role).toBe("user");
+    expect(delivered?.message.text).toContain("Hello world");
+  }),
+);
+
+it.live("returns immediately and reports a send failure via check_agent + delivery", () =>
+  Effect.gen(function* () {
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    // No turn.completed event ever arrives; the only way out is the watcher observing the
+    // failed sendTurn — which proves spawn_agent does not block on the send and still
+    // finalizes the job (rather than waiting out SPAWN_MAX_WAIT).
+    const deps = makeDeps({ instance: codexInstance, dispatchSink, sendTurnFails: true });
+    const { spawnAgent, checkAgent } = makeSpawnAgentHandlers(deps);
+
+    const handle = yield* spawnAgent(
+      { providerInstanceId: "codex", prompt: "do the thing" },
+      invocation(0),
+    );
+    expect(handle).toContain(CHILD_AGENT_ID);
+
+    const result = yield* pollUntilTerminal(checkAgent, CHILD_AGENT_ID);
+    expect(result.kind).toBe("err");
+    if (result.kind === "err") {
+      expect(result.error.message).toContain("Failed to send the prompt");
+    }
+
+    const delivered = yield* waitForDeliveredTurn(dispatchSink);
+    expect(delivered?.threadId).toBe(PARENT_THREAD_ID);
+    expect(delivered?.message.text).toContain("failed");
   }),
 );
 
@@ -257,5 +318,10 @@ it.live("surfaces a failed turn state when the spawn is polled", () =>
 
     // The terminal node is still recorded on the parent, as failed.
     expect(appendedStatuses(dispatchSink)).toEqual(["inProgress", "failed"]);
+
+    // The failure is delivered back to the parent thread too, not left for a poll.
+    const delivered = yield* waitForDeliveredTurn(dispatchSink);
+    expect(delivered?.threadId).toBe(PARENT_THREAD_ID);
+    expect(delivered?.message.text).toContain("failed");
   }),
 );

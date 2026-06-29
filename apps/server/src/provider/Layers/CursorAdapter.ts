@@ -870,7 +870,13 @@ export function makeCursorAdapter(
             Effect.catch((cause) =>
               Effect.logError("Failed to process Cursor runtime notification.", { cause }),
             ),
-            Effect.forkChild,
+            // Fork the notification-drain fiber into the long-lived `sessionScope`, NOT the
+            // calling fiber. `forkChild` ties the fiber to the parent fiber's scope, so when a
+            // one-shot caller (e.g. `spawn_agent`'s standalone `startSession`) returns, its fiber
+            // terminates and auto-interrupts `nf` before the turn ever streams — dropping the
+            // entire subagent reply. `forkIn(sessionScope)` ties `nf` to the session's own scope,
+            // which is closed only by `stopSessionInternal` (or the not-transferred finalizer).
+            Effect.forkIn(sessionScope),
           );
 
           ctx.notificationFiber = nf;

@@ -1154,6 +1154,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     get streamEvents(): ProviderServiceShape["streamEvents"] {
       return Stream.fromPubSub(runtimeEventPubSub);
     },
+    // Scoped subscription that attaches synchronously when yielded, so a caller can be sure
+    // it receives every event published after that point (no late-subscriber race). Consume the
+    // resulting `Subscription` with `Stream.fromSubscription` — it is NOT a `Queue.Dequeue`, so
+    // `Stream.fromQueue` would silently yield nothing.
+    subscribeRuntimeEvents: PubSub.subscribe(runtimeEventPubSub),
   } satisfies ProviderServiceShape;
 });
 

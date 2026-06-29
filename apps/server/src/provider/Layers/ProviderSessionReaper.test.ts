@@ -181,6 +181,8 @@ describe("ProviderSessionReaper", () => {
       },
       rollbackConversation: () => unsupported(),
       streamEvents: Stream.empty,
+      // Unused by the reaper; a never-resolving stub keeps the shape complete.
+      subscribeRuntimeEvents: Effect.never as unknown as ProviderServiceShape["subscribeRuntimeEvents"],
     };
 
     const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(

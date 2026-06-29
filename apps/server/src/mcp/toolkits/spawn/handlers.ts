@@ -2,6 +2,7 @@ import {
   CommandId,
   EventId,
   IsoDateTime,
+  MessageId,
   ProjectId,
   ProviderInstanceId,
   RuntimeItemId,
@@ -10,13 +11,13 @@ import {
   type ProviderInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import type * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -161,6 +162,65 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
       });
     });
 
+  // The message pushed back to the parent thread when a spawned subagent reaches a terminal
+  // state. Framed as a delegated result so the parent agent reads it as a report, not a
+  // fresh user instruction.
+  const deliveryText = (input: {
+    readonly summary: string;
+    readonly childThreadId: ThreadId;
+    readonly status: "completed" | "failed" | "timedOut";
+    readonly resultText: string | null;
+    readonly error: string | null;
+  }): string => {
+    const head = `[Subagent "${input.summary}" (${input.childThreadId})`;
+    const body =
+      input.resultText !== null && input.resultText.length > 0 ? input.resultText : null;
+    switch (input.status) {
+      case "completed":
+        return body !== null ? `${head} finished]\n\n${body}` : `${head} finished with no text output.]`;
+      case "failed":
+        return (
+          `${head} failed: ${input.error ?? "ended in a failed state"}.]` +
+          (body !== null ? `\n\nPartial output:\n${body}` : "")
+        );
+      case "timedOut":
+        return (
+          `${head} timed out after ${spawnMaxWaitMinutes} minutes; it may still be running.]` +
+          (body !== null ? `\n\nPartial output:\n${body}` : "")
+        );
+    }
+  };
+
+  // Push a finished subagent's result back to the PARENT thread as a user turn — the same
+  // mechanism unattended runs use to wake an idle agent (the decider turns this into a
+  // thread.message-sent + turn-start-requested; on a busy parent the provider folds it into
+  // the in-flight turn as a steer). Best-effort: if the parent session has gone away the
+  // result still survives in the job registry for check_agent.
+  const deliverResult = (input: {
+    readonly parentThreadId: ThreadId;
+    readonly runtimeMode: RuntimeMode;
+    readonly interactionMode: ProviderInteractionMode;
+    readonly text: string;
+    readonly createdAt: IsoDateTime;
+  }): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const commandUuid = yield* randomId;
+      yield* orchestrationEngine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`spawn-deliver:${input.parentThreadId}:${commandUuid}`),
+        threadId: input.parentThreadId,
+        message: {
+          messageId: MessageId.make(`spawn-result:${commandUuid}`),
+          role: "user",
+          text: input.text,
+          attachments: [],
+        },
+        runtimeMode: input.runtimeMode,
+        interactionMode: input.interactionMode,
+        createdAt: input.createdAt,
+      });
+    }).pipe(Effect.ignore);
+
   // Poll (bounded) until the projection pipeline reflects a thread, swallowing query
   // errors and giving up after `attemptsLeft` tries (best-effort).
   const waitForThreadProjection = (
@@ -218,6 +278,8 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
   // finalizes its node and releases its provider process.
   const watchToCompletion = (input: {
     readonly parentThreadId: ThreadId;
+    readonly parentRuntimeMode: RuntimeMode;
+    readonly parentInteractionMode: ProviderInteractionMode;
     readonly childThreadId: ThreadId;
     readonly rootItemId: RuntimeItemId;
     readonly summary: string;
@@ -230,21 +292,45 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
   }): Effect.Effect<void> =>
     Effect.scoped(
       Effect.gen(function* () {
-        // Subscribe BEFORE the caller sends the turn so no streamed output is missed, then
-        // watch the child thread for assistant text and turn completion.
+        // Attach the runtime-event subscription BEFORE the prompt is sent so no streamed
+        // output is missed. `streamEvents` is a hot PubSub, so a lazily-run subscription can
+        // attach after the provider has already published its first deltas and drop them
+        // (intermittently losing a subagent's entire reply); `subscribeRuntimeEvents` attaches
+        // synchronously here. `done` carries either the turn state or a send failure.
         const textRef = yield* Ref.make("");
-        const done = yield* Deferred.make<string>();
+        const done = yield* Deferred.make<{ readonly state: string } | { readonly sendError: string }>();
+        const events = yield* providerService.subscribeRuntimeEvents;
         yield* Effect.forkScoped(
-          Stream.runForEach(providerService.streamEvents, (event) => {
+          // `events` is a PubSub `Subscription`, NOT a `Queue.Dequeue` — it must be consumed with
+          // `Stream.fromSubscription`. `Stream.fromQueue` silently yields nothing for it, which
+          // would leave the watcher blind to every event and waiting out the full timeout.
+          Stream.runForEach(Stream.fromSubscription(events), (event) => {
             if (event.threadId !== input.childThreadId) return Effect.void;
             if (event.type === "content.delta" && event.payload.streamKind === "assistant_text") {
               return Ref.update(textRef, (text) => text + event.payload.delta);
             }
             if (event.type === "turn.completed") {
-              return Deferred.succeed(done, event.payload.state);
+              return Deferred.succeed(done, { state: event.payload.state });
             }
             return Effect.void;
           }),
+        );
+
+        // Send the prompt on its own fiber. Most providers' sendTurn returns at turn START,
+        // but ACP providers like Cursor only resolve it at turn END — so awaiting it inline
+        // would make spawn_agent block for the whole run. Forking it here keeps spawn_agent
+        // non-blocking for every provider; a send failure resolves `done` so we finalize
+        // instead of waiting out SPAWN_MAX_WAIT.
+        yield* Effect.forkScoped(
+          providerService.sendTurn({ threadId: input.childThreadId, input: input.prompt }).pipe(
+            Effect.matchCauseEffect({
+              onFailure: (cause) =>
+                Deferred.succeed(done, {
+                  sendError: `Failed to send the prompt to the subagent: ${Cause.pretty(cause)}`,
+                }).pipe(Effect.asVoid),
+              onSuccess: () => Effect.void,
+            }),
+          ),
         );
 
         const outcome = yield* Deferred.await(done).pipe(Effect.timeoutOption(SPAWN_MAX_WAIT));
@@ -252,7 +338,9 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         const completedAt = yield* nowIso;
 
         const timedOut = Option.isNone(outcome);
-        const state = Option.getOrUndefined(outcome);
+        const resolved = Option.getOrUndefined(outcome);
+        const sendError = resolved && "sendError" in resolved ? resolved.sendError : null;
+        const state = resolved && "state" in resolved ? resolved.state : undefined;
         const succeeded = state === "completed";
 
         yield* appendNode({
@@ -272,14 +360,29 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
           createdAt: completedAt,
         }).pipe(Effect.ignore);
 
-        yield* patchJob(input.childThreadId, {
-          status: timedOut ? "timedOut" : succeeded ? "completed" : "failed",
-          resultText: finalText.length > 0 ? finalText : null,
-          error:
-            timedOut || succeeded
-              ? null
-              : `Subagent turn ended with state '${state ?? "unknown"}'.`,
-          completedAt,
+        const status = timedOut ? "timedOut" : succeeded ? "completed" : "failed";
+        const resultText = finalText.length > 0 ? finalText : null;
+        const error =
+          timedOut || succeeded
+            ? null
+            : (sendError ?? `Subagent turn ended with state '${state ?? "unknown"}'.`);
+
+        yield* patchJob(input.childThreadId, { status, resultText, error, completedAt });
+
+        // Push the result back to the parent so it need not poll; check_agent remains as an
+        // on-demand liveness check and a fallback if delivery can't land.
+        yield* deliverResult({
+          parentThreadId: input.parentThreadId,
+          runtimeMode: input.parentRuntimeMode,
+          interactionMode: input.parentInteractionMode,
+          text: deliveryText({
+            summary: input.summary,
+            childThreadId: input.childThreadId,
+            status,
+            resultText,
+            error,
+          }),
+          createdAt: completedAt,
         });
       }),
     ).pipe(
@@ -430,12 +533,15 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         completedAt: null,
       });
 
-      // Fork the watcher BEFORE sending the turn (so its stream subscription is live) onto
-      // a detached fiber that outlives this MCP request — that is what makes spawn_agent
-      // non-blocking. The watcher owns the child session from here on.
-      const watcherFiber = yield* Effect.forkDetach(
+      // Fork the watcher onto a detached fiber that outlives this MCP request — that is what
+      // makes spawn_agent non-blocking. The watcher subscribes to the child's stream, sends
+      // the prompt itself (so a provider whose sendTurn only resolves at turn END, like
+      // Cursor's ACP prompt, can't block this request), and owns the child session from here.
+      yield* Effect.forkDetach(
         watchToCompletion({
           parentThreadId: invocation.threadId,
+          parentRuntimeMode: runtimeMode,
+          parentInteractionMode: parent.interactionMode,
           childThreadId,
           rootItemId,
           summary,
@@ -448,34 +554,12 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         }),
       );
 
-      yield* providerService.sendTurn({ threadId: childThreadId, input: params.prompt }).pipe(
-        Effect.mapError(
-          (error) =>
-            new SpawnAgentError({
-              message: `Failed to send prompt to ${params.providerInstanceId}: ${error.message}`,
-            }),
-        ),
-        // If the prompt never lands, tear the watcher down (its finalizer stops the
-        // session) and mark the job failed so a stray poll sees a coherent terminal state.
-        Effect.tapError(() =>
-          Effect.gen(function* () {
-            yield* Fiber.interrupt(watcherFiber);
-            const failedAt = yield* nowIso;
-            yield* patchJob(childThreadId, {
-              status: "failed",
-              error: "Failed to send the prompt to the subagent.",
-              completedAt: failedAt,
-            });
-          }).pipe(Effect.ignore),
-        ),
-      );
-
       return (
-        `Spawned a subagent on ${provider} (instance ${params.providerInstanceId}). ` +
-        `It is running in the background as agent "${childThreadId}". ` +
-        `Call check_agent with agentId "${childThreadId}" about once a minute to poll for ` +
-        "completion; it reports that the subagent is still running until the turn finishes, " +
-        "then returns the subagent's final response."
+        `Spawned a subagent on ${provider} (instance ${params.providerInstanceId}), ` +
+        `running in the background as agent "${childThreadId}". ` +
+        "Its result will be delivered to you as a message when it finishes — you don't need " +
+        `to poll. Use check_agent with agentId "${childThreadId}" only to check whether it is ` +
+        "still running."
       );
     });
 
@@ -502,7 +586,7 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         case "running":
           return (
             `Subagent '${agentId}' on ${job.provider} is still running (started ${job.startedAt}). ` +
-            "Call check_agent again in about a minute."
+            "Its result will arrive as a message when it finishes; you don't need to keep checking."
           );
         case "completed":
           return job.resultText !== null && job.resultText.length > 0

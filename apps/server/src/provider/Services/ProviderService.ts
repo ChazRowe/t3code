@@ -26,6 +26,8 @@ import type {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
+import type * as PubSub from "effect/PubSub";
+import type * as Scope from "effect/Scope";
 import type * as Stream from "effect/Stream";
 
 import type { ProviderServiceError } from "../Errors.ts";
@@ -135,6 +137,20 @@ export interface ProviderServiceShape {
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+
+  /**
+   * Subscribe to the runtime event stream as a scoped PubSub subscription. Unlike
+   * {@link streamEvents} (a lazy `Stream` that only attaches when run), yielding this effect
+   * attaches the subscription synchronously, so a caller can guarantee it is receiving events
+   * before it triggers the work that produces them (e.g. sending a turn) and miss none. Consume
+   * it with `Stream.fromSubscription` — a `Subscription` is NOT a `Queue.Dequeue`, so
+   * `Stream.fromQueue` yields nothing.
+   */
+  readonly subscribeRuntimeEvents: Effect.Effect<
+    PubSub.Subscription<ProviderRuntimeEvent>,
+    never,
+    Scope.Scope
+  >;
 }
 
 /**

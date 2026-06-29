@@ -379,6 +379,62 @@ describe("ProviderSessionReaper", () => {
     expect(Option.isSome(remaining)).toBe(true);
   });
 
+  it("skips stale-lastSeen sessions whose projection updatedAt is recent (synthetic turns)", async () => {
+    // Repro of the looping+ultracode reaper incident: a backgrounded Workflow
+    // re-invokes the live SDK query via synthetic turns, which never bump
+    // `lastSeenAt` (only sendTurn/startSession/stop do) but DO advance the
+    // projection session's `updatedAt`. Once the last workflow watcher clears,
+    // `hasPendingBackgroundWork` is false, so only the synthetic-activity clock
+    // keeps the session alive. lastSeenAt is far in the past; updatedAt is now.
+    const threadId = ThreadId.make("thread-reaper-synthetic-activity");
+    const recent = DateTime.formatIso(await Effect.runPromise(DateTime.now));
+    const harness = await createHarness({
+      readModel: makeReadModel([
+        {
+          id: threadId,
+          session: {
+            threadId,
+            // No active turn (the synthetic turn already completed) and no
+            // pending background work — the prior guards do NOT apply here.
+            status: "ready",
+            providerName: "claudeAgent",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: recent,
+          },
+        },
+      ]),
+    });
+    const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
+
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId,
+        providerName: "claudeAgent",
+        providerInstanceId: null,
+        adapterKey: "claudeAgent",
+        runtimeMode: "full-access",
+        status: "running",
+        // Last real turn was long ago; only synthetic turns have run since.
+        lastSeenAt: "2026-04-14T00:00:00.000Z",
+        resumeCursor: {
+          opaque: "resume-synthetic-activity",
+        },
+        runtimePayload: null,
+      }),
+    );
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+    await Effect.runPromise(drainFibers);
+
+    expect(harness.stopSession).not.toHaveBeenCalled();
+    const remaining = await runtime!.runPromise(repository.getByThreadId({ threadId }));
+    expect(Option.isSome(remaining)).toBe(true);
+  });
+
   it("does not reap sessions that are still within the inactivity threshold", async () => {
     const threadId = ThreadId.make("thread-reaper-fresh");
     const now = DateTime.formatIso(await Effect.runPromise(DateTime.now));

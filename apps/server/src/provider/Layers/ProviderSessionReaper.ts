@@ -53,14 +53,46 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
-        const idleDurationMs = now - lastSeenMs;
-        if (idleDurationMs < inactivityThresholdMs) {
+        // Fast path: a recent provider-level touch (sendTurn / startSession /
+        // stopSession bump `lastSeenAt`) means the session is plainly active, so
+        // skip the projection lookup entirely.
+        if (now - lastSeenMs < inactivityThresholdMs) {
           continue;
         }
 
         const thread = yield* projectionSnapshotQuery
           .getThreadShellById(binding.threadId)
           .pipe(Effect.map(Option.getOrUndefined));
+
+        // `lastSeenAt` only advances on provider-level operations (sendTurn /
+        // startSession / stopSession). A synthetic turn — the live SDK query
+        // auto-re-invoking the agent when a backgrounded `Workflow` completes —
+        // is real activity but never bumps it, so a session that was driving
+        // synthetic turns minutes ago still reads as idle since its last *real*
+        // turn. The projection session's `updatedAt` DOES advance on every turn
+        // lifecycle event (incl. synthetic), so use the later of the two as the
+        // session's true last-activity time. Without this, the reaper tears a
+        // session down seconds after its final synthetic turn — the moment the
+        // `hasPendingBackgroundWork` guard below stops covering it — orphaning
+        // in-flight subagent work (the looping+ultracode reaper incident).
+        const sessionUpdatedAtMs = thread?.session?.updatedAt
+          ? Date.parse(thread.session.updatedAt)
+          : Number.NaN;
+        const lastActivityMs = Number.isNaN(sessionUpdatedAtMs)
+          ? lastSeenMs
+          : Math.max(lastSeenMs, sessionUpdatedAtMs);
+        const idleDurationMs = now - lastActivityMs;
+        if (idleDurationMs < inactivityThresholdMs) {
+          yield* Effect.logDebug("provider.session.reaper.skipped-recent-synthetic-activity", {
+            threadId: binding.threadId,
+            provider: binding.provider,
+            lastSeenAt: binding.lastSeenAt,
+            sessionUpdatedAt: thread?.session?.updatedAt,
+            idleDurationMs,
+          });
+          continue;
+        }
+
         if (thread?.session?.activeTurnId != null) {
           yield* Effect.logDebug("provider.session.reaper.skipped-active-turn", {
             threadId: binding.threadId,

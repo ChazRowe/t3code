@@ -1453,7 +1453,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
           }),
-        ).pipe(Effect.forkChild);
+          // Fork the event-drain fiber into the long-lived `sessionScope`, NOT the calling fiber.
+          // `forkChild` ties the fiber to the parent fiber's scope, so when a one-shot caller
+          // (e.g. `spawn_agent`'s standalone `startSession`) returns, its fiber terminates and
+          // auto-interrupts this fiber before the turn ever streams — leaving the Codex session
+          // `ready` but emitting nothing. `forkIn(sessionScope)` ties it to the session's own
+          // scope, closed only by session teardown (or the not-transferred finalizer).
+        ).pipe(Effect.forkIn(sessionScope));
 
         const started = yield* runtime.start().pipe(
           Effect.mapError(

@@ -128,11 +128,23 @@ const makeDeps = (options: {
   };
 };
 
-const codexInstance = {
-  instanceId: ProviderInstanceId.make("codex"),
-  driverKind: "codex",
-  displayName: "Codex",
-} as unknown as ProviderInstance;
+const instanceWithModels = (slugs: ReadonlyArray<string>): ProviderInstance =>
+  ({
+    instanceId: ProviderInstanceId.make("codex"),
+    driverKind: "codex",
+    displayName: "Codex",
+    // snapshot is a closure of effects; `getSnapshot` yields the ServerProvider
+    // contract whose `models` array carries the valid slugs.
+    snapshot: {
+      getSnapshot: Effect.succeed({ models: slugs.map((slug) => ({ slug })) }),
+    },
+  }) as unknown as ProviderInstance;
+
+const codexInstance = instanceWithModels(["gpt-5.5", "gpt-5.4"]);
+
+// A provider whose model list is empty (e.g. lazy ACP discovery) — must not gate
+// spawns or advertise models.
+const noModelsInstance = instanceWithModels([]);
 
 const appendedStatuses = (commands: ReadonlyArray<OrchestrationCommand>): Array<string> =>
   commands
@@ -323,5 +335,86 @@ it.live("surfaces a failed turn state when the spawn is polled", () =>
     const delivered = yield* waitForDeliveredTurn(dispatchSink);
     expect(delivered?.threadId).toBe(PARENT_THREAD_ID);
     expect(delivered?.message.text).toContain("failed");
+  }),
+);
+
+it.effect("list_agents surfaces each instance's available models", () =>
+  Effect.gen(function* () {
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    const deps = makeDeps({ instance: codexInstance, dispatchSink });
+    const { listAgents } = makeSpawnAgentHandlers(deps);
+
+    const text = yield* listAgents();
+
+    expect(text).toContain("codex (provider: codex, name: Codex");
+    expect(text).toContain("models: gpt-5.5, gpt-5.4");
+  }),
+);
+
+it.effect("list_agents omits the models clause when none are advertised", () =>
+  Effect.gen(function* () {
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    const deps = makeDeps({ instance: noModelsInstance, dispatchSink });
+    const { listAgents } = makeSpawnAgentHandlers(deps);
+
+    const text = yield* listAgents();
+
+    expect(text).toContain("codex (provider: codex, name: Codex)");
+    expect(text).not.toContain("models:");
+  }),
+);
+
+it.effect("rejects an unknown model override up front with the valid set", () =>
+  Effect.gen(function* () {
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    const deps = makeDeps({ instance: codexInstance, dispatchSink });
+    const { spawnAgent } = makeSpawnAgentHandlers(deps);
+
+    const result = yield* spawnAgent(
+      { providerInstanceId: "codex", prompt: "x", model: "gpt-5.5-codex" },
+      invocation(0),
+    ).pipe(Effect.flip);
+
+    expect(result).toBeInstanceOf(SpawnAgentError);
+    expect(result.message).toContain("Unknown model 'gpt-5.5-codex'");
+    expect(result.message).toContain("gpt-5.5, gpt-5.4");
+    // Rejected before any session/node work.
+    expect(dispatchSink).toHaveLength(0);
+  }),
+);
+
+it.effect("does not gate the model when the instance advertises no models", () =>
+  Effect.gen(function* () {
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    const deps = makeDeps({ instance: noModelsInstance, dispatchSink });
+    const { spawnAgent } = makeSpawnAgentHandlers(deps);
+
+    // An arbitrary model id is accepted (reaches session start) rather than rejected,
+    // because an empty list means "unknown", not "nothing is valid".
+    const handle = yield* spawnAgent(
+      { providerInstanceId: "codex", prompt: "x", model: "whatever-1.0" },
+      invocation(0),
+    );
+
+    expect(handle).toContain(CHILD_AGENT_ID);
+  }),
+);
+
+it.live("accepts a known model override and spawns", () =>
+  Effect.gen(function* () {
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    const deps = makeDeps({
+      instance: codexInstance,
+      dispatchSink,
+      events: [event("subagent-id-1", "turn.completed", { state: "completed" })],
+    });
+    const { spawnAgent } = makeSpawnAgentHandlers(deps);
+
+    const handle = yield* spawnAgent(
+      { providerInstanceId: "codex", prompt: "x", model: "gpt-5.5" },
+      invocation(0),
+    );
+
+    expect(handle).toContain(CHILD_AGENT_ID);
   }),
 );

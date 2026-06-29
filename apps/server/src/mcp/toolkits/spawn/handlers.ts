@@ -416,6 +416,25 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         });
       }
 
+      // Reject an unknown model override up front. Without this, an invalid id
+      // (e.g. a guessed `gpt-5.5-codex` for a Codex instance that only serves
+      // `gpt-5.5`) is accepted by the backend, which then streams nothing back —
+      // surfacing as a silent ~2s empty turn with no error. Validating here turns
+      // that into a legible failure. Only enforced when the instance advertises a
+      // model list; lazy-discovery providers expose `models: []` and must not be
+      // gated against an empty set.
+      if (params.model !== undefined) {
+        const knownModels = (yield* instance.snapshot.getSnapshot).models;
+        if (knownModels.length > 0 && !knownModels.some((m) => m.slug === params.model)) {
+          const valid = knownModels.map((m) => m.slug).join(", ");
+          return yield* new SpawnAgentError({
+            message:
+              `Unknown model '${params.model}' for provider instance ` +
+              `'${params.providerInstanceId}'. Valid models: ${valid}.`,
+          });
+        }
+      }
+
       // Inherit the caller's safety envelope (runtime mode) and workspace (cwd) so a
       // delegated agent cannot exceed what the caller itself is permitted.
       const sessions = yield* providerService.listSessions();
@@ -612,18 +631,24 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
     });
 
   const listAgents = (): Effect.Effect<string, SpawnAgentError> =>
-    instanceRegistry.listInstances.pipe(
-      Effect.map((instances) =>
-        instances.length === 0
-          ? "No provider instances are configured."
-          : instances
-              .map((instance) => {
-                const name = instance.displayName ?? instance.instanceId;
-                return `${instance.instanceId} (provider: ${instance.driverKind}, name: ${name})`;
-              })
-              .join("\n"),
-      ),
-    );
+    Effect.gen(function* () {
+      const instances = yield* instanceRegistry.listInstances;
+      if (instances.length === 0) return "No provider instances are configured.";
+      const lines = yield* Effect.forEach(instances, (instance) =>
+        instance.snapshot.getSnapshot.pipe(
+          Effect.map((snapshot) => {
+            const name = instance.displayName ?? instance.instanceId;
+            const models = snapshot.models.map((m) => m.slug);
+            // Surface valid model ids so callers pass a real `model` override
+            // instead of guessing one (a bad id fails as a silent empty turn).
+            // Omitting `model` on spawn_agent uses the instance default.
+            const modelStr = models.length > 0 ? `, models: ${models.join(", ")}` : "";
+            return `${instance.instanceId} (provider: ${instance.driverKind}, name: ${name}${modelStr})`;
+          }),
+        ),
+      );
+      return lines.join("\n");
+    });
 
   return { spawnAgent, checkAgent, listAgents };
 };

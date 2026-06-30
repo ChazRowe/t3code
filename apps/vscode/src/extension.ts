@@ -133,6 +133,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("t3code.openChat", async () => {
+      await vscode.commands.executeCommand("workbench.view.extension.t3code");
+      await vscode.commands.executeCommand("t3code.chat.focus");
+      await chatProvider?.refresh();
+    }),
     vscode.commands.registerCommand("t3code.showStatus", async () => {
       const panel = vscode.window.createWebviewPanel(
         "t3codeStatus",

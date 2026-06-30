@@ -8,9 +8,9 @@ T3 Code as a VSCode extension. Embeds the existing `@t3tools/server` and UI.
 2. Build the extension (host + chat webview): `pnpm --filter t3-code build:bundle && pnpm --filter t3-code build:webview`
    (or `pnpm exec vp run --filter t3-code dev` to watch the host bundle).
 3. Open this repo in VSCode and press **F5** (Run Extension) to launch the
-   Extension Development Host. Open the **T3 Code → Chat** activity-bar view to
-   use live chat, or run **T3 Code: Status** from the command palette to verify
-   the embedded server is up.
+   Extension Development Host. Run **T3 Code: Open Chat** from the command palette
+   (or open the **T3 Code** activity-bar icon → **Chat**). **T3 Code: Status**
+   verifies the embedded server is up.
 
 ## Package VSIX
 

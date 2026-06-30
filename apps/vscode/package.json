@@ -36,6 +36,11 @@
   "contributes": {
     "commands": [
       {
+        "command": "t3code.openChat",
+        "title": "T3 Code: Open Chat",
+        "category": "T3 Code"
+      },
+      {
         "command": "t3code.showStatus",
         "title": "T3 Code: Status",
         "category": "T3 Code"

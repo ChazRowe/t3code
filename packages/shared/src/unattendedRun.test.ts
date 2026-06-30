@@ -16,7 +16,7 @@ const base = {
 } as const;
 
 const ev = (type: string, payload: unknown): OrchestrationEvent =>
-  ({ ...base, type, payload } as unknown as OrchestrationEvent);
+  ({ ...base, type, payload }) as unknown as OrchestrationEvent;
 
 describe("applyUnattendedRunEvent", () => {
   it("starts a run at iteration 1, status running", () => {

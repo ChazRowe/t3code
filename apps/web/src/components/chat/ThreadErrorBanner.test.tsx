@@ -9,8 +9,7 @@ describe("ThreadErrorBanner", () => {
   });
 
   it("places the error text in the alert's flexible content column, not the fixed icon box", () => {
-    const error =
-      "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use";
+    const error = "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use";
     const html = renderToStaticMarkup(<ThreadErrorBanner error={error} />);
 
     expect(html).toContain(error);

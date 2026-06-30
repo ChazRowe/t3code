@@ -51,8 +51,22 @@ describe("parseWorkflowRunFile", () => {
     summary: "Adversarial review",
     workflowProgress: [
       { type: "workflow_phase", index: 1, title: "Review" },
-      { type: "workflow_agent", index: 1, label: "grant_adjunct-failclosed", agentId: "a1385c15bd4ffd5af", model: "claude-opus-4-8[1m]", tokens: 120436 },
-      { type: "workflow_agent", index: 2, label: "contract-backcompat", agentId: "a7a784072f116c4e6", model: "claude-opus-4-8[1m]", tokens: 82704 },
+      {
+        type: "workflow_agent",
+        index: 1,
+        label: "grant_adjunct-failclosed",
+        agentId: "a1385c15bd4ffd5af",
+        model: "claude-opus-4-8[1m]",
+        tokens: 120436,
+      },
+      {
+        type: "workflow_agent",
+        index: 2,
+        label: "contract-backcompat",
+        agentId: "a7a784072f116c4e6",
+        model: "claude-opus-4-8[1m]",
+        tokens: 82704,
+      },
     ],
   };
 
@@ -79,7 +93,12 @@ describe("parseWorkflowRunFile", () => {
 
   it("returns an empty non-terminal snapshot for malformed input", () => {
     const snapshot = parseWorkflowRunFile(undefined);
-    assert.deepEqual(snapshot, { status: undefined, terminal: false, summary: undefined, agents: [] });
+    assert.deepEqual(snapshot, {
+      status: undefined,
+      terminal: false,
+      summary: undefined,
+      agents: [],
+    });
   });
 
   it("falls back to agentId as label when label is missing", () => {
@@ -166,7 +185,10 @@ describe("reconcileWorkflowAgents", () => {
 
   it("emits a start for a newly-seen started agent, no complete yet", () => {
     const r = reconcileWorkflowAgents(new Set(), [agent("a1", "started")]);
-    assert.deepEqual(r.toStart.map((a) => a.info.agentId), ["a1"]);
+    assert.deepEqual(
+      r.toStart.map((a) => a.info.agentId),
+      ["a1"],
+    );
     assert.equal(r.toComplete.length, 0);
     assert.ok(r.emitted.has("start:a1"));
     assert.ok(!r.emitted.has("done:a1"));
@@ -174,15 +196,24 @@ describe("reconcileWorkflowAgents", () => {
 
   it("emits start+complete together for an already-completed agent", () => {
     const r = reconcileWorkflowAgents(new Set(), [agent("a1", "completed")]);
-    assert.deepEqual(r.toStart.map((a) => a.info.agentId), ["a1"]);
-    assert.deepEqual(r.toComplete.map((a) => a.info.agentId), ["a1"]);
+    assert.deepEqual(
+      r.toStart.map((a) => a.info.agentId),
+      ["a1"],
+    );
+    assert.deepEqual(
+      r.toComplete.map((a) => a.info.agentId),
+      ["a1"],
+    );
   });
 
   it("does not re-emit already-emitted keys across polls", () => {
     const first = reconcileWorkflowAgents(new Set(), [agent("a1", "started")]);
     const second = reconcileWorkflowAgents(first.emitted, [agent("a1", "completed")]);
     assert.equal(second.toStart.length, 0); // start already emitted
-    assert.deepEqual(second.toComplete.map((a) => a.info.agentId), ["a1"]);
+    assert.deepEqual(
+      second.toComplete.map((a) => a.info.agentId),
+      ["a1"],
+    );
     const third = reconcileWorkflowAgents(second.emitted, [agent("a1", "completed")]);
     assert.equal(third.toStart.length, 0);
     assert.equal(third.toComplete.length, 0); // fully settled — nothing new
@@ -192,13 +223,25 @@ describe("reconcileWorkflowAgents", () => {
 describe("formatWorkflowAgentLabel", () => {
   it("prefixes the phase as a 'type: description' label when present", () => {
     assert.equal(
-      formatWorkflowAgentLabel({ agentId: "a1", label: "alpha", model: undefined, tokens: undefined, phase: "Review" }),
+      formatWorkflowAgentLabel({
+        agentId: "a1",
+        label: "alpha",
+        model: undefined,
+        tokens: undefined,
+        phase: "Review",
+      }),
       "Review: alpha",
     );
   });
   it("uses the bare label when no phase", () => {
     assert.equal(
-      formatWorkflowAgentLabel({ agentId: "a1", label: "alpha", model: undefined, tokens: undefined, phase: undefined }),
+      formatWorkflowAgentLabel({
+        agentId: "a1",
+        label: "alpha",
+        model: undefined,
+        tokens: undefined,
+        phase: undefined,
+      }),
       "alpha",
     );
   });

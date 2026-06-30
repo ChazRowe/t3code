@@ -25,11 +25,13 @@
 Gate the SDK option behind an env-derived `ServerConfig` boolean and pass it into `queryOptions`. Deliverable: with the flag set, `query()` receives `forwardSubagentText: true`; with it unset, the option is absent.
 
 **Files:**
+
 - Modify: `apps/server/src/config.ts` (add `forwardSubagentActivity: boolean` to the `ServerConfig` interface ~lines 29-74, and to wherever the config object is constructed from env)
 - Modify: `apps/server/src/provider/Layers/ClaudeAdapter.ts:3449-3474` (queryOptions assembly; `const serverConfig = yield* ServerConfig` already exists at ~line 1367)
 - Test: `apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ServerConfig` service (already injected in the adapter as `serverConfig`).
 - Produces: `ServerConfig.forwardSubagentActivity: boolean`, derived from `process.env.T3CODE_FORWARD_SUBAGENT_ACTIVITY === "1"`, default `false`.
 
@@ -113,10 +115,12 @@ git commit -m "feat(provider): gate forwardSubagentText behind T3CODE_FORWARD_SU
 Give runtime item-lifecycle events an optional parent linkage so a subagent's inner items can reference the Task tool-use that spawned them.
 
 **Files:**
+
 - Modify: `packages/contracts/src/providerRuntime.ts:404-411` (`ItemLifecyclePayload`)
 - Test: `packages/contracts/src/providerRuntime.test.ts` (create if absent; otherwise add to the existing contract test file)
 
 **Interfaces:**
+
 - Consumes: `RuntimeItemId` (already defined/exported in `providerRuntime.ts`; it is the branded type produced by `asRuntimeItemId`).
 - Produces: `ItemLifecyclePayload.parentItemId?: RuntimeItemId` — set on every nested subagent item; absent on main-thread items.
 
@@ -190,10 +194,12 @@ git commit -m "feat(contracts): add optional parentItemId to ItemLifecyclePayloa
 When `forwardSubagentText` is on, the SDK delivers subagent `assistant`/`user` messages with non-null `parent_tool_use_id`. Add a dedicated handler that emits nested `item.started`/`item.completed` events for the subagent's tool calls, results, and text — each tagged with `parentItemId` — while leaving main-thread turn state, token usage, and assistant text blocks untouched.
 
 **Files:**
+
 - Modify: `apps/server/src/provider/Layers/ClaudeAdapter.ts` — the dispatch switch (~lines 2876-2889), `handleAssistantMessage` (2480-2566), `handleUserMessage` (2358-2478)
 - Test: `apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
 **Interfaces:**
+
 - Consumes: `offerRuntimeEvent`, `makeEventStamp`, `asRuntimeItemId`, `classifyToolItemType`, `titleForTool`, `summarizeToolRequest`, `nativeProviderRefs`, `context.turnState` (all already defined in this file). `ItemLifecyclePayload.parentItemId` from Task 2.
 - Produces: a new local handler `handleSubagentMessage(context, message)` invoked from the dispatch switch for any `assistant`/`user` message whose `parent_tool_use_id` is non-null.
 
@@ -234,9 +240,7 @@ it.effect("emits nested work-log items for forwarded subagent tool calls", () =>
       message: {
         id: "msg-sa1",
         role: "assistant",
-        content: [
-          { type: "tool_use", id: "inner-bash-1", name: "Bash", input: { command: "ls" } },
-        ],
+        content: [{ type: "tool_use", id: "inner-bash-1", name: "Bash", input: { command: "ls" } }],
       },
     } as unknown as SDKMessage);
 
@@ -316,12 +320,21 @@ const handleSubagentMessage = Effect.fn("handleSubagentMessage")(function* (
       if (!block || typeof block !== "object") {
         continue;
       }
-      const b = block as { type?: unknown; id?: unknown; name?: unknown; input?: unknown; text?: unknown; thinking?: unknown };
+      const b = block as {
+        type?: unknown;
+        id?: unknown;
+        name?: unknown;
+        input?: unknown;
+        text?: unknown;
+        thinking?: unknown;
+      };
 
       if (b.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
         const itemType = classifyToolItemType(b.name);
         const toolInput =
-          typeof b.input === "object" && b.input !== null ? (b.input as Record<string, unknown>) : {};
+          typeof b.input === "object" && b.input !== null
+            ? (b.input as Record<string, unknown>)
+            : {};
         const stamp = yield* makeEventStamp();
         yield* offerRuntimeEvent({
           type: "item.started",
@@ -340,7 +353,11 @@ const handleSubagentMessage = Effect.fn("handleSubagentMessage")(function* (
             data: { toolName: b.name, input: toolInput },
           },
           providerRefs: nativeProviderRefs(context, { providerItemId: b.id }),
-          raw: { source: "claude.sdk.message", method: "claude/assistant/subagent", payload: message },
+          raw: {
+            source: "claude.sdk.message",
+            method: "claude/assistant/subagent",
+            payload: message,
+          },
         });
         continue;
       }
@@ -369,7 +386,11 @@ const handleSubagentMessage = Effect.fn("handleSubagentMessage")(function* (
             parentItemId,
           },
           providerRefs: nativeProviderRefs(context),
-          raw: { source: "claude.sdk.message", method: "claude/assistant/subagent", payload: message },
+          raw: {
+            source: "claude.sdk.message",
+            method: "claude/assistant/subagent",
+            payload: message,
+          },
         });
       }
     }
@@ -392,7 +413,9 @@ const handleSubagentMessage = Effect.fn("handleSubagentMessage")(function* (
           itemType: "dynamic_tool_call",
           status: toolResult.isError ? "failed" : "completed",
           title: "Subagent tool result",
-          ...(toolResult.text.trim().length > 0 ? { detail: toolResult.text.trim().slice(0, 400) } : {}),
+          ...(toolResult.text.trim().length > 0
+            ? { detail: toolResult.text.trim().slice(0, 400) }
+            : {}),
           parentItemId,
         },
         providerRefs: nativeProviderRefs(context, { providerItemId: toolResult.toolUseId }),
@@ -450,10 +473,12 @@ git commit -m "feat(provider): route forwarded subagent messages into nested wor
 Persist `parentItemId` from runtime item events into the thread-activity payload so the web layer can read it.
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts` — the three lifecycle cases: `item.updated` (561-577), `item.started` (606-621), `item.completed` (584-599)
 - Test: `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts` (add to the existing file)
 
 **Interfaces:**
+
 - Consumes: `event.payload.parentItemId` (from Task 2's contract change).
 - Produces: activity `payload.parentItemId` on `tool.started` / `tool.updated` / `tool.completed` rows.
 
@@ -524,11 +549,13 @@ git commit -m "feat(orchestration): carry parentItemId into thread-activity payl
 Group work-log entries that carry a `parentItemId` under their parent "Subagent task" row, indented.
 
 **Files:**
+
 - Modify: `apps/web/src/session-logic.ts:678-765` (`toDerivedWorkLogEntry`) — surface `parentItemId` onto the derived entry
 - Modify: `apps/web/src/components/chat/MessagesTimeline.tsx:721-821` (`WorkGroupSection`) and `:1548-1705` (`SimpleWorkEntryRow`) — group + indent children
 - Test: `apps/web/src/session-logic.test.ts` (derive) and, if a render test harness exists, `MessagesTimeline.test.tsx`
 
 **Interfaces:**
+
 - Consumes: activity `payload.parentItemId` (Task 4).
 - Produces: `DerivedWorkLogEntry.parentItemId?: string`; grouped rendering keyed by `parentItemId`.
 
@@ -561,10 +588,10 @@ Expected: FAIL — `parentItemId` not on the derived entry.
 In `apps/web/src/session-logic.ts`, add to the `DerivedWorkLogEntry` type a `parentItemId?: string` field, and in `toDerivedWorkLogEntry` (after computing `payload`) add:
 
 ```typescript
-  const parentItemId = asTrimmedString((payload as Record<string, unknown> | null)?.parentItemId);
-  if (parentItemId) {
-    entry.parentItemId = parentItemId;
-  }
+const parentItemId = asTrimmedString((payload as Record<string, unknown> | null)?.parentItemId);
+if (parentItemId) {
+  entry.parentItemId = parentItemId;
+}
 ```
 
 (`asTrimmedString` is the same helper already used by `extractToolTitle` in this file.)
@@ -579,33 +606,35 @@ Expected: PASS.
 In `apps/web/src/components/chat/MessagesTimeline.tsx`, in `WorkGroupSection` before rendering, partition entries into parents and children:
 
 ```typescript
-  const childrenByParent = new Map<string, TimelineWorkEntry[]>();
-  for (const e of visibleEntries) {
-    if (e.parentItemId) {
-      const list = childrenByParent.get(e.parentItemId) ?? [];
-      list.push(e);
-      childrenByParent.set(e.parentItemId, list);
-    }
+const childrenByParent = new Map<string, TimelineWorkEntry[]>();
+for (const e of visibleEntries) {
+  if (e.parentItemId) {
+    const list = childrenByParent.get(e.parentItemId) ?? [];
+    list.push(e);
+    childrenByParent.set(e.parentItemId, list);
   }
-  const topLevelEntries = visibleEntries.filter((e) => !e.parentItemId);
+}
+const topLevelEntries = visibleEntries.filter((e) => !e.parentItemId);
 ```
 
 Render top-level entries as today, and after each parent row whose `id` (the parent's runtime item id) has children, render the children indented. Pass an `indented` prop to `SimpleWorkEntryRow`:
 
 ```tsx
-        {topLevelEntries.map((workEntry) => (
-          <Fragment key={workEntry.id}>
-            <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
-            {(childrenByParent.get(workEntry.id) ?? []).map((child) => (
-              <SimpleWorkEntryRow
-                key={child.id}
-                workEntry={child}
-                workspaceRoot={workspaceRoot}
-                indented
-              />
-            ))}
-          </Fragment>
-        ))}
+{
+  topLevelEntries.map((workEntry) => (
+    <Fragment key={workEntry.id}>
+      <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
+      {(childrenByParent.get(workEntry.id) ?? []).map((child) => (
+        <SimpleWorkEntryRow
+          key={child.id}
+          workEntry={child}
+          workspaceRoot={workspaceRoot}
+          indented
+        />
+      ))}
+    </Fragment>
+  ));
+}
 ```
 
 In `SimpleWorkEntryRow`, accept `indented?: boolean` and apply a left margin when set, e.g. add `indented ? "ml-4 border-l border-border/40 pl-2" : ""` to the row's outer `className`. Match the parent row's runtime item id: the parent Task tool's `item.started` carries `itemId: "task-parent"`, which becomes the activity `id` — confirm the derived parent entry's `id` equals the children's `parentItemId`. If the work-group dedupes/merges activities such that the parent's derived `id` is the activity eventId rather than the item id, key the map on whatever field the derived parent entry exposes as the tool item id; add a `toolItemId` passthrough on the derived entry if needed (read from `providerRefs.providerItemId` or the item id already threaded through the projection).
@@ -633,10 +662,12 @@ git commit -m "feat(web): nest subagent activity under its parent task in the wo
 Subagent activity is high-volume (~7,000 lines observed for a single fugue run). Cap nested items emitted per parent so a runaway subagent can't flood the work log / event store, and log what was dropped.
 
 **Files:**
+
 - Modify: `apps/server/src/provider/Layers/ClaudeAdapter.ts` — `handleSubagentMessage` and `ClaudeSessionContext` (the per-session state struct where `inFlightTools` lives)
 - Test: `apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
 **Interfaces:**
+
 - Consumes: `context` session state.
 - Produces: `context.subagentItemCounts: Map<string, number>` keyed by `parentToolUseId`; a module const `MAX_SUBAGENT_ITEMS_PER_PARENT = 200`.
 
@@ -661,7 +692,9 @@ it("caps nested subagent items per parent and logs the overflow", () =>
       } as unknown as SDKMessage);
     }
     const started = harness.events.filter(
-      (e) => e.type === "item.started" && (e.payload as { parentItemId?: string }).parentItemId === "task-parent",
+      (e) =>
+        e.type === "item.started" &&
+        (e.payload as { parentItemId?: string }).parentItemId === "task-parent",
     );
     assert.equal(started.length, 200);
   }).pipe(Effect.provide(/* the test harness's layer */)));
@@ -683,18 +716,19 @@ const MAX_SUBAGENT_ITEMS_PER_PARENT = 200;
 Add `subagentItemCounts: Map<string, number>` to the `ClaudeSessionContext` type and initialize it (`new Map()`) wherever `inFlightTools` is initialized. At the top of `handleSubagentMessage`, before emitting any item:
 
 ```typescript
-  const emitted = context.subagentItemCounts.get(parentToolUseId) ?? 0;
-  if (emitted >= MAX_SUBAGENT_ITEMS_PER_PARENT) {
-    if (emitted === MAX_SUBAGENT_ITEMS_PER_PARENT) {
-      context.subagentItemCounts.set(parentToolUseId, emitted + 1);
-      yield* Effect.logWarning("subagent activity cap reached; dropping further nested items", {
+const emitted = context.subagentItemCounts.get(parentToolUseId) ?? 0;
+if (emitted >= MAX_SUBAGENT_ITEMS_PER_PARENT) {
+  if (emitted === MAX_SUBAGENT_ITEMS_PER_PARENT) {
+    context.subagentItemCounts.set(parentToolUseId, emitted + 1);
+    yield *
+      Effect.logWarning("subagent activity cap reached; dropping further nested items", {
         parentToolUseId,
         cap: MAX_SUBAGENT_ITEMS_PER_PARENT,
       });
-    }
-    return;
   }
-  context.subagentItemCounts.set(parentToolUseId, emitted + 1);
+  return;
+}
+context.subagentItemCounts.set(parentToolUseId, emitted + 1);
 ```
 
 (Increment once per message, before the per-block loop — this caps messages, which is the right granularity for bounding the firehose. Each message yields a small bounded number of blocks.)

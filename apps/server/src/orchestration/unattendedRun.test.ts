@@ -142,7 +142,10 @@ describe("stripSentinelLine", () => {
 describe("resolveAppendedLastMessage", () => {
   it("returns the latest message with its sentinel line stripped", () => {
     expect(
-      resolveAppendedLastMessage(["older", "final summary\n<<WRAP_COMPLETE>>"], "<<WRAP_COMPLETE>>"),
+      resolveAppendedLastMessage(
+        ["older", "final summary\n<<WRAP_COMPLETE>>"],
+        "<<WRAP_COMPLETE>>",
+      ),
     ).toBe("final summary");
   });
 
@@ -153,7 +156,9 @@ describe("resolveAppendedLastMessage", () => {
   });
 
   it("returns null when nothing substantive remains", () => {
-    expect(resolveAppendedLastMessage(["<<WRAP_COMPLETE>>", "   "], "<<WRAP_COMPLETE>>")).toBeNull();
+    expect(
+      resolveAppendedLastMessage(["<<WRAP_COMPLETE>>", "   "], "<<WRAP_COMPLETE>>"),
+    ).toBeNull();
   });
 
   it("returns null for an empty list", () => {

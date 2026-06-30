@@ -209,8 +209,9 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
           existingProject.value.defaultModelSelection ?? getAutoBootstrapDefaultModelSelection();
       }
 
-      const existingThreadId =
-        yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
+      const existingThreadId = serverConfig.autoBootstrapCreateNewThread
+        ? Option.none<ThreadId>()
+        : yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
       if (Option.isNone(existingThreadId)) {
         const createdAt = DateTime.formatIso(yield* DateTime.now);
         const createdThreadId = ThreadId.make(yield* randomUUID);

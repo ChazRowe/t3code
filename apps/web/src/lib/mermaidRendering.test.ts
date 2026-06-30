@@ -39,12 +39,8 @@ describe("ensureNodeTextContrast", () => {
     expect(ensureNodeTextContrast("classDef edgey stroke:#2471a3;")).toBe(
       "classDef edgey stroke:#2471a3;",
     );
-    expect(ensureNodeTextContrast("classDef ghost fill:none;")).toBe(
-      "classDef ghost fill:none;",
-    );
-    expect(ensureNodeTextContrast("classDef v fill:var(--x);")).toBe(
-      "classDef v fill:var(--x);",
-    );
+    expect(ensureNodeTextContrast("classDef ghost fill:none;")).toBe("classDef ghost fill:none;");
+    expect(ensureNodeTextContrast("classDef v fill:var(--x);")).toBe("classDef v fill:var(--x);");
   });
 
   it("only rewrites classDef/style lines, not the rest of the diagram", () => {

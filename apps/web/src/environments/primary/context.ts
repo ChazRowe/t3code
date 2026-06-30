@@ -56,13 +56,19 @@ async function fetchPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironment
         PrimaryEnvironmentHttpClient.pipe(Effect.flatMap((client) => client.metadata.descriptor())),
       );
     } catch (error) {
-      const status =
+      const httpStatus =
         HttpClientError.isHttpClientError(error) && error.response !== undefined
           ? error.response.status
-          : 500;
+          : null;
+      const detail =
+        httpStatus !== null
+          ? String(httpStatus)
+          : error instanceof Error
+            ? error.message
+            : String(error);
       throw new BootstrapHttpError({
-        message: `Failed to load server environment descriptor (${status}).`,
-        status,
+        message: `Failed to load server environment descriptor (${detail}).`,
+        status: httpStatus ?? 500,
       });
     }
 

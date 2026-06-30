@@ -38,6 +38,9 @@ const probeReady = async (httpBaseUrl: string, signal: AbortSignal): Promise<boo
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+const resolveWorkspaceFolderCwd = (): string | undefined =>
+  vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const channel = vscode.window.createOutputChannel("T3 Code");
   context.subscriptions.push(channel);
@@ -102,6 +105,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         fileExists: (p) => fs.existsSync(p),
       }),
     t3Home,
+    getWorkspaceCwd: resolveWorkspaceFolderCwd,
     spawn: spawnChild,
     probeReady,
     sleep,
@@ -125,6 +129,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     logger,
     extensionUri: context.extensionUri,
     getSession: getChatSession,
+    getWorkspaceCwd: resolveWorkspaceFolderCwd,
   });
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("t3code.chat", chatProvider, {

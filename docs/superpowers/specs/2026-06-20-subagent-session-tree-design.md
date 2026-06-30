@@ -39,7 +39,7 @@ The feature is built on top of a **performance fix** that is the real motivation
 
 > **A subagent's transcript = activities with `parentItemId` set. Exclude them from the parent thread's snapshot and projector. Keep the root `collab_agent_tool_call` ref. Load/stream a subagent's direct children on demand when watched.**
 
-The root `collab_agent_tool_call` activity already *is* a compact reference (label = subagent type + description, status, `turnId`). It stays in the parent. Its children (the transcript) move off the parent's hot path. Deep nesting is recursive: a subagent's children may themselves include further `collab_agent_tool_call` refs; watching a subagent loads one level of its children, and drilling into a nested ref loads the next. **Each level loads exactly one level of children, so payloads stay bounded at every depth.**
+The root `collab_agent_tool_call` activity already _is_ a compact reference (label = subagent type + description, status, `turnId`). It stays in the parent. Its children (the transcript) move off the parent's hot path. Deep nesting is recursive: a subagent's children may themselves include further `collab_agent_tool_call` refs; watching a subagent loads one level of its children, and drilling into a nested ref loads the next. **Each level loads exactly one level of children, so payloads stay bounded at every depth.**
 
 ### Three-tier lazy loading (keeps every layer small)
 
@@ -53,7 +53,7 @@ The root `collab_agent_tool_call` activity already *is* a compact reference (lab
 - The tree node for a subagent shows status derived from its root ref (`inProgress` / `completed` / `error`).
 - **Watching across completion:** if a subagent completes while you're watching it, the watch view keeps the final transcript visible (frozen, read-only) with a small "Subagent finished" banner and a link back to the parent. The route stays valid because the data is persisted.
 - **Iteration grouping** applies only to threads with an unattended run. Each subagent ref is stamped with the `iteration` active at creation time (read from the thread's `UnattendedRunState.currentIteration` at ingestion; `null` for manual threads). Manual-thread subagents nest directly under the session.
-- Retention/pruning (ephemeral-per-iteration) is intentionally *enabled by the schema* but not implemented here.
+- Retention/pruning (ephemeral-per-iteration) is intentionally _enabled by the schema_ but not implemented here.
 
 ### Read-only watch view
 
@@ -152,5 +152,5 @@ The root `collab_agent_tool_call` activity already *is* a compact reference (lab
 ## Open questions / future
 
 - Retention/pruning knob (ephemeral-per-iteration) — schema-ready, deferred.
-- Surfacing subagent refs for *non-open* running sessions beyond the `liveSubagentCount` badge (full tree currently loads on expand only) — acceptable for v1.
+- Surfacing subagent refs for _non-open_ running sessions beyond the `liveSubagentCount` badge (full tree currently loads on expand only) — acceptable for v1.
 - Codex / other providers emitting `collab_agent_tool_call` would light up automatically; untested until such a producer exists.

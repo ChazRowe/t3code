@@ -1,5 +1,6 @@
 import type { Logger } from "../logger.ts";
 import { buildBootstrap, mintBootstrapToken, serializeBootstrapLine } from "./bootstrap.ts";
+import { resolveEmbeddedServerSpawnArgs } from "./embeddedServerArgs.ts";
 
 export interface SpawnedChild {
   readonly pid: number | undefined;
@@ -39,6 +40,7 @@ export interface SupervisorDeps {
   readonly resolveEntry: () => ResolvedEntryLite;
   readonly t3Home: string;
   readonly host?: string;
+  readonly getWorkspaceCwd?: () => string | undefined;
   readonly spawn: (
     cmd: string,
     args: readonly string[],
@@ -98,12 +100,30 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
       T3CODE_NO_BROWSER: String(bootstrap.noBrowser),
       T3CODE_TAILSCALE_SERVE: String(bootstrap.tailscaleServeEnabled),
       T3CODE_TAILSCALE_SERVE_PORT: String(bootstrap.tailscaleServePort),
+      // Force the bundled `ws` library to use its pure-JS mask/unmask and UTF-8
+      // validation instead of the optional native `bufferutil`/`utf-8-validate`
+      // addons. The embedded server runs under VS Code's Electron Node, whose ABI
+      // does not match the prebuilt addons: `require()` resolves to a broken module
+      // whose `unmask` is not a function, so `ws` installs it and then throws
+      // `TypeError: bufferUtil.unmask is not a function` on the first inbound frame,
+      // crashing the server on every WebSocket connection (the chat webview never
+      // receives its welcome event and hangs on "Waiting for session…"). The pure-JS
+      // path has no native dependency and works under any Node/Electron runtime.
+      WS_NO_BUFFER_UTIL: "1",
+      WS_NO_UTF_8_VALIDATE: "1",
     };
 
-    const child = deps.spawn(entry.command, [entry.entryPath, "--bootstrap-fd", "3"], {
-      cwd: deps.t3Home,
-      env: { ...process.env, ...entry.spawnEnv, ...embeddedServerEnv },
-    });
+    const child = deps.spawn(
+      entry.command,
+      resolveEmbeddedServerSpawnArgs({
+        entryPath: entry.entryPath,
+        workspaceCwd: deps.getWorkspaceCwd?.(),
+      }),
+      {
+        cwd: deps.t3Home,
+        env: { ...process.env, ...entry.spawnEnv, ...embeddedServerEnv },
+      },
+    );
     current = child;
     deps.logger.info(`Spawned server pid=${String(child.pid)} port=${currentPort}`);
     child.writeBootstrap(serializeBootstrapLine(bootstrap));

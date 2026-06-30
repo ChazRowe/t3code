@@ -65,6 +65,7 @@ apps/vscode/
 ```
 
 Responsibilities:
+
 - **`bridge.ts`** — minimal Phase-2 bridge surface (`getLocalEnvironmentBootstrap` only); Phase 4 extends via the same global or a sibling native-bridge channel.
 - **`chatShell.tsx`** — everything the webview React tree needs below `ChatView`: auth gate, environment connection service, server welcome → active thread ref, reconnect/error surfaces.
 - **`webviewHtml.ts`** — testable HTML assembly; extension host passes `asWebviewUri` results and a cryptographically random CSP nonce.
@@ -76,6 +77,7 @@ Responsibilities:
 ## Task 1: `isVSCode`, `VsCodeBridge`, and primary environment target/auth
 
 **Files:**
+
 - Create: `apps/web/src/vscode/bridge.ts`
 - Modify: `apps/web/src/env.ts`
 - Modify: `apps/web/src/vite-env.d.ts`
@@ -84,6 +86,7 @@ Responsibilities:
 - Test: `apps/web/src/environments/primary/target.test.ts` (extend existing bootstrap tests)
 
 **Interfaces:**
+
 - Consumes: `DesktopEnvironmentBootstrap` type from `@t3tools/contracts`.
 - Produces:
   - `export interface VsCodeBridge { getLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null }`
@@ -95,28 +98,28 @@ Responsibilities:
 - [ ] **Step 1: Write the failing test** — append to `apps/web/src/environments/primary/target.test.ts`:
 
 ```ts
-  it("uses vscodeBridge bootstrap urls when present", () => {
-    vi.stubGlobal("window", {
-      location: { origin: "https://file+.vscode-resource.vscode-cdn.net/" },
-      desktopBridge: undefined,
-      vscodeBridge: {
-        getLocalEnvironmentBootstrap: () => ({
-          label: "Local environment",
-          httpBaseUrl: "https://abc-3801.vscode-cdn.example/",
-          wsBaseUrl: "wss://abc-3801.vscode-cdn.example/",
-          bootstrapToken: "vscode-bootstrap-token",
-        }),
-      },
-    });
-
-    expect(readPrimaryEnvironmentTarget()).toEqual({
-      source: "vscode-managed",
-      target: {
+it("uses vscodeBridge bootstrap urls when present", () => {
+  vi.stubGlobal("window", {
+    location: { origin: "https://file+.vscode-resource.vscode-cdn.net/" },
+    desktopBridge: undefined,
+    vscodeBridge: {
+      getLocalEnvironmentBootstrap: () => ({
+        label: "Local environment",
         httpBaseUrl: "https://abc-3801.vscode-cdn.example/",
         wsBaseUrl: "wss://abc-3801.vscode-cdn.example/",
-      },
-    });
+        bootstrapToken: "vscode-bootstrap-token",
+      }),
+    },
   });
+
+  expect(readPrimaryEnvironmentTarget()).toEqual({
+    source: "vscode-managed",
+    target: {
+      httpBaseUrl: "https://abc-3801.vscode-cdn.example/",
+      wsBaseUrl: "wss://abc-3801.vscode-cdn.example/",
+    },
+  });
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -144,8 +147,7 @@ export const readVsCodeBridge = (): VsCodeBridge | null => {
 `apps/web/src/env.ts` — append:
 
 ```ts
-export const isVSCode =
-  typeof window !== "undefined" && window.vscodeBridge !== undefined;
+export const isVSCode = typeof window !== "undefined" && window.vscodeBridge !== undefined;
 ```
 
 `apps/web/src/vite-env.d.ts` — add to `Window`:
@@ -220,12 +222,14 @@ git commit -m "feat(web): add vscodeBridge bootstrap target for embedded VSCode 
 ## Task 2: `@t3tools/web` exports + `VsCodeChatShell`
 
 **Files:**
+
 - Modify: `apps/web/package.json`
 - Create: `apps/web/src/vscode/chatShell.tsx`
 - Create: `apps/web/src/vscode/main.tsx`
 - Test: `apps/web/src/vscode/chatShell.test.tsx`
 
 **Interfaces:**
+
 - Consumes: Task 1 bridge/target/auth; `ChatView`; `startEnvironmentConnectionService`, `ensureEnvironmentConnectionBootstrapped` from `~/environments/runtime`; `ensurePrimaryEnvironmentReady`, `resolveInitialServerAuthGateState`, `updatePrimaryEnvironmentDescriptor` from `~/environments/primary`; `useServerWelcomeSubscription`, `startServerStateSync`, `getPrimaryEnvironmentConnection` from `~/rpc/serverState`; `WebSocketConnectionCoordinator`, `WebSocketConnectionSurface`, `SlowRpcAckToastCoordinator` from `~/components/WebSocketConnectionSurface`; `ToastProvider`, `AnchoredToastProvider` from `~/components/ui/toast`; `AppAtomRegistryProvider` from `~/rpc/atomRegistry`.
 - Produces:
   - `export function VsCodeChatShell(): JSX.Element`
@@ -271,11 +275,17 @@ describe("VsCodeChatShell", () => {
           bootstrapToken: "tok",
         }),
       },
-      location: { href: "https://file+.vscode-resource.vscode-cdn.net/index.html", origin: "https://file+.vscode-resource.vscode-cdn.net" },
+      location: {
+        href: "https://file+.vscode-resource.vscode-cdn.net/index.html",
+        origin: "https://file+.vscode-resource.vscode-cdn.net",
+      },
       history: { replaceState: vi.fn() },
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
-      requestAnimationFrame: (cb: FrameRequestCallback) => { cb(0); return 0; },
+      requestAnimationFrame: (cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      },
       cancelAnimationFrame: vi.fn(),
     });
   });
@@ -358,7 +368,10 @@ function VsCodeChatShellInner() {
 
   useEffect(() => {
     if (!isVSCode) {
-      setPhase({ kind: "error", message: "T3 Code chat shell requires the VSCode webview bridge." });
+      setPhase({
+        kind: "error",
+        message: "T3 Code chat shell requires the VSCode webview bridge.",
+      });
       return;
     }
     let cancelled = false;
@@ -421,7 +434,9 @@ function VsCodeChatShellInner() {
   if (phase.kind === "error") {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="text-sm text-[var(--vscode-errorForeground,var(--color-red-500))]">{phase.message}</p>
+        <p className="text-sm text-[var(--vscode-errorForeground,var(--color-red-500))]">
+          {phase.message}
+        </p>
         <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
           Retry
         </Button>
@@ -507,12 +522,14 @@ git commit -m "feat(web): add VsCodeChatShell for embedded VSCode chat webview"
 ## Task 3: Webview Vite build target
 
 **Files:**
+
 - Create: `apps/vscode/webview/vite.config.ts`
 - Create: `apps/vscode/webview/chat/index.html`
 - Modify: `apps/vscode/package.json`
 - Modify: `apps/vscode/vite.config.ts` (run.tasks `build` depends on webview build)
 
 **Interfaces:**
+
 - Consumes: `@t3tools/web/vscode/main` entry.
 - Produces: `apps/vscode/dist/webview/chat/index.html` + hashed assets; script `"build:webview": "vp build --config webview/vite.config.ts"`.
 
@@ -617,12 +634,15 @@ git commit -m "feat(vscode): add Vite webview bundle build for chat shell"
 ## Task 4: Pure webview HTML builder (CSP + bootstrap injection)
 
 **Files:**
+
 - Create: `apps/vscode/src/ui/webviewHtml.ts`
 - Test: `apps/vscode/src/ui/webviewHtml.test.ts`
 
 **Interfaces:**
+
 - Consumes: `DesktopEnvironmentBootstrap`-shaped bootstrap object.
 - Produces:
+
   ```ts
   export interface WebviewBootstrapPayload {
     readonly label: string;
@@ -633,12 +653,12 @@ git commit -m "feat(vscode): add Vite webview bundle build for chat shell"
   export interface RenderWebviewHtmlInput {
     readonly nonce: string;
     readonly bootstrap: WebviewBootstrapPayload;
-    readonly scriptUri: string;       // already asWebviewUri'd
+    readonly scriptUri: string; // already asWebviewUri'd
     readonly styleUris: readonly string[];
     readonly connectSrcOrigins: readonly string[]; // http + ws origins for CSP
   }
-  export function renderWebviewHtml(input: RenderWebviewHtmlInput): string
-  export function buildConnectSrcOrigins(httpBaseUrl: string, wsBaseUrl: string): string[]
+  export function renderWebviewHtml(input: RenderWebviewHtmlInput): string;
+  export function buildConnectSrcOrigins(httpBaseUrl: string, wsBaseUrl: string): string[];
   ```
 
 - [ ] **Step 1: Write the failing test**
@@ -722,12 +742,15 @@ git commit -m "feat(vscode): add webview HTML builder with CSP and bootstrap inj
 ## Task 5: Server session resolver (extension host)
 
 **Files:**
+
 - Create: `apps/vscode/src/session/serverSession.ts`
 - Test: `apps/vscode/src/session/serverSession.test.ts`
 
 **Interfaces:**
+
 - Consumes: `resolveExternalBaseUrls` from `../transport/urlResolver.ts`.
 - Produces:
+
   ```ts
   export interface ResolvedServerSession {
     readonly httpBaseUrl: string;
@@ -740,7 +763,7 @@ git commit -m "feat(vscode): add webview HTML builder with CSP and bootstrap inj
     readonly bootstrapToken: string;
     readonly label?: string;
     readonly asExternalUri: (url: string) => Promise<string>;
-  }): Promise<ResolvedServerSession>
+  }): Promise<ResolvedServerSession>;
   ```
 
 - [ ] **Step 1: Write failing test** (mock `asExternalUri` identity + forwarded cases — mirror `urlResolver.test.ts`).
@@ -758,12 +781,15 @@ git commit -m "feat(vscode): resolve external server session for webview bootstr
 ## Task 6: `ChatWebviewViewProvider`
 
 **Files:**
+
 - Create: `apps/vscode/src/webview/chatViewProvider.ts`
 - Modify: `apps/vscode/src/extension.ts`
 
 **Interfaces:**
+
 - Consumes: `resolveServerSession`, `renderWebviewHtml`, `buildConnectSrcOrigins`; supervisor `getHandle()`; `Logger`.
 - Produces:
+
   ```ts
   export interface ChatViewProviderDeps {
     readonly logger: Logger;
@@ -780,6 +806,7 @@ git commit -m "feat(vscode): resolve external server session for webview bootstr
 - [ ] **Step 1: Implement provider**
 
 Key behaviors:
+
 - `webview.options = { enableScripts: true, localResourceRoots: [Uri.joinPath(extensionUri, "dist/webview/chat")] }`
 - `retainContextWhenHidden = true`
 - On resolve/refresh: `getSession()` → if null, set HTML error panel ("Server starting…" with meta refresh or message to retry); else build bootstrap payload, locate `dist/webview/chat/assets/index-*.js` (use `readdirSync` + stable helper `resolveWebviewEntryAsset(extensionUri): { scriptUri, styleUris }`), call `renderWebviewHtml`, assign `webview.html`.
@@ -801,12 +828,14 @@ git commit -m "feat(vscode): add ChatWebviewViewProvider for live chat surface"
 ## Task 7: Manifest contributions + extension wiring
 
 **Files:**
+
 - Modify: `apps/vscode/package.json` (`contributes.viewsContainers`, `views`, optional command)
 - Modify: `apps/vscode/src/extension.ts`
 - Modify: `apps/vscode/.vscodeignore` (ensure `!dist/webview/**` is packaged — do **not** ignore `dist/webview`)
 - Modify: `apps/vscode/README.md`
 
 **Interfaces:**
+
 - Produces: Activity bar container `t3code` with view `t3code.chat` titled **T3 Code: Chat**; auto-reveal on first successful server start (optional `vscode.commands.executeCommand("t3code.chat.focus")`).
 
 - [ ] **Step 1: Add manifest contributions**
@@ -837,6 +866,7 @@ Add `media/t3code.svg` (simple monogram; 24×24, currentColor-friendly).
 - [ ] **Step 2: Wire `extension.ts`**
 
 After supervisor starts successfully:
+
 1. Build `ChatWebviewViewProvider` with `getSession` reading `supervisor.getHandle()` + `resolveServerSession` + `vscode.env.asExternalUri`.
 2. `context.subscriptions.push(vscode.window.registerWebviewViewProvider("t3code.chat", provider))`.
 3. On supervisor `start()` resolution (and after restarts via supervisor callback if added, or poll `getHandle()` in provider refresh on visibility), call `provider.refresh()`.
@@ -861,16 +891,19 @@ git commit -m "feat(vscode): register chat webview view and wire server session 
 ## Task 8: VSIX packaging + headless smoke
 
 **Files:**
+
 - Create: `apps/vscode/scripts/smokeChatWebview.ts`
 - Modify: `apps/vscode/package.json` (`smoke-test` runs both smokes or add `smoke-chat-webview`)
 - Modify: `apps/vscode/scripts/smokeSupervisor.ts` (optional: export shared spawn helper — only if duplication hurts)
 
 **Interfaces:**
+
 - Produces: script that builds webview, asserts `index.html` + entry asset exist, spawns supervisor headlessly, resolves session URLs, verifies descriptor fetch — mirrors Phase 1 smoke pattern.
 
 - [ ] **Step 1: Write `smokeChatWebview.ts`**
 
 Minimum checks:
+
 1. `dist/webview/chat/index.html` exists after `build:webview`.
 2. Headless supervisor reaches ready (reuse smokeSupervisor patterns).
 3. `resolveServerSession` returns ws/http URLs; `fetch(readinessUrl)` OK.
@@ -909,6 +942,7 @@ Open repo → **Run Extension**. Confirm output channel: `Server ready at http:/
 - [ ] **Step 3: Open chat webview**
 
 Activity bar → **T3 Code** → **Chat**. Confirm:
+
 - No CSP/connect errors in **Help → Toggle Developer Tools** (webview devtools).
 - Transitions from "Connecting…" → chat UI (server welcome provides `bootstrapThreadId` when a workspace folder is open).
 
@@ -949,7 +983,9 @@ git commit -m "fix(vscode): phase 2 chat webview acceptance fixes"
 ## Roadmap — Phases 3–4 (unchanged; separate plans)
 
 ### Phase 3 — Remaining webviews + selection broker
+
 Surfaces #1, #3, #4; extension-host broker; full VSCode CSS-token re-theme.
 
 ### Phase 4 — Native bridge
+
 `postMessage` → VSCode APIs for secrets, pickers, terminals, `showTextDocument`, etc.

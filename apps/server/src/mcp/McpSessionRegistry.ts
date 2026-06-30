@@ -55,8 +55,17 @@ export interface McpSessionRegistryOptions {
   readonly now?: () => number;
 }
 
-const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1_000;
-const DEFAULT_MAXIMUM_LIFETIME_MS = 8 * 60 * 60 * 1_000;
+// Unattended runs loop for days, and the MCP credential is minted once at
+// session start (see ProviderService.prepareMcpSession) — it has to outlive the
+// whole run. The previous caps (30 min idle, 8 h lifetime) silently pruned the
+// token mid-loop: a quiet stretch with no MCP tool call tripped the idle timeout
+// and the next spawn/preview call failed, or a >8 h iteration outran the
+// lifetime. Both are sized to ~1 week so a week-long loop keeps its credential.
+// These tokens are local-loopback bearers (127.0.0.1 /mcp) revoked on session
+// stop, so a long idle backstop carries negligible risk.
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1_000;
+const DEFAULT_IDLE_TIMEOUT_MS = ONE_WEEK_MS;
+const DEFAULT_MAXIMUM_LIFETIME_MS = ONE_WEEK_MS;
 
 const bytesToHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");

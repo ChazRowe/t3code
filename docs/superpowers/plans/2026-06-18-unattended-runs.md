@@ -28,6 +28,7 @@
 ## File Structure
 
 **New files:**
+
 - `packages/shared/src/unattendedRun.ts` — pure `UnattendedRunState` fold reducer + helpers (`applyUnattendedRunEvent`). Exported via subpath `@t3tools/shared/unattendedRun`.
 - `apps/server/src/orchestration/unattendedRun.ts` — server constants: `WRAP_SENTINEL`, `buildUnattendedPreamble`, `CONTINUE_MESSAGE`, `messageHasWrapSentinel`.
 - `apps/server/src/orchestration/Services/UnattendedRunReactor.ts` — reactor Service tag + shape.
@@ -38,6 +39,7 @@
 - `apps/web/src/components/chat/unattendedRunBanner.ts` — pure builder for the banner stack item + logic test.
 
 **Modified files:**
+
 - `packages/contracts/src/orchestration.ts` — domain types, commands, events, `OrchestrationThread.unattendedRun`.
 - `packages/shared/package.json` — add the `./unattendedRun` subpath export.
 - `apps/server/src/orchestration/Schemas.ts` — alias new payloads.
@@ -62,9 +64,11 @@
 ### Task 1: Unattended run domain types in contracts
 
 **Files:**
+
 - Modify: `packages/contracts/src/orchestration.ts`
 
 **Interfaces:**
+
 - Produces: `UnattendedRunStatus`, `UnattendedRunPauseReason`, `UnattendedRunOutcome`, `UNATTENDED_RUN_MAX_ITERATIONS`, `UnattendedRunState` (+ `.Type` exports). `UnattendedRunState` = `{ status, totalIterations, currentIteration, pauseReason: reason|null, startedAt, updatedAt }`.
 
 - [ ] **Step 1: Add the domain types.** Insert after the `ProviderInteractionMode` block (near line 126), mirroring the existing `Schema.Literals` / `Schema.Struct` style. Use `PositiveInt` and the `Schema.Int.check(Schema.isBetween(...))` patterns already imported via baseSchemas.
@@ -116,9 +120,11 @@ git commit -m "feat(contracts): add UnattendedRunState domain types"
 ### Task 2: Add `unattendedRun` to OrchestrationThread read model
 
 **Files:**
+
 - Modify: `packages/contracts/src/orchestration.ts`
 
 **Interfaces:**
+
 - Consumes: `UnattendedRunState` (Task 1).
 - Produces: `OrchestrationThread.unattendedRun: UnattendedRunState | null`.
 
@@ -148,9 +154,11 @@ git commit -m "feat(contracts): add unattendedRun field to OrchestrationThread"
 ### Task 3: Unattended run commands in contracts
 
 **Files:**
+
 - Modify: `packages/contracts/src/orchestration.ts`
 
 **Interfaces:**
+
 - Produces: 4 client commands + 3 internal commands, all wired into the relevant unions. Field shapes:
   - start: `{ type, commandId, threadId, totalIterations, createdAt }`
   - pause/resume/stop/advance/complete: `{ type, commandId, threadId, createdAt }`
@@ -237,9 +245,11 @@ git commit -m "feat(contracts): add unattended run commands"
 ### Task 4: Unattended run events in contracts
 
 **Files:**
+
 - Modify: `packages/contracts/src/orchestration.ts`
 
 **Interfaces:**
+
 - Produces: 5 event-type literals, 5 payload schemas, 5 `OrchestrationEvent` union members.
   - started payload: `{ threadId, totalIterations, startedAt, updatedAt }`
   - iteration-advanced payload: `{ threadId, iteration, updatedAt }`
@@ -333,9 +343,11 @@ git commit -m "feat(contracts): add unattended run events"
 ### Task 5: Alias new payloads in server Schemas.ts
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Schemas.ts`
 
 **Interfaces:**
+
 - Produces: server-internal aliases mirroring the contract payloads (used by decider/projector for decoding).
 
 - [ ] **Step 1: Import + alias.** Add the five payloads to the import from `@t3tools/contracts` and re-export them, mirroring the existing alias lines (e.g. `ThreadRuntimeModeSetPayload`).
@@ -376,11 +388,13 @@ git commit -m "feat(server): alias unattended run payloads"
 ### Task 6: Pure `applyUnattendedRunEvent` reducer in shared
 
 **Files:**
+
 - Create: `packages/shared/src/unattendedRun.ts`
 - Modify: `packages/shared/package.json`
 - Test: `packages/shared/src/unattendedRun.test.ts`
 
 **Interfaces:**
+
 - Produces: `applyUnattendedRunEvent(current: UnattendedRunState | null, event: OrchestrationEvent): UnattendedRunState | null`. Pure; ignores non-unattended events (returns `current` unchanged). This is the single fold used by the in-memory projector, the SQL projection, and the web store.
 
 - [ ] **Step 1: Write the failing test.**
@@ -405,7 +419,7 @@ const base = {
 } as const;
 
 const ev = (type: string, payload: unknown): OrchestrationEvent =>
-  ({ ...base, type, payload } as unknown as OrchestrationEvent);
+  ({ ...base, type, payload }) as unknown as OrchestrationEvent;
 
 describe("applyUnattendedRunEvent", () => {
   it("starts a run at iteration 1, status running", () => {
@@ -608,10 +622,12 @@ git commit -m "feat(shared): pure unattended run fold reducer"
 ### Task 7: Server constants — sentinel & prompts
 
 **Files:**
+
 - Create: `apps/server/src/orchestration/unattendedRun.ts`
 - Test: `apps/server/src/orchestration/unattendedRun.test.ts`
 
 **Interfaces:**
+
 - Produces: `WRAP_SENTINEL: string`, `messageHasWrapSentinel(text: string): boolean`, `buildUnattendedPreamble(totalIterations: number): string`, `CONTINUE_MESSAGE: string`.
 
 - [ ] **Step 1: Write the failing test.**
@@ -664,8 +680,7 @@ Expected: FAIL — module not found.
 export const WRAP_SENTINEL = "<<WRAP_COMPLETE>>";
 
 /** True when the agent's final message signals a completed wrap. */
-export const messageHasWrapSentinel = (text: string): boolean =>
-  text.includes(WRAP_SENTINEL);
+export const messageHasWrapSentinel = (text: string): boolean => text.includes(WRAP_SENTINEL);
 
 /** Message that opens iteration 1 and sets the unattended contract. */
 export const buildUnattendedPreamble = (totalIterations: number): string =>
@@ -710,10 +725,12 @@ git commit -m "feat(server): unattended run sentinel and prompt constants"
 ### Task 8: Decider cases for the 7 unattended commands
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/decider.ts`
 - Test: `apps/server/src/orchestration/decider.unattendedRun.test.ts`
 
 **Interfaces:**
+
 - Consumes: `requireThread`, `withEventBase`, `nowIso`, `OrchestrationCommandInvariantError` (already in `decider.ts`); `applyUnattendedRunEvent` is NOT used here (decider validates against the read model's `thread.unattendedRun`).
 - Produces: each command emits exactly one event. Invariants:
   - `start`: thread has no active (`running`/`paused`) run → emit `started`.
@@ -728,7 +745,14 @@ git commit -m "feat(server): unattended run sentinel and prompt constants"
 
 ```ts
 // apps/server/src/orchestration/decider.unattendedRun.test.ts
-import { CommandId, EventId, ProjectId, ThreadId, ProviderInstanceId, DEFAULT_PROVIDER_INTERACTION_MODE } from "@t3tools/contracts";
+import {
+  CommandId,
+  EventId,
+  ProjectId,
+  ThreadId,
+  ProviderInstanceId,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+} from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -744,27 +768,68 @@ const asEventId = (s: string) => EventId.make(s);
 const seedThread = Effect.fn(function* (opts: { started?: boolean; total?: number }) {
   let model = createEmptyReadModel(now);
   model = yield* projectEvent(model, {
-    sequence: 1, eventId: asEventId("e-proj"), aggregateKind: "project",
-    aggregateId: asProjectId("p1"), type: "project.created", occurredAt: now,
-    commandId: CommandId.make("c-proj"), causationEventId: null, correlationId: null, metadata: {},
-    payload: { projectId: asProjectId("p1"), title: "P", workspaceRoot: "/tmp/p",
-      defaultModelSelection: null, scripts: [], createdAt: now, updatedAt: now },
+    sequence: 1,
+    eventId: asEventId("e-proj"),
+    aggregateKind: "project",
+    aggregateId: asProjectId("p1"),
+    type: "project.created",
+    occurredAt: now,
+    commandId: CommandId.make("c-proj"),
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    payload: {
+      projectId: asProjectId("p1"),
+      title: "P",
+      workspaceRoot: "/tmp/p",
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: now,
+      updatedAt: now,
+    },
   } as never);
   model = yield* projectEvent(model, {
-    sequence: 2, eventId: asEventId("e-thread"), aggregateKind: "thread",
-    aggregateId: asThreadId("t1"), type: "thread.created", occurredAt: now,
-    commandId: CommandId.make("c-thread"), causationEventId: null, correlationId: null, metadata: {},
-    payload: { threadId: asThreadId("t1"), projectId: asProjectId("p1"), title: "T",
+    sequence: 2,
+    eventId: asEventId("e-thread"),
+    aggregateKind: "thread",
+    aggregateId: asThreadId("t1"),
+    type: "thread.created",
+    occurredAt: now,
+    commandId: CommandId.make("c-thread"),
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    payload: {
+      threadId: asThreadId("t1"),
+      projectId: asProjectId("p1"),
+      title: "T",
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE, runtimeMode: "full-access",
-      branch: null, worktreePath: null, createdAt: now, updatedAt: now },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: "full-access",
+      branch: null,
+      worktreePath: null,
+      createdAt: now,
+      updatedAt: now,
+    },
   } as never);
   if (opts.started) {
     model = yield* projectEvent(model, {
-      sequence: 3, eventId: asEventId("e-run"), aggregateKind: "thread",
-      aggregateId: asThreadId("t1"), type: "thread.unattended-run-started", occurredAt: now,
-      commandId: null, causationEventId: null, correlationId: null, metadata: {},
-      payload: { threadId: asThreadId("t1"), totalIterations: opts.total ?? 3, startedAt: now, updatedAt: now },
+      sequence: 3,
+      eventId: asEventId("e-run"),
+      aggregateKind: "thread",
+      aggregateId: asThreadId("t1"),
+      type: "thread.unattended-run-started",
+      occurredAt: now,
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: {
+        threadId: asThreadId("t1"),
+        totalIterations: opts.total ?? 3,
+        startedAt: now,
+        updatedAt: now,
+      },
     } as never);
   }
   return model;
@@ -775,8 +840,13 @@ it.layer(NodeServices.layer)("decider unattended run", (it) => {
     Effect.gen(function* () {
       const readModel = yield* seedThread({});
       const result = yield* decideOrchestrationCommand({
-        command: { type: "thread.unattended-run.start", commandId: CommandId.make("c1"),
-          threadId: asThreadId("t1"), totalIterations: 3, createdAt: now },
+        command: {
+          type: "thread.unattended-run.start",
+          commandId: CommandId.make("c1"),
+          threadId: asThreadId("t1"),
+          totalIterations: 3,
+          createdAt: now,
+        },
         readModel,
       });
       const event = Array.isArray(result) ? result[0] : result;
@@ -790,8 +860,13 @@ it.layer(NodeServices.layer)("decider unattended run", (it) => {
       const readModel = yield* seedThread({ started: true });
       const exit = yield* Effect.exit(
         decideOrchestrationCommand({
-          command: { type: "thread.unattended-run.start", commandId: CommandId.make("c2"),
-            threadId: asThreadId("t1"), totalIterations: 2, createdAt: now },
+          command: {
+            type: "thread.unattended-run.start",
+            commandId: CommandId.make("c2"),
+            threadId: asThreadId("t1"),
+            totalIterations: 2,
+            createdAt: now,
+          },
           readModel,
         }),
       );
@@ -803,8 +878,12 @@ it.layer(NodeServices.layer)("decider unattended run", (it) => {
     Effect.gen(function* () {
       const readModel = yield* seedThread({ started: true, total: 3 });
       const result = yield* decideOrchestrationCommand({
-        command: { type: "thread.unattended-run.advance", commandId: CommandId.make("c3"),
-          threadId: asThreadId("t1"), createdAt: now },
+        command: {
+          type: "thread.unattended-run.advance",
+          commandId: CommandId.make("c3"),
+          threadId: asThreadId("t1"),
+          createdAt: now,
+        },
         readModel,
       });
       const event = Array.isArray(result) ? result[0] : result;
@@ -817,8 +896,13 @@ it.layer(NodeServices.layer)("decider unattended run", (it) => {
     Effect.gen(function* () {
       const readModel = yield* seedThread({ started: true });
       const result = yield* decideOrchestrationCommand({
-        command: { type: "thread.unattended-run.fault", commandId: CommandId.make("c4"),
-          threadId: asThreadId("t1"), reason: "no-sentinel", createdAt: now },
+        command: {
+          type: "thread.unattended-run.fault",
+          commandId: CommandId.make("c4"),
+          threadId: asThreadId("t1"),
+          reason: "no-sentinel",
+          createdAt: now,
+        },
         readModel,
       });
       const event = Array.isArray(result) ? result[0] : result;
@@ -831,8 +915,12 @@ it.layer(NodeServices.layer)("decider unattended run", (it) => {
     Effect.gen(function* () {
       const readModel = yield* seedThread({ started: true });
       const result = yield* decideOrchestrationCommand({
-        command: { type: "thread.unattended-run.complete", commandId: CommandId.make("c5"),
-          threadId: asThreadId("t1"), createdAt: now },
+        command: {
+          type: "thread.unattended-run.complete",
+          commandId: CommandId.make("c5"),
+          threadId: asThreadId("t1"),
+          createdAt: now,
+        },
         readModel,
       });
       const event = Array.isArray(result) ? result[0] : result;
@@ -967,10 +1055,12 @@ git commit -m "feat(server): decide unattended run commands into events"
 ### Task 9: Project unattended events into the in-memory read model
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/projector.ts`
 - Test: `apps/server/src/orchestration/projector.test.ts` (add cases)
 
 **Interfaces:**
+
 - Consumes: `applyUnattendedRunEvent` from `@t3tools/shared/unattendedRun`.
 - Produces: `thread.created` initializes `unattendedRun: null`; the 5 unattended events update it via the shared reducer.
 
@@ -980,34 +1070,70 @@ git commit -m "feat(server): decide unattended run commands into events"
 it("projects an unattended run lifecycle onto the thread", async () => {
   const now = "2026-01-01T00:00:00.000Z";
   let model = await Effect.runPromise(
-    projectEvent(createEmptyReadModel(now), makeEvent({
-      sequence: 1, type: "thread.created", aggregateKind: "thread", aggregateId: "thread-1",
-      occurredAt: now, commandId: "cmd-create",
-      payload: { threadId: "thread-1", projectId: "project-1", title: "demo",
-        modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
-        runtimeMode: "full-access", interactionMode: "default", branch: null, worktreePath: null,
-        createdAt: now, updatedAt: now } }),
+    projectEvent(
+      createEmptyReadModel(now),
+      makeEvent({
+        sequence: 1,
+        type: "thread.created",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: now,
+        commandId: "cmd-create",
+        payload: {
+          threadId: "thread-1",
+          projectId: "project-1",
+          title: "demo",
+          modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
     ),
   );
   expect(model.threads[0]?.unattendedRun).toBe(null);
 
   model = await Effect.runPromise(
-    projectEvent(model, makeEvent({
-      sequence: 2, type: "thread.unattended-run-started", aggregateKind: "thread",
-      aggregateId: "thread-1", occurredAt: now, commandId: null,
-      payload: { threadId: "thread-1", totalIterations: 4, startedAt: now, updatedAt: now } }),
+    projectEvent(
+      model,
+      makeEvent({
+        sequence: 2,
+        type: "thread.unattended-run-started",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: now,
+        commandId: null,
+        payload: { threadId: "thread-1", totalIterations: 4, startedAt: now, updatedAt: now },
+      }),
     ),
   );
-  expect(model.threads[0]?.unattendedRun).toMatchObject({ status: "running", totalIterations: 4, currentIteration: 1 });
+  expect(model.threads[0]?.unattendedRun).toMatchObject({
+    status: "running",
+    totalIterations: 4,
+    currentIteration: 1,
+  });
 
   model = await Effect.runPromise(
-    projectEvent(model, makeEvent({
-      sequence: 3, type: "thread.unattended-run-paused", aggregateKind: "thread",
-      aggregateId: "thread-1", occurredAt: now, commandId: null,
-      payload: { threadId: "thread-1", reason: "no-sentinel", updatedAt: now } }),
+    projectEvent(
+      model,
+      makeEvent({
+        sequence: 3,
+        type: "thread.unattended-run-paused",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: now,
+        commandId: null,
+        payload: { threadId: "thread-1", reason: "no-sentinel", updatedAt: now },
+      }),
     ),
   );
-  expect(model.threads[0]?.unattendedRun).toMatchObject({ status: "paused", pauseReason: "no-sentinel" });
+  expect(model.threads[0]?.unattendedRun).toMatchObject({
+    status: "paused",
+    pauseReason: "no-sentinel",
+  });
 });
 ```
 
@@ -1063,10 +1189,12 @@ git commit -m "feat(server): project unattended run state in-memory"
 ### Task 10: Migration — add `unattended_run` column
 
 **Files:**
+
 - Create: `apps/server/src/persistence/Migrations/NNN_ProjectionThreadsUnattendedRun.ts`
 - Modify: `apps/server/src/persistence/Migrations.ts`
 
 **Interfaces:**
+
 - Produces: a nullable `unattended_run TEXT` column on `projection_threads`.
 
 - [ ] **Step 1: Determine the next migration number.**
@@ -1115,12 +1243,14 @@ git commit -m "feat(server): migration adds projection_threads.unattended_run"
 ### Task 11: Persist & read `unattendedRun` through the thread row
 
 **Files:**
+
 - Modify: `apps/server/src/persistence/Services/ProjectionThreads.ts`
 - Modify: `apps/server/src/persistence/Layers/ProjectionThreads.ts`
 - Modify: `apps/server/src/orchestration/Layers/ProjectionPipeline.ts`
 - Modify: `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts`
 
 **Interfaces:**
+
 - Consumes: `applyUnattendedRunEvent` from `@t3tools/shared/unattendedRun`, `UnattendedRunState` from contracts.
 - Produces: the `unattended_run` column round-trips into `OrchestrationThread.unattendedRun` from both `getSnapshot` and `getThreadDetailById`.
 
@@ -1194,12 +1324,14 @@ git commit -m "feat(server): persist unattended run state on projection_threads"
 ### Task 12: UnattendedRunReactor — service + skeleton wiring
 
 **Files:**
+
 - Create: `apps/server/src/orchestration/Services/UnattendedRunReactor.ts`
 - Create: `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`
 - Modify: `apps/server/src/orchestration/Layers/OrchestrationReactor.ts`
 - Modify: `apps/server/src/server.ts`
 
 **Interfaces:**
+
 - Produces: `UnattendedRunReactor` Service tag with `{ start(): Effect<void, never, Scope>; drain: Effect<void> }`, and `UnattendedRunReactorLive` layer. Subscribes to `orchestrationEngine.streamDomainEvents`; processes via a `makeDrainableWorker`.
 
 - [ ] **Step 1: Service definition** — mirror `Services/ThreadDeletionReactor.ts`:
@@ -1274,7 +1406,9 @@ const make = Effect.gen(function* () {
 export const UnattendedRunReactorLive = Layer.effect(UnattendedRunReactor, make);
 
 // Re-exported for unit testing pure helpers added in Task 13.
-export const __test = { /* populated in Task 13 */ };
+export const __test = {
+  /* populated in Task 13 */
+};
 ```
 
 - [ ] **Step 3: Wire into `OrchestrationReactor`.** In `Layers/OrchestrationReactor.ts` add `const unattendedRunReactor = yield* UnattendedRunReactor;` and `yield* unattendedRunReactor.start();` inside `start`, plus the import.
@@ -1296,14 +1430,17 @@ git commit -m "feat(server): scaffold UnattendedRunReactor and wire it in"
 ### Task 13: Reactor loop logic
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`
 - Test: `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts`
 
 **Interfaces:**
+
 - Consumes: `messageHasWrapSentinel`, `buildUnattendedPreamble`, `CONTINUE_MESSAGE` from `../unattendedRun.ts`; `MessageId` from contracts; `ProjectionSnapshotQuery.getThreadDetailById`; `orchestrationEngine.dispatch`.
 - Produces: the full state machine described below.
 
 **Loop rules (implement exactly):**
+
 1. `thread.turn-start-requested` → `latestAssistantText.set(threadId, "")`.
 2. `thread.message-sent` with `role === "assistant"` → append `payload.text` to `latestAssistantText[threadId]`.
 3. `thread.unattended-run-started` → read thread (snapshot), dispatch a `thread.turn.start` whose message text is `buildUnattendedPreamble(totalIterations)`, with a fresh `MessageId`, passing the thread's `runtimeMode`/`interactionMode`.
@@ -1351,7 +1488,7 @@ Write `UnattendedRunReactor.test.ts` with a `describe("decideTurnEndAction")` bl
 Run: `cd /home/chaz/projects/t3code/apps/server && vp test run src/orchestration/Layers/UnattendedRunReactor.test.ts`
 Expected: FAIL — `decideTurnEndAction` not exported.
 
-- [ ] **Step 3: Implement `decideTurnEndAction` + the full `processEvent`.** Replace the placeholder `processEvent` with a `switch (event.type)` implementing rules 1-6, using `decideTurnEndAction` for the `thread.session-set` branch. Use `serverCommandId(tag)` + `orchestrationEngine.dispatch({...})` for every command; generate message ids with `MessageId.make(\`unattended:${uuid}\`)` via `crypto.randomUUIDv4`. Read the thread via `projectionSnapshotQuery.getThreadDetailById(threadId)` (returns `Option<OrchestrationThread>`; use `Option.getOrUndefined`). Populate the exported `__test` object with `{ decideTurnEndAction }`.
+- [ ] **Step 3: Implement `decideTurnEndAction` + the full `processEvent`.** Replace the placeholder `processEvent` with a `switch (event.type)` implementing rules 1-6, using `decideTurnEndAction` for the `thread.session-set` branch. Use `serverCommandId(tag)` + `orchestrationEngine.dispatch({...})` for every command; generate message ids with `MessageId.make(\`unattended:${uuid}\`)`via`crypto.randomUUIDv4`. Read the thread via `projectionSnapshotQuery.getThreadDetailById(threadId)`(returns`Option<OrchestrationThread>`; use `Option.getOrUndefined`). Populate the exported `\_\_test`object with`{ decideTurnEndAction }`.
 
 - [ ] **Step 4: Run the pure test to confirm it passes.**
 
@@ -1381,13 +1518,15 @@ git commit -m "feat(server): unattended run reactor loop (sentinel -> clear -> c
 ### Task 14: Rehydrate active runs on startup
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`
 - Test: `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts` (add case)
 
 **Interfaces:**
+
 - Produces: on `start()`, before subscribing, the reactor reads the snapshot and, for each thread with `unattendedRun.status === "running"` whose session is not currently `running`, dispatches a `CONTINUE_MESSAGE` turn to resume the current iteration. (`streamDomainEvents` is new-events-only, so without this a run silently stalls after a restart.)
 
-- [ ] **Step 1: Write the failing test.** Build a harness where the persisted read model already has a thread with `unattendedRun.status === "running"` and an idle session (dispatch the events, then create a *fresh* reactor instance against the same persistence and call `start()`). Assert a continue turn is issued on start. (If reusing one runtime is simpler, assert that calling `start()` with a pre-seeded running run triggers a `thread.turn.start`.)
+- [ ] **Step 1: Write the failing test.** Build a harness where the persisted read model already has a thread with `unattendedRun.status === "running"` and an idle session (dispatch the events, then create a _fresh_ reactor instance against the same persistence and call `start()`). Assert a continue turn is issued on start. (If reusing one runtime is simpler, assert that calling `start()` with a pre-seeded running run triggers a `thread.turn.start`.)
 
 - [ ] **Step 2: Run it to confirm it fails.**
 
@@ -1397,14 +1536,15 @@ Expected: FAIL — no resume turn issued on start.
 - [ ] **Step 3: Implement rehydration** at the top of `start`, before `Effect.forkScoped(...)`:
 
 ```ts
-    const snapshot = yield* projectionSnapshotQuery.getSnapshot();
-    yield* Effect.forEach(
-      snapshot.threads.filter(
-        (t) => t.unattendedRun?.status === "running" && t.session?.status !== "running",
-      ),
-      (thread) => issueContinueTurn(thread),
-      { concurrency: 1, discard: true },
-    );
+const snapshot = yield * projectionSnapshotQuery.getSnapshot();
+yield *
+  Effect.forEach(
+    snapshot.threads.filter(
+      (t) => t.unattendedRun?.status === "running" && t.session?.status !== "running",
+    ),
+    (thread) => issueContinueTurn(thread),
+    { concurrency: 1, discard: true },
+  );
 ```
 
 where `issueContinueTurn(thread)` is the same helper used by rule 6 (resume). Guard against double-issue by only resuming threads whose session is not `running`.
@@ -1442,11 +1582,13 @@ git commit -m "chore(server): green check after unattended run server work"
 ### Task 16: Web Thread type + store reducers
 
 **Files:**
+
 - Modify: `apps/web/src/types.ts`
 - Modify: `apps/web/src/store.ts`
 - Test: `apps/web/src/store.unattendedRun.test.ts` (new) — if the store has no existing test, add one; otherwise append to the existing store test.
 
 **Interfaces:**
+
 - Consumes: `applyUnattendedRunEvent` from `@t3tools/shared/unattendedRun`, `UnattendedRunState` from `@t3tools/contracts`.
 - Produces: `Thread.unattendedRun: UnattendedRunState | null`; the store folds the 5 events.
 
@@ -1460,7 +1602,7 @@ Expected: FAIL.
 - [ ] **Step 3: Add the type field.** In `types.ts` `Thread` interface add:
 
 ```ts
-  unattendedRun: UnattendedRunState | null;
+unattendedRun: UnattendedRunState | null;
 ```
 
 Import `UnattendedRunState` from `@t3tools/contracts`. Initialize it to `null` wherever a `Thread` is constructed from a `thread.created`/snapshot (search `store.ts` for the thread-created reducer and the snapshot hydration; set `unattendedRun: thread.unattendedRun ?? null`).
@@ -1497,25 +1639,30 @@ git commit -m "feat(web): track unattended run state in the store"
 ### Task 17: Web command senders
 
 **Files:**
+
 - Modify: `apps/web/src/hooks/useThreadActions.ts` (or the nearest existing hook that already sends `thread.session.stop` — keep them together)
 
 **Interfaces:**
+
 - Produces: `startUnattendedRun(threadRef, totalIterations)`, `pauseUnattendedRun(threadRef)`, `resumeUnattendedRun(threadRef)`, `stopUnattendedRun(threadRef)`, each calling `api.orchestration.dispatchCommand` with `newCommandId()` and `new Date().toISOString()`, mirroring the existing `thread.session.stop` sender.
 
 - [ ] **Step 1: Implement the four senders** next to the existing session-stop sender:
 
 ```ts
-const startUnattendedRun = useCallback(async (totalIterations: number) => {
-  const api = readEnvironmentApi(environmentId);
-  if (!api) return;
-  await api.orchestration.dispatchCommand({
-    type: "thread.unattended-run.start",
-    commandId: newCommandId(),
-    threadId: threadRef.threadId,
-    totalIterations,
-    createdAt: new Date().toISOString(),
-  });
-}, [environmentId, threadRef.threadId]);
+const startUnattendedRun = useCallback(
+  async (totalIterations: number) => {
+    const api = readEnvironmentApi(environmentId);
+    if (!api) return;
+    await api.orchestration.dispatchCommand({
+      type: "thread.unattended-run.start",
+      commandId: newCommandId(),
+      threadId: threadRef.threadId,
+      totalIterations,
+      createdAt: new Date().toISOString(),
+    });
+  },
+  [environmentId, threadRef.threadId],
+);
 // pause / resume / stop identical but with their type strings and no totalIterations
 ```
 
@@ -1538,9 +1685,11 @@ git commit -m "feat(web): dispatch unattended run commands"
 ### Task 18: Start dialog
 
 **Files:**
+
 - Create: `apps/web/src/components/chat/UnattendedRunDialog.tsx`
 
 **Interfaces:**
+
 - Produces: `UnattendedRunDialog({ open, onOpenChange, onConfirm })` where `onConfirm(totalIterations: number)`. Uses `AlertDialog` + `NumberField` (min 1, max `UNATTENDED_RUN_MAX_ITERATIONS`), defaulting to a sensible value (e.g. 5). Shows a short note that the agent must end each wrap with the sentinel.
 
 - [ ] **Step 1: Implement the dialog** using the `AlertDialog` + `NumberField` template (see `ProjectScriptsControl.tsx` for dialog usage and `ui/number-field.tsx` for the input). Clamp the value to `[1, UNATTENDED_RUN_MAX_ITERATIONS]` before calling `onConfirm`.
@@ -1560,10 +1709,12 @@ git commit -m "feat(web): unattended run start dialog"
 ### Task 19: Menu item to open the dialog
 
 **Files:**
+
 - Modify: `apps/web/src/components/chat/CompactComposerControlsMenu.tsx`
 - Modify: `apps/web/src/components/chat/ChatComposer.tsx`
 
 **Interfaces:**
+
 - Consumes: a new `onStartUnattendedRun: () => void` prop + a `canStartUnattendedRun: boolean` prop on `CompactComposerControlsMenu`.
 - Produces: a "Start unattended run…" `MenuItem`, disabled when a run is already active or a turn is running.
 
@@ -1596,11 +1747,13 @@ git commit -m "feat(web): start-unattended-run menu item"
 ### Task 20: Status banner + dialog mount + handlers
 
 **Files:**
+
 - Create: `apps/web/src/components/chat/unattendedRunBanner.ts`
 - Test: `apps/web/src/components/chat/unattendedRunBanner.test.ts`
 - Modify: `apps/web/src/components/ChatView.tsx`
 
 **Interfaces:**
+
 - Produces: `buildUnattendedRunBannerItem(input: { run: UnattendedRunState; onPause; onResume; onStop }): ComposerBannerStackItem | null` — a pure builder returning the banner item (variant `info` when running, `warning` when paused) or `null` when the run is terminal/absent.
 
 - [ ] **Step 1: Write the failing test** for the pure builder:
@@ -1616,23 +1769,46 @@ const handlers = { onPause: noop, onResume: noop, onStop: noop };
 describe("buildUnattendedRunBannerItem", () => {
   it("returns an info banner while running", () => {
     const item = buildUnattendedRunBannerItem({
-      run: { status: "running", totalIterations: 3, currentIteration: 2, pauseReason: null, startedAt: "x", updatedAt: "x" },
+      run: {
+        status: "running",
+        totalIterations: 3,
+        currentIteration: 2,
+        pauseReason: null,
+        startedAt: "x",
+        updatedAt: "x",
+      },
       ...handlers,
     });
     expect(item?.variant).toBe("info");
   });
   it("returns a warning banner when paused", () => {
     const item = buildUnattendedRunBannerItem({
-      run: { status: "paused", totalIterations: 3, currentIteration: 2, pauseReason: "no-sentinel", startedAt: "x", updatedAt: "x" },
+      run: {
+        status: "paused",
+        totalIterations: 3,
+        currentIteration: 2,
+        pauseReason: "no-sentinel",
+        startedAt: "x",
+        updatedAt: "x",
+      },
       ...handlers,
     });
     expect(item?.variant).toBe("warning");
   });
   it("returns null for terminal runs", () => {
-    expect(buildUnattendedRunBannerItem({
-      run: { status: "completed", totalIterations: 3, currentIteration: 3, pauseReason: null, startedAt: "x", updatedAt: "x" },
-      ...handlers,
-    })).toBeNull();
+    expect(
+      buildUnattendedRunBannerItem({
+        run: {
+          status: "completed",
+          totalIterations: 3,
+          currentIteration: 3,
+          pauseReason: null,
+          startedAt: "x",
+          updatedAt: "x",
+        },
+        ...handlers,
+      }),
+    ).toBeNull();
   });
 });
 ```

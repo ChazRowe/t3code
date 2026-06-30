@@ -112,7 +112,10 @@ const make = Effect.gen(function* () {
 
   const effectiveSentinel = (cfg: UnattendedRunSettings): string => cfg.sentinel || WRAP_SENTINEL;
 
-  const buildContinueText = (cfg: UnattendedRunSettings, appendedMessage: string | null): string => {
+  const buildContinueText = (
+    cfg: UnattendedRunSettings,
+    appendedMessage: string | null,
+  ): string => {
     const base = cfg.continueMessage || CONTINUE_MESSAGE;
     return appendedMessage ? `${base}\n\n${appendedMessage}` : base;
   };

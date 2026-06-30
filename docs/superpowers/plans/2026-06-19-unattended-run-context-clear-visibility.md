@@ -22,10 +22,12 @@
 ### Task 1: Preamble wrap budget
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/unattendedRun.ts` (`buildUnattendedPreamble`)
 - Test: `apps/server/src/orchestration/unattendedRun.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: no new exports; `buildUnattendedPreamble(totalIterations)` output now contains the wrap-budget paragraph.
 
@@ -34,11 +36,11 @@
 Add inside the existing `describe("unattended run constants", ...)` block in `apps/server/src/orchestration/unattendedRun.test.ts`:
 
 ```ts
-  it("preamble states a ~35% wrap-budget ceiling", () => {
-    const preamble = buildUnattendedPreamble(5);
-    expect(preamble).toContain("35%");
-    expect(preamble.toLowerCase()).toContain("ceiling");
-  });
+it("preamble states a ~35% wrap-budget ceiling", () => {
+  const preamble = buildUnattendedPreamble(5);
+  expect(preamble).toContain("35%");
+  expect(preamble.toLowerCase()).toContain("ceiling");
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -92,10 +94,12 @@ git commit -m "feat(orchestration): give unattended runs a ~35% wrap-budget ceil
 ### Task 2: Marker kind constants + summary formatters
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/unattendedRun.ts`
 - Test: `apps/server/src/orchestration/unattendedRun.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces (exact exports the reactor will import in Tasks 3–4):
   - `CONTEXT_CLEARED_ACTIVITY_KIND = "unattended.context-cleared"` (string const)
@@ -223,10 +227,12 @@ git commit -m "feat(orchestration): add context-clear marker kinds and summary f
 ### Task 3: Reactor tracks usage and emits the before-marker on clear
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`
 - Test: `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CONTEXT_CLEARED_ACTIVITY_KIND`, `buildContextClearedSummary` from `../unattendedRun.ts`; `EventId` from `@t3tools/contracts`.
 - Produces (used by Task 4, same file): the module-private `latestContextUsage` map, `awaitingFreshContextReading` map, `readContextWindowUsage(payload)` helper, and `appendMarker(threadId, kind, summary, payload)` effect.
 
@@ -235,27 +241,27 @@ git commit -m "feat(orchestration): add context-clear marker kinds and summary f
 In `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts`, add `EventId` to the `@t3tools/contracts` import if not already present (Task from the awaiting-input fix already added it — confirm it's there). Then add this helper inside `setupHarness`, next to `emitUserInputRequested`, and include it in the returned object:
 
 ```ts
-  // Emit a `context-window.updated` activity the way the provider does as token
-  // usage is reported during a turn.
-  const emitContextWindowUpdated = (label: string, usedTokens: number, maxTokens: number) =>
-    Effect.gen(function* () {
-      yield* engine.dispatch({
-        type: "thread.activity.append",
-        commandId: CommandId.make(`cmd-ctx-${label}`),
-        threadId,
-        activity: {
-          id: EventId.make(`ctx-${label}`),
-          tone: "info",
-          kind: "context-window.updated",
-          summary: "Context window updated",
-          payload: { usedTokens, maxTokens },
-          turnId: null,
-          createdAt: now,
-        },
+// Emit a `context-window.updated` activity the way the provider does as token
+// usage is reported during a turn.
+const emitContextWindowUpdated = (label: string, usedTokens: number, maxTokens: number) =>
+  Effect.gen(function* () {
+    yield* engine.dispatch({
+      type: "thread.activity.append",
+      commandId: CommandId.make(`cmd-ctx-${label}`),
+      threadId,
+      activity: {
+        id: EventId.make(`ctx-${label}`),
+        tone: "info",
+        kind: "context-window.updated",
+        summary: "Context window updated",
+        payload: { usedTokens, maxTokens },
+        turnId: null,
         createdAt: now,
-      });
-      yield* reactor.drain;
+      },
+      createdAt: now,
     });
+    yield* reactor.drain;
+  });
 ```
 
 Add `emitContextWindowUpdated` to the `return { ... }` object at the end of `setupHarness`.
@@ -296,89 +302,90 @@ In `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`:
 (b) Next to the existing `latestAssistantText` / `sawRunningSinceTurnStart` maps, add:
 
 ```ts
-  // Per-thread latest reported context-window usage (from `context-window.updated`
-  // activities), used to label the context-clear markers.
-  const latestContextUsage = new Map<string, { usedTokens: number; maxTokens: number }>();
-  // Per-thread flag: a clear just happened and we still owe a "fresh" marker for
-  // the next context-window reading.
-  const awaitingFreshContextReading = new Map<string, boolean>();
+// Per-thread latest reported context-window usage (from `context-window.updated`
+// activities), used to label the context-clear markers.
+const latestContextUsage = new Map<string, { usedTokens: number; maxTokens: number }>();
+// Per-thread flag: a clear just happened and we still owe a "fresh" marker for
+// the next context-window reading.
+const awaitingFreshContextReading = new Map<string, boolean>();
 ```
 
 (c) Add a fresh `EventId` generator next to `freshMessageId`:
 
 ```ts
-  const freshEventId = crypto.randomUUIDv4.pipe(Effect.map((uuid) => EventId.make(uuid)));
+const freshEventId = crypto.randomUUIDv4.pipe(Effect.map((uuid) => EventId.make(uuid)));
 ```
 
 (d) Add the usage reader and the best-effort marker append helper (place them above `clearAndContinue`):
 
 ```ts
-  const readContextWindowUsage = (
-    payload: unknown,
-  ): { usedTokens: number; maxTokens: number } | undefined => {
-    if (payload === null || typeof payload !== "object") return undefined;
-    const record = payload as Record<string, unknown>;
-    const usedTokens = record.usedTokens;
-    const maxTokens = record.maxTokens;
-    if (typeof usedTokens === "number" && typeof maxTokens === "number" && maxTokens > 0) {
-      return { usedTokens, maxTokens };
-    }
-    return undefined;
-  };
+const readContextWindowUsage = (
+  payload: unknown,
+): { usedTokens: number; maxTokens: number } | undefined => {
+  if (payload === null || typeof payload !== "object") return undefined;
+  const record = payload as Record<string, unknown>;
+  const usedTokens = record.usedTokens;
+  const maxTokens = record.maxTokens;
+  if (typeof usedTokens === "number" && typeof maxTokens === "number" && maxTokens > 0) {
+    return { usedTokens, maxTokens };
+  }
+  return undefined;
+};
 
-  // Append a marker activity. Best-effort: a failure here must never fault or
-  // stall the run, so non-interrupt causes are logged and swallowed.
-  const appendMarker = (
-    threadId: OrchestrationThread["id"],
-    kind: string,
-    summary: string,
-    payload: unknown,
-  ) =>
-    Effect.gen(function* () {
-      yield* orchestrationEngine.dispatch({
-        type: "thread.activity.append",
-        commandId: yield* serverCommandId("unattended-marker"),
-        threadId,
-        activity: {
-          id: yield* freshEventId,
-          tone: "info",
-          kind,
-          summary,
-          payload,
-          turnId: null,
-          createdAt: yield* nowIso,
-        },
+// Append a marker activity. Best-effort: a failure here must never fault or
+// stall the run, so non-interrupt causes are logged and swallowed.
+const appendMarker = (
+  threadId: OrchestrationThread["id"],
+  kind: string,
+  summary: string,
+  payload: unknown,
+) =>
+  Effect.gen(function* () {
+    yield* orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: yield* serverCommandId("unattended-marker"),
+      threadId,
+      activity: {
+        id: yield* freshEventId,
+        tone: "info",
+        kind,
+        summary,
+        payload,
+        turnId: null,
         createdAt: yield* nowIso,
-      });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterruptsOnly(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("unattended marker append failed", { cause: Cause.pretty(cause) }),
-      ),
-    );
+      },
+      createdAt: yield* nowIso,
+    });
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause)
+        : Effect.logWarning("unattended marker append failed", { cause: Cause.pretty(cause) }),
+    ),
+  );
 ```
 
 (e) In `clearAndContinue`, between the `if (!settled) { ... }` block and the `thread.unattended-run.advance` dispatch, insert the before-marker emission and arm the fresh flag:
 
 ```ts
-      const clearedFrom = thread.unattendedRun?.currentIteration ?? 0;
-      const clearedUsage = latestContextUsage.get(thread.id);
-      yield* appendMarker(
-        thread.id,
-        CONTEXT_CLEARED_ACTIVITY_KIND,
-        buildContextClearedSummary({
-          fromIteration: clearedFrom,
-          toIteration: clearedFrom + 1,
-          ...(clearedUsage ?? {}),
-        }),
-        {
-          fromIteration: clearedFrom,
-          toIteration: clearedFrom + 1,
-          ...(clearedUsage ?? {}),
-        },
-      );
-      awaitingFreshContextReading.set(thread.id, true);
+const clearedFrom = thread.unattendedRun?.currentIteration ?? 0;
+const clearedUsage = latestContextUsage.get(thread.id);
+yield *
+  appendMarker(
+    thread.id,
+    CONTEXT_CLEARED_ACTIVITY_KIND,
+    buildContextClearedSummary({
+      fromIteration: clearedFrom,
+      toIteration: clearedFrom + 1,
+      ...(clearedUsage ?? {}),
+    }),
+    {
+      fromIteration: clearedFrom,
+      toIteration: clearedFrom + 1,
+      ...(clearedUsage ?? {}),
+    },
+  );
+awaitingFreshContextReading.set(thread.id, true);
 ```
 
 (f) Extend the existing `case "thread.activity-appended":` in `processEvent` so it records usage (the user-input.requested handling stays unchanged below it):
@@ -439,10 +446,12 @@ git commit -m "feat(orchestration): emit an inline context-cleared marker at eac
 ### Task 4: Reactor emits the one-shot fresh-context marker
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`
 - Test: `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 2's `CONTEXT_FRESH_ACTIVITY_KIND`, `buildContextFreshSummary`; Task 3's `latestContextUsage`, `awaitingFreshContextReading`, `readContextWindowUsage`, `appendMarker`.
 - Produces: nothing new.
 
@@ -487,36 +496,37 @@ Expected: FAIL — `fresh.length` is `0`.
 In `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`, add `CONTEXT_FRESH_ACTIVITY_KIND` and `buildContextFreshSummary` to the `../unattendedRun.ts` import. Then replace the `context-window.updated` branch body added in Task 3 with:
 
 ```ts
-          if (activity.kind === "context-window.updated") {
-            const usage = readContextWindowUsage(activity.payload);
-            if (!usage) {
-              return;
-            }
-            latestContextUsage.set(threadId, usage);
-            if (!awaitingFreshContextReading.get(threadId)) {
-              return;
-            }
-            const thread = yield* readThread(threadId);
-            if (thread?.unattendedRun?.status !== "running") {
-              return;
-            }
-            awaitingFreshContextReading.set(threadId, false);
-            yield* appendMarker(
-              thread.id,
-              CONTEXT_FRESH_ACTIVITY_KIND,
-              buildContextFreshSummary({
-                iteration: thread.unattendedRun.currentIteration,
-                usedTokens: usage.usedTokens,
-                maxTokens: usage.maxTokens,
-              }),
-              {
-                iteration: thread.unattendedRun.currentIteration,
-                usedTokens: usage.usedTokens,
-                maxTokens: usage.maxTokens,
-              },
-            );
-            return;
-          }
+if (activity.kind === "context-window.updated") {
+  const usage = readContextWindowUsage(activity.payload);
+  if (!usage) {
+    return;
+  }
+  latestContextUsage.set(threadId, usage);
+  if (!awaitingFreshContextReading.get(threadId)) {
+    return;
+  }
+  const thread = yield * readThread(threadId);
+  if (thread?.unattendedRun?.status !== "running") {
+    return;
+  }
+  awaitingFreshContextReading.set(threadId, false);
+  yield *
+    appendMarker(
+      thread.id,
+      CONTEXT_FRESH_ACTIVITY_KIND,
+      buildContextFreshSummary({
+        iteration: thread.unattendedRun.currentIteration,
+        usedTokens: usage.usedTokens,
+        maxTokens: usage.maxTokens,
+      }),
+      {
+        iteration: thread.unattendedRun.currentIteration,
+        usedTokens: usage.usedTokens,
+        maxTokens: usage.maxTokens,
+      },
+    );
+  return;
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -536,9 +546,11 @@ git commit -m "feat(orchestration): emit a one-shot fresh-context marker after e
 ### Task 5: Web regression test — markers render inline
 
 **Files:**
+
 - Test: `apps/web/src/session-logic.test.ts`
 
 **Interfaces:**
+
 - Consumes: `deriveWorkLogEntries` and the existing `makeActivity` test helper (already in this file).
 - Produces: nothing.
 
@@ -549,29 +561,29 @@ This task adds no production code: marker activities render through the existing
 Add inside the existing `describe("deriveWorkLogEntries", ...)` block in `apps/web/src/session-logic.test.ts`:
 
 ```ts
-  it("keeps unattended context-clear markers as visible entries", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "ctx-cleared",
-        createdAt: "2026-02-23T00:00:01.000Z",
-        kind: "unattended.context-cleared",
-        summary: "Context cleared · iteration 1 → 2 · before 517k / 1M (52%)",
-        tone: "info",
-      }),
-      makeActivity({
-        id: "ctx-fresh",
-        createdAt: "2026-02-23T00:00:02.000Z",
-        kind: "unattended.context-fresh",
-        summary: "Fresh context · iteration 2 · now 4k / 1M (0.4%)",
-        tone: "info",
-      }),
-    ];
+it("keeps unattended context-clear markers as visible entries", () => {
+  const activities: OrchestrationThreadActivity[] = [
+    makeActivity({
+      id: "ctx-cleared",
+      createdAt: "2026-02-23T00:00:01.000Z",
+      kind: "unattended.context-cleared",
+      summary: "Context cleared · iteration 1 → 2 · before 517k / 1M (52%)",
+      tone: "info",
+    }),
+    makeActivity({
+      id: "ctx-fresh",
+      createdAt: "2026-02-23T00:00:02.000Z",
+      kind: "unattended.context-fresh",
+      summary: "Fresh context · iteration 2 · now 4k / 1M (0.4%)",
+      tone: "info",
+    }),
+  ];
 
-    const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["ctx-cleared", "ctx-fresh"]);
-    expect(entries[0]?.label).toContain("Context cleared");
-    expect(entries[0]?.sourceActivityKind).toBe("unattended.context-cleared");
-  });
+  const entries = deriveWorkLogEntries(activities);
+  expect(entries.map((entry) => entry.id)).toEqual(["ctx-cleared", "ctx-fresh"]);
+  expect(entries[0]?.label).toContain("Context cleared");
+  expect(entries[0]?.sourceActivityKind).toBe("unattended.context-cleared");
+});
 ```
 
 - [ ] **Step 2: Run test to verify it passes**
@@ -602,18 +614,22 @@ Expected: 0 errors for `apps/server`, `apps/web`, `packages/contracts`. (A pre-e
 - [ ] **Step 2: Lint changed files**
 
 Run:
+
 ```bash
 pnpm exec vp lint apps/server/src/orchestration/unattendedRun.ts apps/server/src/orchestration/Layers/UnattendedRunReactor.ts
 ```
+
 Expected: exit 0.
 
 - [ ] **Step 3: Run the affected suites**
 
 Run:
+
 ```bash
 cd apps/server && pnpm exec vp test run src/orchestration/
 cd ../web && pnpm exec vp test run src/session-logic.test.ts
 ```
+
 Expected: all pass.
 
 - [ ] **Step 4: Manual smoke (optional, requires deploy)**
@@ -625,8 +641,9 @@ Expected: all pass.
 ## Self-Review
 
 **Spec coverage:**
+
 - Inline before/after markers (spec Part A) → Tasks 2, 3, 4 (formatters, before-marker, one-shot fresh-marker). ✓
-- Two *measured* markers → Task 4 reads the first post-clear usage. ✓
+- Two _measured_ markers → Task 4 reads the first post-clear usage. ✓
 - Rendering inline → Task 5 (automatic via `deriveWorkLogEntries`; test locks it in). ✓
 - Edge cases (only while running; unknown usage shows "—"/"unknown"; one-shot fresh) → Tasks 2 (unknown-usage test), 3 (`status !== "running"` guard inherited), 4 (one-shot test). ✓
 - Earlier wrap (spec Part B) → Task 1. ✓

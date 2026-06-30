@@ -4,10 +4,7 @@ import { type ChangeEvent, useEffect, useRef, useState } from "react";
 
 import { Textarea, type TextareaProps } from "./textarea";
 
-export type DraftTextareaProps = Omit<
-  TextareaProps,
-  "value" | "onChange" | "defaultValue"
-> & {
+export type DraftTextareaProps = Omit<TextareaProps, "value" | "onChange" | "defaultValue"> & {
   readonly value: string;
   readonly onCommit: (next: string) => void;
 };

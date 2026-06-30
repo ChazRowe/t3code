@@ -93,8 +93,7 @@ export function parseWorkflowRunFile(raw: unknown): WorkflowRunSnapshot {
     if (e.type === "workflow_agent" && typeof e.agentId === "string") {
       agents.push({
         agentId: e.agentId,
-        label:
-          typeof e.label === "string" && e.label.length > 0 ? e.label : e.agentId,
+        label: typeof e.label === "string" && e.label.length > 0 ? e.label : e.agentId,
         model: typeof e.model === "string" ? e.model : undefined,
         tokens: typeof e.tokens === "number" ? e.tokens : undefined,
         phase: currentPhase,
@@ -144,9 +143,7 @@ function summarizeJournalResult(result: unknown): string | undefined {
  * line always wins (terminal); a `started` line only sets status if none seen.
  * Malformed/blank lines are skipped (partial-write tolerance).
  */
-export function parseWorkflowJournalLines(
-  lines: ReadonlyArray<string>,
-): WorkflowJournalState {
+export function parseWorkflowJournalLines(lines: ReadonlyArray<string>): WorkflowJournalState {
   const statuses = new Map<string, WorkflowAgentLifecycle>();
   const resultSummaries = new Map<string, string>();
   for (const line of lines) {

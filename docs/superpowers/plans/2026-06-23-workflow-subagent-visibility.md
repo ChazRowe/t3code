@@ -4,7 +4,7 @@
 
 **Goal:** Make Claude Code `Workflow`-tool subagents (the `agent()` calls inside a workflow script) appear in t3code's session/subagent tree, where today they are completely invisible.
 
-**Architecture:** t3code only detects Claude subagents via the live Agent-SDK message stream (`message.parent_tool_use_id`), but `Workflow` `agent()` calls run in isolated sub-queries that never enter that stream. Claude *does* write their transcripts and a run journal to disk. We add a **Claude-provider-isolated disk watcher**: when a `Workflow` tool_result flows through the SDK loop (it carries `Transcript dir:` + `Run ID:` in-band), a forked fiber polls the run's on-disk files and translates each workflow agent into the existing generic `collab_agent_tool_call` nested-item events the adapter already emits for `Task` subagents. Downstream (projection → sidebar tree → watch view) and all other providers are untouched.
+**Architecture:** t3code only detects Claude subagents via the live Agent-SDK message stream (`message.parent_tool_use_id`), but `Workflow` `agent()` calls run in isolated sub-queries that never enter that stream. Claude _does_ write their transcripts and a run journal to disk. We add a **Claude-provider-isolated disk watcher**: when a `Workflow` tool_result flows through the SDK loop (it carries `Transcript dir:` + `Run ID:` in-band), a forked fiber polls the run's on-disk files and translates each workflow agent into the existing generic `collab_agent_tool_call` nested-item events the adapter already emits for `Task` subagents. Downstream (projection → sidebar tree → watch view) and all other providers are untouched.
 
 **Tech Stack:** TypeScript, Effect (`Effect`, `Fiber`, `Queue`, `Stream`), `@effect/platform` `FileSystem`/`Path`, `@effect/vitest` for tests. New pure module + edits to one adapter file.
 
@@ -29,6 +29,7 @@
 ### Verified reference facts (from real runs — do not re-derive)
 
 `Workflow` tool_result text (background launch) literally contains these lines:
+
 ```
 Workflow launched in background. Task ID: w4h1ox7dc
 Summary: <one-line summary>
@@ -39,6 +40,7 @@ Run ID: wf_adfba522-74f
 ```
 
 On-disk layout for a run (parent session dir = `<session>`):
+
 - `<session>/workflows/wf_<runId>.json` — run journal. Relevant keys: `status` (e.g. `"completed"`), `summary`, `workflowProgress` (ordered array). Each element is either `{type:"workflow_phase", index, title}` or `{type:"workflow_agent", index, label, agentId, model, tokens}`. Agents belong to the most recent preceding `workflow_phase` in array order.
 - `<session>/subagents/workflows/wf_<runId>/journal.jsonl` — live append log. Lines: `{type:"started", key, agentId}` and `{type:"result", key, agentId, result:{...}}`. (No label/model/tokens here — those only live in the `.json` above.)
 - `<session>/subagents/workflows/wf_<runId>/agent-<agentId>.jsonl` + `.meta.json` (`{"agentType":"workflow-subagent"}`) — per-agent transcript (not needed for MVP).
@@ -46,6 +48,7 @@ On-disk layout for a run (parent session dir = `<session>`):
 Path derivation: from `transcriptDir = <session>/subagents/workflows/wf_<runId>`, the run-file is `path.join(path.dirname(path.dirname(path.dirname(transcriptDir))), "workflows", `${runId}.json`)` and the journal is `path.join(transcriptDir, "journal.jsonl")`.
 
 Tree wiring (already in place — this is WHY the design works, no changes needed):
+
 - Subagent roots = `collab_agent_tool_call` activities with `parent_item_id IS NULL` (`ProjectionSnapshotQuery.ts:1050-1051`). So the top-level `Workflow` tool item, once classified `collab_agent_tool_call`, becomes a root subagent node.
 - Children = `collab_agent_tool_call` activities whose `parentItemId` equals the root's itemId (`ws.ts:175`, `ProjectionPipeline.ts:238-245`). So each workflow agent, emitted with `parentItemId = <Workflow tool itemId>`, nests under it.
 
@@ -54,10 +57,12 @@ Tree wiring (already in place — this is WHY the design works, no changes neede
 ## Task 1: Pure parser — `parseWorkflowLaunch`
 
 **Files:**
+
 - Create: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.ts`
 - Test: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces:
   - `interface WorkflowLaunch { readonly runId: string; readonly transcriptDir: string; readonly taskId: string | undefined }`
@@ -169,10 +174,12 @@ git commit -m "feat(provider): parse Workflow tool_result launch text"
 ## Task 2: Pure parser — `parseWorkflowRunFile`
 
 **Files:**
+
 - Modify: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.ts`
 - Test: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing (takes already-`JSON.parse`d `unknown`).
 - Produces:
   - `interface WorkflowAgentInfo { readonly agentId: string; readonly label: string; readonly model: string | undefined; readonly tokens: number | undefined; readonly phase: string | undefined }`
@@ -191,8 +198,22 @@ describe("parseWorkflowRunFile", () => {
     summary: "Adversarial review",
     workflowProgress: [
       { type: "workflow_phase", index: 1, title: "Review" },
-      { type: "workflow_agent", index: 1, label: "grant_adjunct-failclosed", agentId: "a1385c15bd4ffd5af", model: "claude-opus-4-8[1m]", tokens: 120436 },
-      { type: "workflow_agent", index: 2, label: "contract-backcompat", agentId: "a7a784072f116c4e6", model: "claude-opus-4-8[1m]", tokens: 82704 },
+      {
+        type: "workflow_agent",
+        index: 1,
+        label: "grant_adjunct-failclosed",
+        agentId: "a1385c15bd4ffd5af",
+        model: "claude-opus-4-8[1m]",
+        tokens: 120436,
+      },
+      {
+        type: "workflow_agent",
+        index: 2,
+        label: "contract-backcompat",
+        agentId: "a7a784072f116c4e6",
+        model: "claude-opus-4-8[1m]",
+        tokens: 82704,
+      },
     ],
   };
 
@@ -219,7 +240,12 @@ describe("parseWorkflowRunFile", () => {
 
   it("returns an empty non-terminal snapshot for malformed input", () => {
     const snapshot = parseWorkflowRunFile(undefined);
-    assert.deepEqual(snapshot, { status: undefined, terminal: false, summary: undefined, agents: [] });
+    assert.deepEqual(snapshot, {
+      status: undefined,
+      terminal: false,
+      summary: undefined,
+      agents: [],
+    });
   });
 
   it("falls back to agentId as label when label is missing", () => {
@@ -306,8 +332,7 @@ export function parseWorkflowRunFile(raw: unknown): WorkflowRunSnapshot {
     if (e.type === "workflow_agent" && typeof e.agentId === "string") {
       agents.push({
         agentId: e.agentId,
-        label:
-          typeof e.label === "string" && e.label.length > 0 ? e.label : e.agentId,
+        label: typeof e.label === "string" && e.label.length > 0 ? e.label : e.agentId,
         model: typeof e.model === "string" ? e.model : undefined,
         tokens: typeof e.tokens === "number" ? e.tokens : undefined,
         phase: currentPhase,
@@ -341,10 +366,12 @@ git commit -m "feat(provider): parse Workflow run journal into agent snapshot"
 ## Task 3: Pure parsers — `parseWorkflowJournalLines` + `mergeWorkflowAgents`
 
 **Files:**
+
 - Modify: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.ts`
 - Test: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.test.ts`
 
 **Interfaces:**
+
 - Consumes: `WorkflowRunSnapshot` (Task 2).
 - Produces:
   - `type WorkflowAgentLifecycle = "started" | "completed"`
@@ -459,9 +486,7 @@ function summarizeJournalResult(result: unknown): string | undefined {
  * line always wins (terminal); a `started` line only sets status if none seen.
  * Malformed/blank lines are skipped (partial-write tolerance).
  */
-export function parseWorkflowJournalLines(
-  lines: ReadonlyArray<string>,
-): WorkflowJournalState {
+export function parseWorkflowJournalLines(lines: ReadonlyArray<string>): WorkflowJournalState {
   const statuses = new Map<string, WorkflowAgentLifecycle>();
   const resultSummaries = new Map<string, string>();
   for (const line of lines) {
@@ -551,10 +576,12 @@ git commit -m "feat(provider): merge Workflow journal liveness with run-file age
 ## Task 4: Pure reconciler — `reconcileWorkflowAgents` + `formatWorkflowAgentLabel`
 
 **Files:**
+
 - Modify: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.ts`
 - Test: `apps/server/src/provider/Layers/ClaudeWorkflowWatch.test.ts`
 
 **Interfaces:**
+
 - Consumes: `MergedWorkflowAgent` (Task 3).
 - Produces:
   - `interface WorkflowReconcileResult { readonly toStart: ReadonlyArray<MergedWorkflowAgent>; readonly toComplete: ReadonlyArray<MergedWorkflowAgent>; readonly emitted: ReadonlySet<string> }`
@@ -577,7 +604,10 @@ describe("reconcileWorkflowAgents", () => {
 
   it("emits a start for a newly-seen started agent, no complete yet", () => {
     const r = reconcileWorkflowAgents(new Set(), [agent("a1", "started")]);
-    assert.deepEqual(r.toStart.map((a) => a.info.agentId), ["a1"]);
+    assert.deepEqual(
+      r.toStart.map((a) => a.info.agentId),
+      ["a1"],
+    );
     assert.equal(r.toComplete.length, 0);
     assert.ok(r.emitted.has("start:a1"));
     assert.ok(!r.emitted.has("done:a1"));
@@ -585,15 +615,24 @@ describe("reconcileWorkflowAgents", () => {
 
   it("emits start+complete together for an already-completed agent", () => {
     const r = reconcileWorkflowAgents(new Set(), [agent("a1", "completed")]);
-    assert.deepEqual(r.toStart.map((a) => a.info.agentId), ["a1"]);
-    assert.deepEqual(r.toComplete.map((a) => a.info.agentId), ["a1"]);
+    assert.deepEqual(
+      r.toStart.map((a) => a.info.agentId),
+      ["a1"],
+    );
+    assert.deepEqual(
+      r.toComplete.map((a) => a.info.agentId),
+      ["a1"],
+    );
   });
 
   it("does not re-emit already-emitted keys across polls", () => {
     const first = reconcileWorkflowAgents(new Set(), [agent("a1", "started")]);
     const second = reconcileWorkflowAgents(first.emitted, [agent("a1", "completed")]);
     assert.equal(second.toStart.length, 0); // start already emitted
-    assert.deepEqual(second.toComplete.map((a) => a.info.agentId), ["a1"]);
+    assert.deepEqual(
+      second.toComplete.map((a) => a.info.agentId),
+      ["a1"],
+    );
     const third = reconcileWorkflowAgents(second.emitted, [agent("a1", "completed")]);
     assert.equal(third.toStart.length, 0);
     assert.equal(third.toComplete.length, 0); // fully settled — nothing new
@@ -603,13 +642,25 @@ describe("reconcileWorkflowAgents", () => {
 describe("formatWorkflowAgentLabel", () => {
   it("prefixes the phase as a 'type: description' label when present", () => {
     assert.equal(
-      formatWorkflowAgentLabel({ agentId: "a1", label: "alpha", model: undefined, tokens: undefined, phase: "Review" }),
+      formatWorkflowAgentLabel({
+        agentId: "a1",
+        label: "alpha",
+        model: undefined,
+        tokens: undefined,
+        phase: "Review",
+      }),
       "Review: alpha",
     );
   });
   it("uses the bare label when no phase", () => {
     assert.equal(
-      formatWorkflowAgentLabel({ agentId: "a1", label: "alpha", model: undefined, tokens: undefined, phase: undefined }),
+      formatWorkflowAgentLabel({
+        agentId: "a1",
+        label: "alpha",
+        model: undefined,
+        tokens: undefined,
+        phase: undefined,
+      }),
       "alpha",
     );
   });
@@ -682,10 +733,12 @@ git commit -m "feat(provider): reconcile Workflow agents into deduped start/comp
 ## Task 5: Classify `Workflow` as a subagent container
 
 **Files:**
+
 - Modify: `apps/server/src/provider/Layers/ClaudeAdapter.ts:662-711` (`classifyToolItemType`), `apps/server/src/provider/Layers/ClaudeAdapter.ts:903-929` (`summarizeToolRequest`)
 - Test: `apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: behavior change only — `classifyToolItemType("Workflow") === "collab_agent_tool_call"`; `summarizeToolRequest("Workflow", input)` returns a readable one-liner instead of the dumped script.
 
@@ -696,71 +749,71 @@ git commit -m "feat(provider): reconcile Workflow agents into deduped start/comp
 Add this `it.effect` inside the `describe("ClaudeAdapterLive", ...)` block in `apps/server/src/provider/Layers/ClaudeAdapter.test.ts` (place it right after the existing Task-tool test near line 1350). It mirrors that test's structure exactly:
 
 ```ts
-  it.effect("classifies a top-level Workflow tool as a subagent container", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
+it.effect("classifies a top-level Workflow tool as a subagent container", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
 
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
-        Stream.runCollect,
-        Effect.forkChild,
-      );
-
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-      yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
-
-      harness.query.emit({
-        type: "stream_event",
-        session_id: "sdk-session-wf",
-        uuid: "stream-wf-1",
-        parent_tool_use_id: null,
-        event: {
-          type: "content_block_start",
-          index: 0,
-          content_block: {
-            type: "tool_use",
-            id: "wf-tool-1",
-            name: "Workflow",
-            input: { scriptPath: "/tmp/wf-understand.js" },
-          },
-        },
-      } as unknown as SDKMessage);
-
-      harness.query.emit({
-        type: "assistant",
-        session_id: "sdk-session-wf",
-        uuid: "assistant-wf-1",
-        parent_tool_use_id: null,
-        message: { id: "assistant-message-wf-1", content: [{ type: "text", text: "Launched" }] },
-      } as unknown as SDKMessage);
-
-      harness.query.emit({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        errors: [],
-        session_id: "sdk-session-wf",
-        uuid: "result-wf-1",
-      } as unknown as SDKMessage);
-
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
-      const toolStarted = runtimeEvents.find(
-        (event) => event.type === "item.started" && String(event.itemId) === "wf-tool-1",
-      );
-      assert.equal(toolStarted?.type, "item.started");
-      if (toolStarted?.type === "item.started") {
-        assert.equal(toolStarted.payload.itemType, "collab_agent_tool_call");
-        assert.equal(toolStarted.payload.detail, "Workflow: /tmp/wf-understand.js");
-      }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
+    const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 8).pipe(
+      Stream.runCollect,
+      Effect.forkChild,
     );
-  });
+
+    const session = yield* adapter.startSession({
+      threadId: THREAD_ID,
+      provider: ProviderDriverKind.make("claudeAgent"),
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
+
+    harness.query.emit({
+      type: "stream_event",
+      session_id: "sdk-session-wf",
+      uuid: "stream-wf-1",
+      parent_tool_use_id: null,
+      event: {
+        type: "content_block_start",
+        index: 0,
+        content_block: {
+          type: "tool_use",
+          id: "wf-tool-1",
+          name: "Workflow",
+          input: { scriptPath: "/tmp/wf-understand.js" },
+        },
+      },
+    } as unknown as SDKMessage);
+
+    harness.query.emit({
+      type: "assistant",
+      session_id: "sdk-session-wf",
+      uuid: "assistant-wf-1",
+      parent_tool_use_id: null,
+      message: { id: "assistant-message-wf-1", content: [{ type: "text", text: "Launched" }] },
+    } as unknown as SDKMessage);
+
+    harness.query.emit({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      errors: [],
+      session_id: "sdk-session-wf",
+      uuid: "result-wf-1",
+    } as unknown as SDKMessage);
+
+    const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+    const toolStarted = runtimeEvents.find(
+      (event) => event.type === "item.started" && String(event.itemId) === "wf-tool-1",
+    );
+    assert.equal(toolStarted?.type, "item.started");
+    if (toolStarted?.type === "item.started") {
+      assert.equal(toolStarted.payload.itemType, "collab_agent_tool_call");
+      assert.equal(toolStarted.payload.detail, "Workflow: /tmp/wf-understand.js");
+    }
+  }).pipe(
+    Effect.provideService(Random.Random, makeDeterministicRandomService()),
+    Effect.provide(harness.layer),
+  );
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -773,21 +826,21 @@ Expected: FAIL — `itemType` is `"dynamic_tool_call"` (and `detail` is the seri
 In `apps/server/src/provider/Layers/ClaudeAdapter.ts`, add a `Workflow` branch to `classifyToolItemType` immediately after the `spawn_agent`/`list_agents` block (around line 671, before the generic `if (normalized.includes("agent"))`):
 
 ```ts
-  // The Workflow tool orchestrates a fleet of agent() sub-queries. Classify it as
-  // a subagent container so it renders as a root subagent node and the workflow
-  // agents (emitted by ClaudeWorkflowWatch) can nest beneath it.
-  if (normalized === "workflow") {
-    return "collab_agent_tool_call";
-  }
+// The Workflow tool orchestrates a fleet of agent() sub-queries. Classify it as
+// a subagent container so it renders as a root subagent node and the workflow
+// agents (emitted by ClaudeWorkflowWatch) can nest beneath it.
+if (normalized === "workflow") {
+  return "collab_agent_tool_call";
+}
 ```
 
 And add a `Workflow` special case at the very top of `summarizeToolRequest` (before the `command` check around line 904) so the node detail is readable rather than the dumped script:
 
 ```ts
-  if (toolName === "Workflow") {
-    const scriptPath = typeof input.scriptPath === "string" ? input.scriptPath : undefined;
-    return scriptPath ? `Workflow: ${scriptPath}` : "Workflow: inline script";
-  }
+if (toolName === "Workflow") {
+  const scriptPath = typeof input.scriptPath === "string" ? input.scriptPath : undefined;
+  return scriptPath ? `Workflow: ${scriptPath}` : "Workflow: inline script";
+}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -807,10 +860,12 @@ git commit -m "feat(provider): render Workflow tool as a subagent container node
 ## Task 6: Watcher fiber, trigger, and teardown
 
 **Files:**
+
 - Modify: `apps/server/src/provider/Layers/ClaudeAdapter.ts` — imports (top), `ClaudeSessionContext` (`:179-221`), context construction (`:3429` declarations + `:3878-3902` literal), new `watchWorkflowRun` helper (place adjacent to `handleSubagentMessage`, after `:2733`), trigger inside `handleUserMessage` (after `:2560` `context.inFlightTools.delete(index)`), teardown in the stop path (after `:3289`).
 - Test: `apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
 **Interfaces:**
+
 - Consumes: `parseWorkflowLaunch`, `parseWorkflowRunFile`, `parseWorkflowJournalLines`, `mergeWorkflowAgents`, `reconcileWorkflowAgents`, `formatWorkflowAgentLabel`, `WorkflowLaunch` from `./ClaudeWorkflowWatch.ts`; existing in-scope: `fileSystem`, `path`, `offerRuntimeEvent`, `makeEventStamp`, `asRuntimeItemId`, `asCanonicalTurnId`, `nativeProviderRefs`, `PROVIDER`.
 - Produces: nested `collab_agent_tool_call` `item.started`/`item.completed` runtime events, itemId `<runId>:<agentId>`, `parentItemId = <Workflow tool itemId>`.
 
@@ -819,109 +874,128 @@ git commit -m "feat(provider): render Workflow tool as a subagent container node
 Add this `it.effect` to `apps/server/src/provider/Layers/ClaudeAdapter.test.ts`, right after the Task 5 test. It uses a real temp dir (the harness already provides `NodeServices.layer`, and the file already imports `mkdirSync`, `writeFileSync`, `mkdtempSync`, `os`, `path`):
 
 ```ts
-  it.effect("surfaces Workflow agents as nested subagent items via the disk watcher", () => {
-    const sessionRoot = mkdtempSync(path.join(os.tmpdir(), "t3-wf-watch-"));
-    const runId = "wf_test123";
-    const transcriptDir = path.join(sessionRoot, "subagents", "workflows", runId);
-    mkdirSync(path.join(sessionRoot, "workflows"), { recursive: true });
-    mkdirSync(transcriptDir, { recursive: true });
-    writeFileSync(
-      path.join(sessionRoot, "workflows", `${runId}.json`),
-      JSON.stringify({
-        runId,
-        status: "completed",
-        summary: "two-agent review",
-        workflowProgress: [
-          { type: "workflow_phase", index: 1, title: "Review" },
-          { type: "workflow_agent", index: 1, label: "alpha", agentId: "agentAAA", model: "claude-opus-4-8[1m]", tokens: 100 },
-          { type: "workflow_agent", index: 2, label: "beta", agentId: "agentBBB", model: "claude-opus-4-8[1m]", tokens: 200 },
-        ],
-      }),
-    );
-    writeFileSync(
-      path.join(transcriptDir, "journal.jsonl"),
-      [
-        `{"type":"started","agentId":"agentAAA"}`,
-        `{"type":"started","agentId":"agentBBB"}`,
-        `{"type":"result","agentId":"agentAAA","result":"alpha-done"}`,
-        `{"type":"result","agentId":"agentBBB","result":"beta-done"}`,
-      ].join("\n"),
-    );
-
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-
-      // Collect until both workflow-agent completions have arrived (robust to ordering).
-      let completedAgents = 0;
-      const runtimeEventsFiber = yield* Stream.takeUntil(adapter.streamEvents, (event) => {
-        if (event.type === "item.completed" && String(event.itemId).startsWith(`${runId}:`)) {
-          completedAgents += 1;
-        }
-        return completedAgents >= 2;
-      }).pipe(Stream.runCollect, Effect.forkChild);
-
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-      yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
-
-      harness.query.emit({
-        type: "stream_event",
-        session_id: "sdk-session-wf2",
-        uuid: "stream-wf2-1",
-        parent_tool_use_id: null,
-        event: {
-          type: "content_block_start",
-          index: 0,
-          content_block: { type: "tool_use", id: "wf-tool-2", name: "Workflow", input: { scriptPath: "/tmp/x.js" } },
+it.effect("surfaces Workflow agents as nested subagent items via the disk watcher", () => {
+  const sessionRoot = mkdtempSync(path.join(os.tmpdir(), "t3-wf-watch-"));
+  const runId = "wf_test123";
+  const transcriptDir = path.join(sessionRoot, "subagents", "workflows", runId);
+  mkdirSync(path.join(sessionRoot, "workflows"), { recursive: true });
+  mkdirSync(transcriptDir, { recursive: true });
+  writeFileSync(
+    path.join(sessionRoot, "workflows", `${runId}.json`),
+    JSON.stringify({
+      runId,
+      status: "completed",
+      summary: "two-agent review",
+      workflowProgress: [
+        { type: "workflow_phase", index: 1, title: "Review" },
+        {
+          type: "workflow_agent",
+          index: 1,
+          label: "alpha",
+          agentId: "agentAAA",
+          model: "claude-opus-4-8[1m]",
+          tokens: 100,
         },
-      } as unknown as SDKMessage);
-
-      harness.query.emit({
-        type: "user",
-        session_id: "sdk-session-wf2",
-        uuid: "user-wf2-1",
-        parent_tool_use_id: null,
-        message: {
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: "wf-tool-2",
-              is_error: false,
-              content: `Workflow launched in background. Task ID: tk1\nTranscript dir: ${transcriptDir}\nRun ID: ${runId}`,
-            },
-          ],
+        {
+          type: "workflow_agent",
+          index: 2,
+          label: "beta",
+          agentId: "agentBBB",
+          model: "claude-opus-4-8[1m]",
+          tokens: 200,
         },
-      } as unknown as SDKMessage);
+      ],
+    }),
+  );
+  writeFileSync(
+    path.join(transcriptDir, "journal.jsonl"),
+    [
+      `{"type":"started","agentId":"agentAAA"}`,
+      `{"type":"started","agentId":"agentBBB"}`,
+      `{"type":"result","agentId":"agentAAA","result":"alpha-done"}`,
+      `{"type":"result","agentId":"agentBBB","result":"beta-done"}`,
+    ].join("\n"),
+  );
 
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const adapter = yield* ClaudeAdapter;
 
-      const started = runtimeEvents.filter(
-        (e) => e.type === "item.started" && String(e.itemId).startsWith(`${runId}:`),
-      );
-      const completed = runtimeEvents.filter(
-        (e) => e.type === "item.completed" && String(e.itemId).startsWith(`${runId}:`),
-      );
-      assert.equal(started.length, 2, "both workflow agents should start");
-      assert.equal(completed.length, 2, "both workflow agents should complete");
-
-      const alpha = completed.find((e) => String(e.itemId) === `${runId}:agentAAA`);
-      assert.ok(alpha, "alpha completion present");
-      if (alpha?.type === "item.completed") {
-        assert.equal(alpha.payload.itemType, "collab_agent_tool_call");
-        assert.equal(alpha.payload.status, "completed");
-        assert.equal(alpha.payload.parentItemId, "wf-tool-2");
-        assert.equal(alpha.payload.detail, "Review: alpha");
+    // Collect until both workflow-agent completions have arrived (robust to ordering).
+    let completedAgents = 0;
+    const runtimeEventsFiber = yield* Stream.takeUntil(adapter.streamEvents, (event) => {
+      if (event.type === "item.completed" && String(event.itemId).startsWith(`${runId}:`)) {
+        completedAgents += 1;
       }
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => rmSync(sessionRoot, { recursive: true, force: true }))),
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
+      return completedAgents >= 2;
+    }).pipe(Stream.runCollect, Effect.forkChild);
+
+    const session = yield* adapter.startSession({
+      threadId: THREAD_ID,
+      provider: ProviderDriverKind.make("claudeAgent"),
+      runtimeMode: "full-access",
+    });
+    yield* adapter.sendTurn({ threadId: session.threadId, input: "orchestrate", attachments: [] });
+
+    harness.query.emit({
+      type: "stream_event",
+      session_id: "sdk-session-wf2",
+      uuid: "stream-wf2-1",
+      parent_tool_use_id: null,
+      event: {
+        type: "content_block_start",
+        index: 0,
+        content_block: {
+          type: "tool_use",
+          id: "wf-tool-2",
+          name: "Workflow",
+          input: { scriptPath: "/tmp/x.js" },
+        },
+      },
+    } as unknown as SDKMessage);
+
+    harness.query.emit({
+      type: "user",
+      session_id: "sdk-session-wf2",
+      uuid: "user-wf2-1",
+      parent_tool_use_id: null,
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "wf-tool-2",
+            is_error: false,
+            content: `Workflow launched in background. Task ID: tk1\nTranscript dir: ${transcriptDir}\nRun ID: ${runId}`,
+          },
+        ],
+      },
+    } as unknown as SDKMessage);
+
+    const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+    const started = runtimeEvents.filter(
+      (e) => e.type === "item.started" && String(e.itemId).startsWith(`${runId}:`),
     );
-  });
+    const completed = runtimeEvents.filter(
+      (e) => e.type === "item.completed" && String(e.itemId).startsWith(`${runId}:`),
+    );
+    assert.equal(started.length, 2, "both workflow agents should start");
+    assert.equal(completed.length, 2, "both workflow agents should complete");
+
+    const alpha = completed.find((e) => String(e.itemId) === `${runId}:agentAAA`);
+    assert.ok(alpha, "alpha completion present");
+    if (alpha?.type === "item.completed") {
+      assert.equal(alpha.payload.itemType, "collab_agent_tool_call");
+      assert.equal(alpha.payload.status, "completed");
+      assert.equal(alpha.payload.parentItemId, "wf-tool-2");
+      assert.equal(alpha.payload.detail, "Review: alpha");
+    }
+  }).pipe(
+    Effect.ensuring(Effect.sync(() => rmSync(sessionRoot, { recursive: true, force: true }))),
+    Effect.provideService(Random.Random, makeDeterministicRandomService()),
+    Effect.provide(harness.layer),
+  );
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -962,8 +1036,8 @@ In the `ClaudeSessionContext` interface (`:179`), add after `subagentNestedToolC
 In `startSession`, near the other `const ... = new Map(...)` declarations (~`:3429`, alongside `inFlightTools`), add:
 
 ```ts
-      const workflowWatchedRunIds = new Set<string>();
-      const workflowWatchers = new Map<string, Fiber.Fiber<void, never>>();
+const workflowWatchedRunIds = new Set<string>();
+const workflowWatchers = new Map<string, Fiber.Fiber<void, never>>();
 ```
 
 Then add both to the `context: ClaudeSessionContext = {...}` literal (`:3878`), after `subagentNestedToolCalls,`:
@@ -978,148 +1052,157 @@ Then add both to the `context: ClaudeSessionContext = {...}` literal (`:3878`), 
 Insert immediately after `handleSubagentMessage` ends (`:2733`), so it shares scope with `fileSystem`, `path`, `offerRuntimeEvent`, `makeEventStamp`, etc.:
 
 ```ts
-  const WORKFLOW_MAX_POLLS = 1800; // ~30 min at 1 poll/sec — backstop against a leaked fiber.
+const WORKFLOW_MAX_POLLS = 1800; // ~30 min at 1 poll/sec — backstop against a leaked fiber.
 
-  // Builds the shared item payload for a workflow agent's nested collab item. The
-  // `data` mirrors a Task subagent (toolName/input/result) so existing watch-view
-  // rendering works unchanged; phase/model/tokens ride along for v2 badge work.
-  const workflowAgentItemData = (
-    runId: string,
-    agent: { info: { agentId: string; label: string; model: string | undefined; tokens: number | undefined; phase: string | undefined }; resultSummary: string | undefined },
-    includeResult: boolean,
-  ): Record<string, unknown> => ({
-    toolName: "Workflow",
-    input: {
-      subagent_type: agent.info.phase ?? "workflow",
-      description: agent.info.label,
-      ...(agent.info.model ? { model: agent.info.model } : {}),
-    },
-    ...(includeResult ? { result: { content: agent.resultSummary ?? "" } } : {}),
-    workflowRunId: runId,
-    workflowAgentId: agent.info.agentId,
-    ...(agent.info.tokens !== undefined ? { tokens: agent.info.tokens } : {}),
+// Builds the shared item payload for a workflow agent's nested collab item. The
+// `data` mirrors a Task subagent (toolName/input/result) so existing watch-view
+// rendering works unchanged; phase/model/tokens ride along for v2 badge work.
+const workflowAgentItemData = (
+  runId: string,
+  agent: {
+    info: {
+      agentId: string;
+      label: string;
+      model: string | undefined;
+      tokens: number | undefined;
+      phase: string | undefined;
+    };
+    resultSummary: string | undefined;
+  },
+  includeResult: boolean,
+): Record<string, unknown> => ({
+  toolName: "Workflow",
+  input: {
+    subagent_type: agent.info.phase ?? "workflow",
+    description: agent.info.label,
+    ...(agent.info.model ? { model: agent.info.model } : {}),
+  },
+  ...(includeResult ? { result: { content: agent.resultSummary ?? "" } } : {}),
+  workflowRunId: runId,
+  workflowAgentId: agent.info.agentId,
+  ...(agent.info.tokens !== undefined ? { tokens: agent.info.tokens } : {}),
+});
+
+// Polls a Workflow run's on-disk files and translates each agent into nested
+// collab_agent_tool_call lifecycle events parented to the Workflow tool item.
+// Stops when the run reaches a terminal status or the poll backstop is hit.
+const watchWorkflowRun = Effect.fn("watchWorkflowRun")(function* (
+  context: ClaudeSessionContext,
+  parentToolUseId: string,
+  launch: WorkflowLaunch,
+) {
+  const sessionDir = path.dirname(path.dirname(path.dirname(launch.transcriptDir)));
+  const runFilePath = path.join(sessionDir, "workflows", `${launch.runId}.json`);
+  const journalPath = path.join(launch.transcriptDir, "journal.jsonl");
+  const parentItemId = asRuntimeItemId(parentToolUseId);
+
+  const readRunFile = fileSystem.readFileString(runFilePath).pipe(
+    Effect.map((text): unknown => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return undefined;
+      }
+    }),
+    Effect.catchAll(() => Effect.succeed(undefined as unknown)),
+  );
+  const readJournalLines = fileSystem.readFileString(journalPath).pipe(
+    Effect.map((text) => text.split("\n")),
+    Effect.catchAll(() => Effect.succeed([] as Array<string>)),
+  );
+
+  let emitted = new Set<string>();
+
+  const pollOnce = Effect.fn("watchWorkflowRun.poll")(function* () {
+    const snapshot = parseWorkflowRunFile(yield* readRunFile);
+    const journal = parseWorkflowJournalLines(yield* readJournalLines);
+    let merged = mergeWorkflowAgents(snapshot, journal);
+    // On a terminal run, force every known agent to "completed" so no nested
+    // item is left pulsing forever if its journal result line never landed.
+    if (snapshot.terminal) {
+      merged = merged.map((m) => ({ ...m, status: "completed" as const }));
+    }
+    const result = reconcileWorkflowAgents(emitted, merged);
+    emitted = new Set(result.emitted);
+
+    const turnIdPart = context.turnState
+      ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+      : {};
+
+    for (const agent of result.toStart) {
+      const stamp = yield* makeEventStamp();
+      const itemId = `${launch.runId}:${agent.info.agentId}`;
+      yield* offerRuntimeEvent({
+        type: "item.started",
+        eventId: stamp.eventId,
+        provider: PROVIDER,
+        createdAt: stamp.createdAt,
+        threadId: context.session.threadId,
+        ...turnIdPart,
+        itemId: asRuntimeItemId(itemId),
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          title: "Subagent task",
+          detail: formatWorkflowAgentLabel(agent.info),
+          data: workflowAgentItemData(launch.runId, agent, false),
+          parentItemId,
+        },
+        providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),
+        raw: {
+          source: "claude.workflow.watch",
+          method: "workflow/agent/started",
+          payload: { runId: launch.runId, agentId: agent.info.agentId },
+        },
+      });
+    }
+
+    for (const agent of result.toComplete) {
+      const stamp = yield* makeEventStamp();
+      const itemId = `${launch.runId}:${agent.info.agentId}`;
+      yield* offerRuntimeEvent({
+        type: "item.completed",
+        eventId: stamp.eventId,
+        provider: PROVIDER,
+        createdAt: stamp.createdAt,
+        threadId: context.session.threadId,
+        ...turnIdPart,
+        itemId: asRuntimeItemId(itemId),
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          title: "Subagent task",
+          detail: formatWorkflowAgentLabel(agent.info),
+          data: workflowAgentItemData(launch.runId, agent, true),
+          parentItemId,
+        },
+        providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),
+        raw: {
+          source: "claude.workflow.watch",
+          method: "workflow/agent/completed",
+          payload: { runId: launch.runId, agentId: agent.info.agentId },
+        },
+      });
+    }
+
+    return snapshot.terminal;
   });
 
-  // Polls a Workflow run's on-disk files and translates each agent into nested
-  // collab_agent_tool_call lifecycle events parented to the Workflow tool item.
-  // Stops when the run reaches a terminal status or the poll backstop is hit.
-  const watchWorkflowRun = Effect.fn("watchWorkflowRun")(function* (
-    context: ClaudeSessionContext,
-    parentToolUseId: string,
-    launch: WorkflowLaunch,
-  ) {
-    const sessionDir = path.dirname(path.dirname(path.dirname(launch.transcriptDir)));
-    const runFilePath = path.join(sessionDir, "workflows", `${launch.runId}.json`);
-    const journalPath = path.join(launch.transcriptDir, "journal.jsonl");
-    const parentItemId = asRuntimeItemId(parentToolUseId);
-
-    const readRunFile = fileSystem.readFileString(runFilePath).pipe(
-      Effect.map((text): unknown => {
-        try {
-          return JSON.parse(text);
-        } catch {
-          return undefined;
-        }
-      }),
-      Effect.catchAll(() => Effect.succeed(undefined as unknown)),
-    );
-    const readJournalLines = fileSystem.readFileString(journalPath).pipe(
-      Effect.map((text) => text.split("\n")),
-      Effect.catchAll(() => Effect.succeed([] as Array<string>)),
-    );
-
-    let emitted = new Set<string>();
-
-    const pollOnce = Effect.fn("watchWorkflowRun.poll")(function* () {
-      const snapshot = parseWorkflowRunFile(yield* readRunFile);
-      const journal = parseWorkflowJournalLines(yield* readJournalLines);
-      let merged = mergeWorkflowAgents(snapshot, journal);
-      // On a terminal run, force every known agent to "completed" so no nested
-      // item is left pulsing forever if its journal result line never landed.
-      if (snapshot.terminal) {
-        merged = merged.map((m) => ({ ...m, status: "completed" as const }));
+  const loop = (n: number): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      if (n >= WORKFLOW_MAX_POLLS) {
+        return;
       }
-      const result = reconcileWorkflowAgents(emitted, merged);
-      emitted = new Set(result.emitted);
-
-      const turnIdPart = context.turnState
-        ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
-        : {};
-
-      for (const agent of result.toStart) {
-        const stamp = yield* makeEventStamp();
-        const itemId = `${launch.runId}:${agent.info.agentId}`;
-        yield* offerRuntimeEvent({
-          type: "item.started",
-          eventId: stamp.eventId,
-          provider: PROVIDER,
-          createdAt: stamp.createdAt,
-          threadId: context.session.threadId,
-          ...turnIdPart,
-          itemId: asRuntimeItemId(itemId),
-          payload: {
-            itemType: "collab_agent_tool_call",
-            status: "inProgress",
-            title: "Subagent task",
-            detail: formatWorkflowAgentLabel(agent.info),
-            data: workflowAgentItemData(launch.runId, agent, false),
-            parentItemId,
-          },
-          providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),
-          raw: {
-            source: "claude.workflow.watch",
-            method: "workflow/agent/started",
-            payload: { runId: launch.runId, agentId: agent.info.agentId },
-          },
-        });
+      const terminal = yield* pollOnce();
+      if (terminal) {
+        return;
       }
-
-      for (const agent of result.toComplete) {
-        const stamp = yield* makeEventStamp();
-        const itemId = `${launch.runId}:${agent.info.agentId}`;
-        yield* offerRuntimeEvent({
-          type: "item.completed",
-          eventId: stamp.eventId,
-          provider: PROVIDER,
-          createdAt: stamp.createdAt,
-          threadId: context.session.threadId,
-          ...turnIdPart,
-          itemId: asRuntimeItemId(itemId),
-          payload: {
-            itemType: "collab_agent_tool_call",
-            status: "completed",
-            title: "Subagent task",
-            detail: formatWorkflowAgentLabel(agent.info),
-            data: workflowAgentItemData(launch.runId, agent, true),
-            parentItemId,
-          },
-          providerRefs: nativeProviderRefs(context, { providerItemId: itemId }),
-          raw: {
-            source: "claude.workflow.watch",
-            method: "workflow/agent/completed",
-            payload: { runId: launch.runId, agentId: agent.info.agentId },
-          },
-        });
-      }
-
-      return snapshot.terminal;
+      yield* Effect.sleep("1 second");
+      yield* loop(n + 1);
     });
 
-    const loop = (n: number): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        if (n >= WORKFLOW_MAX_POLLS) {
-          return;
-        }
-        const terminal = yield* pollOnce();
-        if (terminal) {
-          return;
-        }
-        yield* Effect.sleep("1 second");
-        yield* loop(n + 1);
-      });
-
-    yield* loop(0);
-  });
+  yield* loop(0);
+});
 ```
 
 - [ ] **Step 3e: Trigger the watcher from `handleUserMessage`**
@@ -1127,29 +1210,31 @@ Insert immediately after `handleSubagentMessage` ends (`:2733`), so it shares sc
 In `handleUserMessage`, immediately after `context.inFlightTools.delete(index);` (`:2560`), add:
 
 ```ts
-      if (tool.toolName === "Workflow" && !toolResult.isError) {
-        const launch = parseWorkflowLaunch(toolResult.text);
-        if (launch && !context.workflowWatchedRunIds.has(launch.runId)) {
-          context.workflowWatchedRunIds.add(launch.runId);
-          const parentToolUseId = tool.itemId;
-          const watcher = yield* Effect.forkDaemon(
-            watchWorkflowRun(context, parentToolUseId, launch).pipe(
-              Effect.catchAllCause((cause) =>
-                Effect.logError("Claude workflow watcher failed.", {
-                  cause,
-                  runId: launch.runId,
-                }),
-              ),
-              Effect.ensuring(
-                Effect.sync(() => {
-                  context.workflowWatchers.delete(launch.runId);
-                }),
-              ),
-            ),
-          );
-          context.workflowWatchers.set(launch.runId, watcher);
-        }
-      }
+if (tool.toolName === "Workflow" && !toolResult.isError) {
+  const launch = parseWorkflowLaunch(toolResult.text);
+  if (launch && !context.workflowWatchedRunIds.has(launch.runId)) {
+    context.workflowWatchedRunIds.add(launch.runId);
+    const parentToolUseId = tool.itemId;
+    const watcher =
+      yield *
+      Effect.forkDaemon(
+        watchWorkflowRun(context, parentToolUseId, launch).pipe(
+          Effect.catchAllCause((cause) =>
+            Effect.logError("Claude workflow watcher failed.", {
+              cause,
+              runId: launch.runId,
+            }),
+          ),
+          Effect.ensuring(
+            Effect.sync(() => {
+              context.workflowWatchers.delete(launch.runId);
+            }),
+          ),
+        ),
+      );
+    context.workflowWatchers.set(launch.runId, watcher);
+  }
+}
 ```
 
 - [ ] **Step 3f: Tear watchers down on stop**
@@ -1157,12 +1242,12 @@ In `handleUserMessage`, immediately after `context.inFlightTools.delete(index);`
 In the stop path, immediately after the `streamFiber` interrupt block (`:3289`), add:
 
 ```ts
-    for (const watcher of context.workflowWatchers.values()) {
-      if (watcher.pollUnsafe() === undefined) {
-        yield* Fiber.interrupt(watcher);
-      }
-    }
-    context.workflowWatchers.clear();
+for (const watcher of context.workflowWatchers.values()) {
+  if (watcher.pollUnsafe() === undefined) {
+    yield * Fiber.interrupt(watcher);
+  }
+}
+context.workflowWatchers.clear();
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1206,6 +1291,7 @@ Expected: PASS. Confirms no cross-adapter regression from the shared `classifyTo
 - [ ] **Step 4: Manual end-to-end verification (REQUIRED SUB-SKILL: superpowers:verification-before-completion)**
 
 Deploy to the running daemon and drive a real workflow:
+
 - `pnpm daemon:deploy` (see memory `t3code-daemon-deployment`).
 - In a Claude session inside t3code, run a small `Workflow` (e.g. 2 trivial agents).
 - Confirm in the sidebar subagent tree: a `Workflow` root node appears with each agent nested beneath it, transitioning from running → completed, labeled `"<phase>: <agent label>"`.

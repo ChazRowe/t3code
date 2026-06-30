@@ -23,31 +23,33 @@ These apply to **every** task. Exact values, copied from the approved spec (`doc
 
 ## File Structure
 
-| File | Responsibility | Tasks |
-|---|---|---|
-| `packages/contracts/src/settings.ts` | `UnattendedRunSettings` struct, `unattendedRun` on `ServerSettings` + `ServerSettingsPatch`, relocated `WRAP_SENTINEL` / `CONTINUE_MESSAGE` constants | 1 |
-| `packages/contracts/src/settings.test.ts` | Decode/defaults/patch round-trip for the new struct | 1 |
-| `apps/server/src/orchestration/unattendedRun.ts` | Re-export constants; `buildUnattendedPreamble`/`messageHasWrapSentinel` accept effective sentinel; new pure `stripSentinelLine` + `resolveAppendedLastMessage` | 1, 2, 3 |
-| `apps/server/src/orchestration/unattendedRun.test.ts` | Unit tests for the helpers above | 2, 3 |
-| `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts` | Inject `ServerSettingsService`; effective sentinel for preamble + detection; custom continue message; iteration-scoped assistant-message accumulator + append | 4, 5 |
-| `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts` | Harness `ServerSettings` override; reactor behavior tests | 4, 5 |
-| `apps/web/src/components/ui/draft-textarea.tsx` | New multiline commit-on-blur input (Enter inserts a newline, does NOT commit) | 6 |
-| `apps/web/src/components/settings/loopingSettings.ts` | Pure `preambleMissingEffectiveSentinel` warning helper | 7 |
-| `apps/web/src/components/settings/loopingSettings.test.ts` | Unit test for the warning helper | 7 |
-| `apps/web/src/components/settings/LoopingSettings.tsx` | `LoopingSettingsPanel` (4 controls + reset buttons + placeholders + warning) | 7 |
-| `apps/web/src/routes/settings.looping.tsx` | Route that renders the panel | 7 |
-| `apps/web/src/components/settings/SettingsSidebarNav.tsx` | Register the "Looping" nav item + `SettingsSectionPath` member | 7 |
+| File                                                                | Responsibility                                                                                                                                                 | Tasks   |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `packages/contracts/src/settings.ts`                                | `UnattendedRunSettings` struct, `unattendedRun` on `ServerSettings` + `ServerSettingsPatch`, relocated `WRAP_SENTINEL` / `CONTINUE_MESSAGE` constants          | 1       |
+| `packages/contracts/src/settings.test.ts`                           | Decode/defaults/patch round-trip for the new struct                                                                                                            | 1       |
+| `apps/server/src/orchestration/unattendedRun.ts`                    | Re-export constants; `buildUnattendedPreamble`/`messageHasWrapSentinel` accept effective sentinel; new pure `stripSentinelLine` + `resolveAppendedLastMessage` | 1, 2, 3 |
+| `apps/server/src/orchestration/unattendedRun.test.ts`               | Unit tests for the helpers above                                                                                                                               | 2, 3    |
+| `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`      | Inject `ServerSettingsService`; effective sentinel for preamble + detection; custom continue message; iteration-scoped assistant-message accumulator + append  | 4, 5    |
+| `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts` | Harness `ServerSettings` override; reactor behavior tests                                                                                                      | 4, 5    |
+| `apps/web/src/components/ui/draft-textarea.tsx`                     | New multiline commit-on-blur input (Enter inserts a newline, does NOT commit)                                                                                  | 6       |
+| `apps/web/src/components/settings/loopingSettings.ts`               | Pure `preambleMissingEffectiveSentinel` warning helper                                                                                                         | 7       |
+| `apps/web/src/components/settings/loopingSettings.test.ts`          | Unit test for the warning helper                                                                                                                               | 7       |
+| `apps/web/src/components/settings/LoopingSettings.tsx`              | `LoopingSettingsPanel` (4 controls + reset buttons + placeholders + warning)                                                                                   | 7       |
+| `apps/web/src/routes/settings.looping.tsx`                          | Route that renders the panel                                                                                                                                   | 7       |
+| `apps/web/src/components/settings/SettingsSidebarNav.tsx`           | Register the "Looping" nav item + `SettingsSectionPath` member                                                                                                 | 7       |
 
 ---
 
 ## Task 1: Contracts — `unattendedRun` struct + shared default constants
 
 **Files:**
+
 - Modify: `packages/contracts/src/settings.ts`
 - Modify: `apps/server/src/orchestration/unattendedRun.ts` (relocate constants; re-export)
 - Test: `packages/contracts/src/settings.test.ts`
 
 **Interfaces:**
+
 - Produces: `UnattendedRunSettings` (`{ preamble: string; continueMessage: string; sentinel: string; appendLastAgentMessage: boolean }`); `unattendedRun` field on `ServerSettings` and `ServerSettingsPatch`; `WRAP_SENTINEL: string`, `CONTINUE_MESSAGE: string` exported from `@t3tools/contracts` and re-exported from `unattendedRun.ts`.
 
 - [ ] **Step 1: Write the failing contracts test**
@@ -55,10 +57,7 @@ These apply to **every** task. Exact values, copied from the approved spec (`doc
 Append to `packages/contracts/src/settings.test.ts`:
 
 ```ts
-import {
-  CONTINUE_MESSAGE,
-  WRAP_SENTINEL,
-} from "./settings.ts";
+import { CONTINUE_MESSAGE, WRAP_SENTINEL } from "./settings.ts";
 
 describe("ServerSettings.unattendedRun", () => {
   it("defaults every field to empty/false so legacy configs decode unchanged", () => {
@@ -113,6 +112,7 @@ describe("ServerSettings.unattendedRun", () => {
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/packages/contracts && npx vp test run src/settings.test.ts
 ```
+
 Expected: FAIL — `unattendedRun` undefined / `WRAP_SENTINEL` not exported.
 
 - [ ] **Step 3: Add the constants + struct to `settings.ts`**
@@ -188,6 +188,7 @@ cd /home/chaz/projects/t3code/packages/contracts && npx vp test run src/settings
 npx tsgo --noEmit
 cd /home/chaz/projects/t3code/apps/server && npx tsgo --noEmit
 ```
+
 Expected: contracts test PASS; both typechecks clean.
 
 - [ ] **Step 6: Commit**
@@ -203,10 +204,12 @@ git commit -m "feat(contracts): add unattendedRun settings struct + share defaul
 ## Task 2: Server — effective sentinel in `buildUnattendedPreamble` + `messageHasWrapSentinel`
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/unattendedRun.ts`
 - Test: `apps/server/src/orchestration/unattendedRun.test.ts`
 
 **Interfaces:**
+
 - Consumes: `WRAP_SENTINEL` (Task 1).
 - Produces: `buildUnattendedPreamble(totalIterations: number, model?: string | null, sentinel?: string): string` (defaults `sentinel = WRAP_SENTINEL`); `messageHasWrapSentinel(text: string, sentinel?: string): boolean` (defaults `sentinel = WRAP_SENTINEL`).
 
@@ -215,20 +218,20 @@ git commit -m "feat(contracts): add unattendedRun settings struct + share defaul
 Add to the `describe("unattended run constants", ...)` block in `apps/server/src/orchestration/unattendedRun.test.ts`:
 
 ```ts
-  it("embeds a custom sentinel in the preamble when one is passed", () => {
-    const preamble = buildUnattendedPreamble(5, "gpt-5-codex", "<<DONE>>");
-    expect(preamble).toContain("<<DONE>>");
-    expect(preamble).not.toContain(WRAP_SENTINEL);
-  });
+it("embeds a custom sentinel in the preamble when one is passed", () => {
+  const preamble = buildUnattendedPreamble(5, "gpt-5-codex", "<<DONE>>");
+  expect(preamble).toContain("<<DONE>>");
+  expect(preamble).not.toContain(WRAP_SENTINEL);
+});
 
-  it("defaults the preamble sentinel to WRAP_SENTINEL when none is passed", () => {
-    expect(buildUnattendedPreamble(5)).toContain(WRAP_SENTINEL);
-  });
+it("defaults the preamble sentinel to WRAP_SENTINEL when none is passed", () => {
+  expect(buildUnattendedPreamble(5)).toContain(WRAP_SENTINEL);
+});
 
-  it("detects a custom sentinel and ignores the default when a custom one is set", () => {
-    expect(messageHasWrapSentinel("all done\n<<DONE>>", "<<DONE>>")).toBe(true);
-    expect(messageHasWrapSentinel(`all done\n${WRAP_SENTINEL}`, "<<DONE>>")).toBe(false);
-  });
+it("detects a custom sentinel and ignores the default when a custom one is set", () => {
+  expect(messageHasWrapSentinel("all done\n<<DONE>>", "<<DONE>>")).toBe(true);
+  expect(messageHasWrapSentinel(`all done\n${WRAP_SENTINEL}`, "<<DONE>>")).toBe(false);
+});
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -237,6 +240,7 @@ Add to the `describe("unattended run constants", ...)` block in `apps/server/src
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/unattendedRun.test.ts
 ```
+
 Expected: FAIL — `buildUnattendedPreamble` ignores the 3rd arg; `messageHasWrapSentinel` ignores the 2nd arg.
 
 - [ ] **Step 3: Thread the sentinel parameter through both functions**
@@ -270,6 +274,7 @@ export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/unattendedRun.test.ts
 npx tsgo --noEmit
 ```
+
 Expected: PASS; typecheck clean. (Existing one-arg calls still pass via the default.)
 
 - [ ] **Step 5: Commit**
@@ -285,10 +290,12 @@ git commit -m "feat(unattended): accept an effective sentinel in preamble + dete
 ## Task 3: Server — pure `stripSentinelLine` + `resolveAppendedLastMessage`
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/unattendedRun.ts`
 - Test: `apps/server/src/orchestration/unattendedRun.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `stripSentinelLine(text: string, sentinel: string): string` — removes any line equal to the sentinel after trimming, preserving the rest; the overall result is trimmed.
   - `resolveAppendedLastMessage(messages: readonly string[], sentinel: string): string | null` — walks `messages` backward, returns the first non-empty `stripSentinelLine` result, else `null`.
@@ -323,7 +330,10 @@ describe("stripSentinelLine", () => {
 describe("resolveAppendedLastMessage", () => {
   it("returns the latest message with its sentinel line stripped", () => {
     expect(
-      resolveAppendedLastMessage(["older", "final summary\n<<WRAP_COMPLETE>>"], "<<WRAP_COMPLETE>>"),
+      resolveAppendedLastMessage(
+        ["older", "final summary\n<<WRAP_COMPLETE>>"],
+        "<<WRAP_COMPLETE>>",
+      ),
     ).toBe("final summary");
   });
 
@@ -334,7 +344,9 @@ describe("resolveAppendedLastMessage", () => {
   });
 
   it("returns null when nothing substantive remains", () => {
-    expect(resolveAppendedLastMessage(["<<WRAP_COMPLETE>>", "   "], "<<WRAP_COMPLETE>>")).toBeNull();
+    expect(
+      resolveAppendedLastMessage(["<<WRAP_COMPLETE>>", "   "], "<<WRAP_COMPLETE>>"),
+    ).toBeNull();
   });
 
   it("returns null for an empty list", () => {
@@ -355,6 +367,7 @@ describe("resolveAppendedLastMessage", () => {
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/unattendedRun.test.ts
 ```
+
 Expected: FAIL — `stripSentinelLine` / `resolveAppendedLastMessage` not exported.
 
 - [ ] **Step 3: Implement the helpers**
@@ -400,6 +413,7 @@ export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/unattendedRun.test.ts
 npx tsgo --noEmit
 ```
+
 Expected: PASS; typecheck clean.
 
 - [ ] **Step 5: Commit**
@@ -415,10 +429,12 @@ git commit -m "feat(unattended): add stripSentinelLine + resolveAppendedLastMess
 ## Task 4: Reactor — inject `ServerSettingsService`; effective sentinel + custom preamble
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`
 - Test: `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ServerSettingsService` (`apps/server/src/serverSettings.ts`); `UnattendedRunSettings`, `DEFAULT_SERVER_SETTINGS` (`@t3tools/contracts`); `buildUnattendedPreamble`, `messageHasWrapSentinel`, `WRAP_SENTINEL` (Task 2).
 - Produces: reactor reads `unattendedRun` config fresh; the built-in preamble embeds the effective sentinel; wrap detection uses the effective sentinel; a custom non-empty `preamble` overrides the built-in. `projectionTurnHasWrapSentinel(thread, sentinel?)` gains an optional sentinel param (default `WRAP_SENTINEL`). New test harness signature: `makeTestLayer(unattendedRun?: DeepPartial<ServerSettings["unattendedRun"]>)`.
 
@@ -495,6 +511,7 @@ effectIt.effect("does not advance on the default sentinel when a custom one is c
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/Layers/UnattendedRunReactor.test.ts
 ```
+
 Expected: FAIL — the reactor ignores `unattendedRun` config (uses the built-in preamble and the default sentinel). Compilation of the harness change may also surface the missing `ServerSettingsService` provision; that resolves once Step 3 injects it.
 
 - [ ] **Step 3: Inject the service and use the effective config in the reactor**
@@ -532,60 +549,61 @@ const projectionTurnHasWrapSentinel = (
 Inside `make`, after the other service acquisitions (e.g. after `const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;`), add:
 
 ```ts
-  const serverSettingsService = yield* ServerSettingsService;
+const serverSettingsService = yield * ServerSettingsService;
 
-  // Read the unattended-run config fresh; fall back to built-in defaults if the
-  // settings read ever fails so a config error never faults a running loop.
-  const readUnattendedConfig: Effect.Effect<UnattendedRunSettings> =
-    serverSettingsService.getSettings.pipe(
-      Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
-      Effect.map((settings) => settings.unattendedRun),
-    );
+// Read the unattended-run config fresh; fall back to built-in defaults if the
+// settings read ever fails so a config error never faults a running loop.
+const readUnattendedConfig: Effect.Effect<UnattendedRunSettings> =
+  serverSettingsService.getSettings.pipe(
+    Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+    Effect.map((settings) => settings.unattendedRun),
+  );
 
-  const effectiveSentinel = (cfg: UnattendedRunSettings): string => cfg.sentinel || WRAP_SENTINEL;
+const effectiveSentinel = (cfg: UnattendedRunSettings): string => cfg.sentinel || WRAP_SENTINEL;
 ```
 
 In `handleSessionSet`, after the `run.status !== "running"` guard and before computing `hasSentinel`, read the config and compute the effective sentinel:
 
 ```ts
-    const cfg = yield* readUnattendedConfig;
-    const sentinel = effectiveSentinel(cfg);
+const cfg = yield * readUnattendedConfig;
+const sentinel = effectiveSentinel(cfg);
 ```
 
 Change the `hasSentinel` computation to pass the effective sentinel to both detectors:
 
 ```ts
-    const hasSentinel =
-      messageHasWrapSentinel(latestAssistantText.get(threadId) ?? "", sentinel) ||
-      projectionTurnHasWrapSentinel(thread, sentinel);
+const hasSentinel =
+  messageHasWrapSentinel(latestAssistantText.get(threadId) ?? "", sentinel) ||
+  projectionTurnHasWrapSentinel(thread, sentinel);
 ```
 
 In the `thread.unattended-run-started` case (in `processEvent`), read the config and choose the preamble. Replace the `text: buildUnattendedPreamble(...)` block with:
 
 ```ts
-          const cfg = yield* readUnattendedConfig;
-          const preambleText =
-            cfg.preamble ||
-            buildUnattendedPreamble(
-              event.payload.totalIterations,
-              thread.modelSelection.model,
-              effectiveSentinel(cfg),
-            );
-          yield* orchestrationEngine.dispatch({
-            type: "thread.turn.start",
-            commandId: yield* serverCommandId("unattended-preamble"),
-            threadId: thread.id,
-            message: {
-              messageId: yield* freshMessageId,
-              role: "user",
-              text: preambleText,
-              attachments: [],
-            },
-            runtimeMode: thread.runtimeMode,
-            interactionMode: thread.interactionMode,
-            createdAt: yield* nowIso,
-          });
-          return;
+const cfg = yield * readUnattendedConfig;
+const preambleText =
+  cfg.preamble ||
+  buildUnattendedPreamble(
+    event.payload.totalIterations,
+    thread.modelSelection.model,
+    effectiveSentinel(cfg),
+  );
+yield *
+  orchestrationEngine.dispatch({
+    type: "thread.turn.start",
+    commandId: yield * serverCommandId("unattended-preamble"),
+    threadId: thread.id,
+    message: {
+      messageId: yield * freshMessageId,
+      role: "user",
+      text: preambleText,
+      attachments: [],
+    },
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    createdAt: yield * nowIso,
+  });
+return;
 ```
 
 - [ ] **Step 4: Run to verify the tests pass**
@@ -595,6 +613,7 @@ export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/Layers/UnattendedRunReactor.test.ts
 npx tsgo --noEmit
 ```
+
 Expected: all reactor tests PASS (including the pre-existing ones, which run with default config); typecheck clean.
 
 - [ ] **Step 5: Commit**
@@ -610,10 +629,12 @@ git commit -m "feat(unattended): read settings for effective sentinel + custom p
 ## Task 5: Reactor — custom continue message + append-last-agent-message
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Layers/UnattendedRunReactor.ts`
 - Test: `apps/server/src/orchestration/Layers/UnattendedRunReactor.test.ts`
 
 **Interfaces:**
+
 - Consumes: `readUnattendedConfig`, `effectiveSentinel` (Task 4); `resolveAppendedLastMessage`, `CONTINUE_MESSAGE` (Tasks 1/3).
 - Produces: continue text = `cfg.continueMessage || CONTINUE_MESSAGE`, with the resolved last message plain-appended (`\n\n`) when `cfg.appendLastAgentMessage` is on. An iteration-scoped, `messageId`-keyed accumulator of assistant messages, reset at the iteration boundary (run start + context clear), drives `resolveAppendedLastMessage`.
 
@@ -637,20 +658,22 @@ effectIt.effect("uses a custom continue message verbatim when configured", () =>
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ continueMessage: "RESUME NOW" })))),
 );
 
-effectIt.effect("appends the last assistant message (sentinel stripped) when the toggle is on", () =>
-  Effect.gen(function* () {
-    const harness = yield* setupHarness();
-    yield* harness.startUnattendedRun(2);
+effectIt.effect(
+  "appends the last assistant message (sentinel stripped) when the toggle is on",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* setupHarness();
+      yield* harness.startUnattendedRun(2);
 
-    yield* harness.driveTurnEnd("wrap", `did real work\n${WRAP_SENTINEL}`);
+      yield* harness.driveTurnEnd("wrap", `did real work\n${WRAP_SENTINEL}`);
 
-    const thread = yield* harness.readThread;
-    const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
-    const continueText = userMessages[1]?.text ?? "";
-    assert.ok(continueText.includes(CONTINUE_MESSAGE), continueText);
-    assert.ok(continueText.endsWith("\n\ndid real work"), continueText);
-    assert.ok(!continueText.includes(WRAP_SENTINEL), continueText);
-  }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ appendLastAgentMessage: true })))),
+      const thread = yield* harness.readThread;
+      const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
+      const continueText = userMessages[1]?.text ?? "";
+      assert.ok(continueText.includes(CONTINUE_MESSAGE), continueText);
+      assert.ok(continueText.endsWith("\n\ndid real work"), continueText);
+      assert.ok(!continueText.includes(WRAP_SENTINEL), continueText);
+    }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ appendLastAgentMessage: true })))),
 );
 
 effectIt.effect("does not append the last assistant message when the toggle is off", () =>
@@ -673,6 +696,7 @@ effectIt.effect("does not append the last assistant message when the toggle is o
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/Layers/UnattendedRunReactor.test.ts
 ```
+
 Expected: FAIL — continue text is always `CONTINUE_MESSAGE`; no append.
 
 - [ ] **Step 3: Add the accumulator, build the continue text, and thread the appended message through**
@@ -684,46 +708,46 @@ Add `resolveAppendedLastMessage` to the existing import from `../unattendedRun.t
 Add a per-thread accumulator next to the other `Map`s (after `latestAssistantText`):
 
 ```ts
-  // Per-thread, per-iteration map of assistant messageId -> accumulated text.
-  // `thread.message-sent` fires per streamed CHUNK reusing a messageId across a
-  // message's chunks; keying by messageId reconstructs discrete messages. Reset
-  // at the ITERATION boundary (run start + context clear), NOT at turn start, so
-  // it captures every assistant message of an iteration that spans turns.
-  const iterationAssistantMessages = new Map<string, Map<string, string>>();
+// Per-thread, per-iteration map of assistant messageId -> accumulated text.
+// `thread.message-sent` fires per streamed CHUNK reusing a messageId across a
+// message's chunks; keying by messageId reconstructs discrete messages. Reset
+// at the ITERATION boundary (run start + context clear), NOT at turn start, so
+// it captures every assistant message of an iteration that spans turns.
+const iterationAssistantMessages = new Map<string, Map<string, string>>();
 ```
 
 Add a helper to build the continue text (place it near `effectiveSentinel`):
 
 ```ts
-  const buildContinueText = (cfg: UnattendedRunSettings, appendedMessage: string | null): string => {
-    const base = cfg.continueMessage || CONTINUE_MESSAGE;
-    return appendedMessage ? `${base}\n\n${appendedMessage}` : base;
-  };
+const buildContinueText = (cfg: UnattendedRunSettings, appendedMessage: string | null): string => {
+  const base = cfg.continueMessage || CONTINUE_MESSAGE;
+  return appendedMessage ? `${base}\n\n${appendedMessage}` : base;
+};
 ```
 
 Change `issueContinueTurn` to build the text from config + an optional appended message (read config fresh when not supplied, so resume/rehydrate honor a custom continue message):
 
 ```ts
-  const issueContinueTurn = Effect.fn("issueContinueTurn")(function* (
-    thread: OrchestrationThread,
-    options?: { readonly cfg?: UnattendedRunSettings; readonly appendedMessage?: string | null },
-  ) {
-    const cfg = options?.cfg ?? (yield* readUnattendedConfig);
-    yield* orchestrationEngine.dispatch({
-      type: "thread.turn.start",
-      commandId: yield* serverCommandId("unattended-continue"),
-      threadId: thread.id,
-      message: {
-        messageId: yield* freshMessageId,
-        role: "user",
-        text: buildContinueText(cfg, options?.appendedMessage ?? null),
-        attachments: [],
-      },
-      runtimeMode: thread.runtimeMode,
-      interactionMode: thread.interactionMode,
-      createdAt: yield* nowIso,
-    });
+const issueContinueTurn = Effect.fn("issueContinueTurn")(function* (
+  thread: OrchestrationThread,
+  options?: { readonly cfg?: UnattendedRunSettings; readonly appendedMessage?: string | null },
+) {
+  const cfg = options?.cfg ?? (yield* readUnattendedConfig);
+  yield* orchestrationEngine.dispatch({
+    type: "thread.turn.start",
+    commandId: yield* serverCommandId("unattended-continue"),
+    threadId: thread.id,
+    message: {
+      messageId: yield* freshMessageId,
+      role: "user",
+      text: buildContinueText(cfg, options?.appendedMessage ?? null),
+      attachments: [],
+    },
+    runtimeMode: thread.runtimeMode,
+    interactionMode: thread.interactionMode,
+    createdAt: yield* nowIso,
   });
+});
 ```
 
 Change `clearAndContinue` to take the resolved config + appended message and reset the accumulator at the clear boundary. Update its signature:
@@ -739,14 +763,14 @@ Change `clearAndContinue` to take the resolved config + appended message and res
 Inside `clearAndContinue`, where `awaitingFreshContextReading.set(thread.id, true);` is set (right after the cleared marker is appended), add the accumulator reset:
 
 ```ts
-      awaitingFreshContextReading.set(thread.id, true);
-      iterationAssistantMessages.set(thread.id, new Map());
+awaitingFreshContextReading.set(thread.id, true);
+iterationAssistantMessages.set(thread.id, new Map());
 ```
 
 …and change the final call from `yield* issueContinueTurn(thread);` to:
 
 ```ts
-      yield* issueContinueTurn(thread, { cfg, appendedMessage });
+yield * issueContinueTurn(thread, { cfg, appendedMessage });
 ```
 
 In `handleSessionSet`, the `clear-continue` case must resolve the appended message (before `clearAndContinue` resets the accumulator) and pass `cfg` through. Replace:
@@ -794,7 +818,7 @@ In `processEvent`, the `thread.message-sent` case must also feed the iteration a
 In the `thread.unattended-run-started` case (Task 4's block), reset the accumulator at run start. Add, right after reading the thread / before issuing the preamble turn:
 
 ```ts
-          iterationAssistantMessages.set(thread.id, new Map());
+iterationAssistantMessages.set(thread.id, new Map());
 ```
 
 - [ ] **Step 4: Run to verify the tests pass**
@@ -804,6 +828,7 @@ export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/server && npx vp test run src/orchestration/Layers/UnattendedRunReactor.test.ts
 npx tsgo --noEmit
 ```
+
 Expected: all reactor tests PASS; typecheck clean.
 
 - [ ] **Step 5: Commit**
@@ -819,9 +844,11 @@ git commit -m "feat(unattended): custom continue message + append-last-agent-mes
 ## Task 6: Web — `DraftTextarea` component
 
 **Files:**
+
 - Create: `apps/web/src/components/ui/draft-textarea.tsx`
 
 **Interfaces:**
+
 - Consumes: `Textarea`, `TextareaProps` from `./textarea` (`apps/web/src/components/ui/textarea.tsx`).
 - Produces: `DraftTextarea` — a multiline `<Textarea>` that buffers keystrokes and calls `onCommit(next)` on blur. **Enter inserts a newline (does NOT commit)** — this is why it cannot reuse `useCommitOnBlur` (that hook commits on Enter and is typed for `HTMLInputElement`).
 
@@ -836,10 +863,7 @@ import { type ChangeEvent, useEffect, useRef, useState } from "react";
 
 import { Textarea, type TextareaProps } from "./textarea";
 
-export type DraftTextareaProps = Omit<
-  TextareaProps,
-  "value" | "onChange" | "defaultValue"
-> & {
+export type DraftTextareaProps = Omit<TextareaProps, "value" | "onChange" | "defaultValue"> & {
   readonly value: string;
   readonly onCommit: (next: string) => void;
 };
@@ -886,6 +910,7 @@ export function DraftTextarea({ value, onCommit, ...rest }: DraftTextareaProps) 
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/web && npx tsgo --noEmit
 ```
+
 Expected: clean. (The component is consumed in Task 7; an unused-export warning is not an error.)
 
 - [ ] **Step 3: Commit**
@@ -901,6 +926,7 @@ git commit -m "feat(web): add DraftTextarea commit-on-blur multiline input"
 ## Task 7: Web — Looping settings panel, route, and nav
 
 **Files:**
+
 - Create: `apps/web/src/components/settings/loopingSettings.ts` (pure warning helper)
 - Test: `apps/web/src/components/settings/loopingSettings.test.ts`
 - Create: `apps/web/src/components/settings/LoopingSettings.tsx`
@@ -908,6 +934,7 @@ git commit -m "feat(web): add DraftTextarea commit-on-blur multiline input"
 - Modify: `apps/web/src/components/settings/SettingsSidebarNav.tsx`
 
 **Interfaces:**
+
 - Consumes: `useSettings`, `useUpdateSettings` (`apps/web/src/hooks/useSettings.ts`); `DEFAULT_UNIFIED_SETTINGS`, `WRAP_SENTINEL`, `CONTINUE_MESSAGE` (`@t3tools/contracts`); `SettingsPageContainer`, `SettingsSection`, `SettingsRow`, `SettingResetButton` (`./settingsLayout`); `DraftInput` (`../ui/draft-input`); `DraftTextarea` (Task 6); `Switch` (`../ui/switch`).
 - Produces: `preambleMissingEffectiveSentinel(preamble, effectiveSentinel): boolean`; `LoopingSettingsPanel`; the `/settings/looping` route; the "Looping" nav item.
 
@@ -949,6 +976,7 @@ describe("preambleMissingEffectiveSentinel", () => {
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/web && npx vp test run src/components/settings/loopingSettings.test.ts
 ```
+
 Expected: FAIL — module/function not found.
 
 - [ ] **Step 3: Implement the warning helper**
@@ -975,6 +1003,7 @@ export const preambleMissingEffectiveSentinel = (
 export PATH="/home/chaz/.nvm/versions/node/v24.17.0/bin:$PATH"
 cd /home/chaz/projects/t3code/apps/web && npx vp test run src/components/settings/loopingSettings.test.ts
 ```
+
 Expected: PASS.
 
 - [ ] **Step 5: Create the panel component**
@@ -1032,8 +1061,7 @@ export function LoopingSettingsPanel() {
         >
           {showPreambleWarning ? (
             <p className="pt-2 pb-3.5 text-xs text-amber-600 dark:text-amber-500">
-              Your custom preamble does not mention the sentinel
-              {" "}
+              Your custom preamble does not mention the sentinel{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono">{effectiveSentinel}</code>.
               The run can only advance when the agent emits it, so be sure to instruct the agent to
               print it on its own line.
@@ -1170,6 +1198,7 @@ cd /home/chaz/projects/t3code/apps/web
 npx vp test run src/components/settings/loopingSettings.test.ts
 npx tsgo --noEmit
 ```
+
 Expected: helper test PASS; typecheck clean (the generated route tree picks up `settings.looping.tsx`; if `tsgo` reports the route is unknown, run the web dev/build once to regenerate `routeTree.gen.ts`, then re-run `tsgo`).
 
 If `RepeatIcon` is not exported by the installed `lucide-react`, substitute another existing icon (e.g. `RotateCwIcon`) — confirm by checking the other icons already imported in that file resolve.

@@ -12,16 +12,22 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  createKnownEnvironment,
   createWsRpcClient as createBaseWsRpcClient,
-  type WsRpcClient,
   bootstrapRemoteBearerSession,
-  fetchRemoteEnvironmentDescriptor,
   fetchRemoteDpopSessionState,
+  fetchRemoteEnvironmentDescriptor,
   fetchRemoteSessionState,
+  getKnownEnvironmentHttpBaseUrl,
+  getKnownEnvironmentWsBaseUrl,
   type ManagedRelayDpopProofInput,
   ManagedRelayDpopSigner,
   resolveRemoteDpopWebSocketConnectionUrl,
   resolveRemoteWebSocketConnectionUrl,
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+  type WsRpcClient,
 } from "@t3tools/client-runtime";
 
 import { type QueryClient } from "@tanstack/react-query";
@@ -31,13 +37,6 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Headers, HttpTraceContext } from "effect/unstable/http";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
-import {
-  createKnownEnvironment,
-  getKnownEnvironmentWsBaseUrl,
-  scopedThreadKey,
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@t3tools/client-runtime";
 
 import {
   markPromotedDraftThreadByRef,
@@ -48,7 +47,9 @@ import { ensureLocalApi } from "~/localApi";
 import { collectActiveTerminalUiThreadKeys } from "~/lib/terminalUiStateCleanup";
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { getPrimaryKnownEnvironment } from "../primary";
+import { getVsCodePrimaryBearerToken } from "../primary/vscodeBearerAuth";
 import { webRuntime } from "../../lib/runtime";
+import { isVSCode } from "../../env";
 import { connectManagedCloudEnvironment } from "../../cloud/linkEnvironment";
 import { readManagedRelayClerkToken } from "../../cloud/managedAuth";
 
@@ -1385,6 +1386,30 @@ function createPrimaryEnvironmentClient(
     );
   }
   const connectionLabel = knownEnvironment?.label ?? null;
+
+  if (isVSCode) {
+    const wsUrlProvider = async () => {
+      const bearerToken = getVsCodePrimaryBearerToken();
+      const httpBaseUrl = getKnownEnvironmentHttpBaseUrl(knownEnvironment);
+      if (!bearerToken || !httpBaseUrl) {
+        throw new Error("VSCode chat is missing bearer auth for the embedded server.");
+      }
+      return webRuntime.runPromise(
+        resolveRemoteWebSocketConnectionUrl({
+          wsBaseUrl,
+          httpBaseUrl,
+          bearerToken,
+        }),
+      );
+    };
+    return createWsRpcClient(
+      new WsTransport(wsUrlProvider, {
+        getConnectionLabel: () => connectionLabel,
+        getVersionMismatchHint: () =>
+          resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
+      }),
+    );
+  }
 
   return createWsRpcClient(
     new WsTransport(wsBaseUrl, {

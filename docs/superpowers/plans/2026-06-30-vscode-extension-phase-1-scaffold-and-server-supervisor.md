@@ -56,6 +56,7 @@ apps/vscode/
 ```
 
 Responsibilities:
+
 - **`server/freePort.ts`** — find an available loopback TCP port starting at 3773, probing `127.0.0.1` and `::1` (mirrors the desktop scan's intent without importing it).
 - **`server/bootstrap.ts`** — mint the random bootstrap token and produce both the typed `DesktopBackendBootstrap` object and the exact `string` line written to fd 3.
 - **`server/serverEntry.ts`** — decide which Node binary to spawn (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`) and locate `apps/server/dist/bin.mjs` (packaged copy first, monorepo dev path fallback).
@@ -69,6 +70,7 @@ Responsibilities:
 ## Task 1: Scaffold the `apps/vscode` package (manifest, tsconfig, build, activation stub)
 
 **Files:**
+
 - Create: `apps/vscode/package.json`
 - Create: `apps/vscode/tsconfig.json`
 - Create: `apps/vscode/vite.config.ts`
@@ -78,6 +80,7 @@ Responsibilities:
 - Create: `apps/vscode/src/logger.ts`
 
 **Interfaces:**
+
 - Consumes: nothing (first task).
 - Produces: the buildable package; `Logger` interface (`{ info(msg: string): void; warn(msg: string): void; error(msg: string, err?: unknown): void }`) and `createOutputChannelLogger(channel: { appendLine(line: string): void }): Logger` from `src/logger.ts`, reused by every later task.
 
@@ -94,7 +97,7 @@ Responsibilities:
   "publisher": "t3tools",
   "engines": {
     "vscode": "^1.90.0",
-    "node": "^24.13.1"
+    "node": "^24.13.1",
   },
   "main": "./dist/extension.cjs",
   "extensionKind": ["workspace"],
@@ -104,24 +107,24 @@ Responsibilities:
       {
         "command": "t3code.showStatus",
         "title": "T3 Code: Status",
-        "category": "T3 Code"
-      }
-    ]
+        "category": "T3 Code",
+      },
+    ],
   },
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
     "typecheck": "tsgo --noEmit",
-    "test": "vp test run"
+    "test": "vp test run",
   },
   "dependencies": {
-    "@t3tools/contracts": "workspace:*"
+    "@t3tools/contracts": "workspace:*",
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/vscode": "^1.90.0",
-    "vite-plus": "catalog:"
-  }
+    "vite-plus": "catalog:",
+  },
 }
 ```
 
@@ -135,9 +138,9 @@ Note: `@types/vscode` pins the same floor as `engines.vscode`. The `build` scrip
   "compilerOptions": {
     "composite": true,
     "types": ["node", "vscode"],
-    "lib": ["ESNext", "DOM", "esnext.disposable"]
+    "lib": ["ESNext", "DOM", "esnext.disposable"],
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
 }
 ```
 
@@ -244,7 +247,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("t3code.showStatus", () => {
-      void vscode.window.showInformationMessage("T3 Code: status webview not wired yet (Phase 1, Task 7).");
+      void vscode.window.showInformationMessage(
+        "T3 Code: status webview not wired yet (Phase 1, Task 7).",
+      );
     }),
   );
 }
@@ -277,10 +282,12 @@ git commit -m "feat(vscode): scaffold @t3tools/vscode-extension package"
 ## Task 2: Free-port scan
 
 **Files:**
+
 - Create: `apps/vscode/src/server/freePort.ts`
 - Test: `apps/vscode/src/server/freePort.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `findFreeLoopbackPort(options?: { startPort?: number; maxPort?: number }): Promise<number>` — resolves the first port (default start `3773`, default max `65535`) bindable on both `127.0.0.1` and `::1`; rejects with `Error("No free loopback port found ...")` if none.
 
@@ -375,10 +382,12 @@ git commit -m "feat(vscode): add free loopback port scan"
 ## Task 3: Bootstrap envelope builder + fd-3 line
 
 **Files:**
+
 - Create: `apps/vscode/src/server/bootstrap.ts`
 - Test: `apps/vscode/src/server/bootstrap.test.ts`
 
 **Interfaces:**
+
 - Consumes: `DesktopBackendBootstrap` **type** from `@t3tools/contracts` (type-only import).
 - Produces:
   - `mintBootstrapToken(randomBytes?: (n: number) => Buffer): string` — 48-hex-char token (24 random bytes), `node:crypto` by default; the param is for deterministic tests.
@@ -400,7 +409,12 @@ describe("bootstrap", () => {
   });
 
   it("builds the local-only desktop bootstrap envelope", () => {
-    const bootstrap = buildBootstrap({ port: 3773, host: "127.0.0.1", t3Home: "/home/u/.t3", token: "tok" });
+    const bootstrap = buildBootstrap({
+      port: 3773,
+      host: "127.0.0.1",
+      t3Home: "/home/u/.t3",
+      token: "tok",
+    });
     expect(bootstrap).toMatchObject({
       mode: "desktop",
       noBrowser: true,
@@ -436,9 +450,8 @@ import { randomBytes as nodeRandomBytes } from "node:crypto";
 
 import type { DesktopBackendBootstrap } from "@t3tools/contracts";
 
-export const mintBootstrapToken = (
-  randomBytes: (n: number) => Buffer = nodeRandomBytes,
-): string => randomBytes(24).toString("hex");
+export const mintBootstrapToken = (randomBytes: (n: number) => Buffer = nodeRandomBytes): string =>
+  randomBytes(24).toString("hex");
 
 export interface BuildBootstrapInput {
   readonly port: number;
@@ -484,10 +497,12 @@ git commit -m "feat(vscode): add bootstrap envelope builder for fd-3 handshake"
 ## Task 4: Server entry resolver (node exec + bin path)
 
 **Files:**
+
 - Create: `apps/vscode/src/server/serverEntry.ts`
 - Test: `apps/vscode/src/server/serverEntry.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces:
   - `resolveServerEntry(input: { extensionPath: string; execPath: string; fileExists: (p: string) => boolean }): { command: string; entryPath: string; spawnEnv: Record<string, string> }` — picks the server bin (packaged copy `<extensionPath>/server/dist/bin.mjs` if present, else monorepo dev path `<extensionPath>/../../apps/server/dist/bin.mjs`), returns the Node `command` (`execPath`) and the `ELECTRON_RUN_AS_NODE=1` env so the host's Electron/Node binary runs as plain Node (the same trick the desktop app and VSCode itself use). Throws `Error` if no bin is found.
@@ -506,21 +521,33 @@ const dev = path.resolve(ext, "..", "..", "apps", "server", "dist", "bin.mjs");
 
 describe("resolveServerEntry", () => {
   it("prefers the packaged server bin when present", () => {
-    const r = resolveServerEntry({ extensionPath: ext, execPath: "/usr/bin/node", fileExists: (p) => p === packaged });
+    const r = resolveServerEntry({
+      extensionPath: ext,
+      execPath: "/usr/bin/node",
+      fileExists: (p) => p === packaged,
+    });
     expect(r.entryPath).toBe(packaged);
     expect(r.command).toBe("/usr/bin/node");
     expect(r.spawnEnv.ELECTRON_RUN_AS_NODE).toBe("1");
   });
 
   it("falls back to the monorepo dev path", () => {
-    const r = resolveServerEntry({ extensionPath: ext, execPath: "/usr/bin/node", fileExists: (p) => p === dev });
+    const r = resolveServerEntry({
+      extensionPath: ext,
+      execPath: "/usr/bin/node",
+      fileExists: (p) => p === dev,
+    });
     expect(r.entryPath).toBe(dev);
   });
 
   it("throws when no server bin exists", () => {
-    expect(() => resolveServerEntry({ extensionPath: ext, execPath: "/usr/bin/node", fileExists: () => false })).toThrow(
-      /server bin not found/i,
-    );
+    expect(() =>
+      resolveServerEntry({
+        extensionPath: ext,
+        execPath: "/usr/bin/node",
+        fileExists: () => false,
+      }),
+    ).toThrow(/server bin not found/i);
   });
 });
 ```
@@ -552,7 +579,9 @@ export const resolveServerEntry = (input: ResolveServerEntryInput): ResolvedServ
   const dev = path.resolve(input.extensionPath, "..", "..", "apps", "server", "dist", "bin.mjs");
   const entryPath = input.fileExists(packaged) ? packaged : input.fileExists(dev) ? dev : null;
   if (entryPath === null) {
-    throw new Error(`Server bin not found. Looked in:\n  ${packaged}\n  ${dev}\nRun \`pnpm build:server\`.`);
+    throw new Error(
+      `Server bin not found. Looked in:\n  ${packaged}\n  ${dev}\nRun \`pnpm build:server\`.`,
+    );
   }
   return {
     command: input.execPath,
@@ -582,39 +611,52 @@ git commit -m "feat(vscode): resolve server child entry path and node command"
 This is the core of the phase. All effects are injected so it runs headless. Constants mirror the desktop supervisor: initial restart delay 500ms, max 10s, readiness timeout 60s, readiness interval 100ms, terminate grace 2s.
 
 **Files:**
+
 - Create: `apps/vscode/src/server/serverSupervisor.ts`
 - Test: `apps/vscode/src/server/serverSupervisor.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Logger` (`src/logger.ts`); `findFreeLoopbackPort` (Task 2); `mintBootstrapToken`/`buildBootstrap`/`serializeBootstrapLine` (Task 3); `ResolvedServerEntry` (Task 4).
 - Produces:
   - Types:
     ```ts
     interface SpawnedChild {
       readonly pid: number | undefined;
-      writeBootstrap(line: string): void;   // writes to fd 3 then ends that stream
+      writeBootstrap(line: string): void; // writes to fd 3 then ends that stream
       kill(signal: NodeJS.Signals): void;
       onExit(cb: (code: number | null) => void): void;
     }
     interface SupervisorDeps {
       readonly logger: Logger;
       readonly findFreePort: (opts?: { startPort?: number }) => Promise<number>;
-      readonly resolveEntry: () => { command: string; entryPath: string; spawnEnv: Record<string, string> };
+      readonly resolveEntry: () => {
+        command: string;
+        entryPath: string;
+        spawnEnv: Record<string, string>;
+      };
       readonly t3Home: string;
-      readonly host?: string;                // default "127.0.0.1"
-      readonly spawn: (cmd: string, args: readonly string[], opts: { cwd: string; env: Record<string, string | undefined> }) => SpawnedChild;
+      readonly host?: string; // default "127.0.0.1"
+      readonly spawn: (
+        cmd: string,
+        args: readonly string[],
+        opts: { cwd: string; env: Record<string, string | undefined> },
+      ) => SpawnedChild;
       readonly probeReady: (httpBaseUrl: string, signal: AbortSignal) => Promise<boolean>;
       readonly sleep: (ms: number) => Promise<void>;
       readonly now: () => number;
       readonly tuning?: Partial<SupervisorTuning>;
     }
     interface SupervisorTuning {
-      initialRestartDelayMs: number; maxRestartDelayMs: number;
-      readinessTimeoutMs: number; readinessIntervalMs: number; terminateGraceMs: number;
+      initialRestartDelayMs: number;
+      maxRestartDelayMs: number;
+      readinessTimeoutMs: number;
+      readinessIntervalMs: number;
+      terminateGraceMs: number;
     }
     interface ServerHandle {
       readonly port: number;
-      readonly httpBaseUrl: string;          // http://<host>:<port>
+      readonly httpBaseUrl: string; // http://<host>:<port>
       readonly token: string;
     }
     ```
@@ -630,8 +672,11 @@ import { createServerSupervisor, restartDelay } from "./serverSupervisor.ts";
 import { createOutputChannelLogger } from "../logger.ts";
 
 const tuning = {
-  initialRestartDelayMs: 10, maxRestartDelayMs: 100,
-  readinessTimeoutMs: 1000, readinessIntervalMs: 5, terminateGraceMs: 20,
+  initialRestartDelayMs: 10,
+  maxRestartDelayMs: 100,
+  readinessTimeoutMs: 1000,
+  readinessIntervalMs: 5,
+  terminateGraceMs: 20,
 };
 const logger = createOutputChannelLogger({ appendLine: () => {} });
 
@@ -657,13 +702,19 @@ const makeDeps = (overrides: { probeReady?: () => Promise<boolean> } = {}) => {
       pid: child.pid,
       writeBootstrap: (line: string) => child.written.push(line),
       kill: (sig: NodeJS.Signals) => child.killed.push(sig),
-      onExit: (cb: (code: number | null) => void) => { onExit = cb; },
+      onExit: (cb: (code: number | null) => void) => {
+        onExit = cb;
+      },
     };
   };
   const deps = {
     logger,
     findFreePort: async () => 3801,
-    resolveEntry: () => ({ command: "node", entryPath: "/bin.mjs", spawnEnv: { ELECTRON_RUN_AS_NODE: "1" } }),
+    resolveEntry: () => ({
+      command: "node",
+      entryPath: "/bin.mjs",
+      spawnEnv: { ELECTRON_RUN_AS_NODE: "1" },
+    }),
     t3Home: "/home/u/.t3",
     spawn,
     probeReady: overrides.probeReady ?? (async () => true),
@@ -676,7 +727,13 @@ const makeDeps = (overrides: { probeReady?: () => Promise<boolean> } = {}) => {
 
 describe("restartDelay", () => {
   it("doubles per attempt and caps at max", () => {
-    const t = { initialRestartDelayMs: 500, maxRestartDelayMs: 10000, readinessTimeoutMs: 0, readinessIntervalMs: 0, terminateGraceMs: 0 };
+    const t = {
+      initialRestartDelayMs: 500,
+      maxRestartDelayMs: 10000,
+      readinessTimeoutMs: 0,
+      readinessIntervalMs: 0,
+      terminateGraceMs: 0,
+    };
     expect(restartDelay(0, t)).toBe(500);
     expect(restartDelay(1, t)).toBe(1000);
     expect(restartDelay(5, t)).toBe(10000); // 500*32 capped
@@ -696,7 +753,9 @@ describe("createServerSupervisor", () => {
     expect(args).toEqual(["/bin.mjs", "--bootstrap-fd", "3"]);
     const line = children[0]!.written[0]!;
     expect(JSON.parse(line) as { desktopBootstrapToken: string }).toMatchObject({
-      port: 3801, host: "127.0.0.1", desktopBootstrapToken: handle.token,
+      port: 3801,
+      host: "127.0.0.1",
+      desktopBootstrapToken: handle.token,
     });
     expect(supervisor.snapshot()).toMatchObject({ running: true, ready: true });
     await supervisor.stop();
@@ -731,7 +790,13 @@ describe("createServerSupervisor", () => {
 
   it("rejects start() if readiness never succeeds before timeout", async () => {
     const { deps } = makeDeps({ probeReady: async () => false });
-    const supervisor = createServerSupervisor({ ...deps, now: (() => { let t = 0; return () => (t += 100); })() });
+    const supervisor = createServerSupervisor({
+      ...deps,
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
+    });
     await expect(supervisor.start()).rejects.toThrow(/readiness|timed out/i);
     await supervisor.stop();
   });
@@ -823,7 +888,9 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
       if (ok) return;
       await deps.sleep(tuning.readinessIntervalMs);
     }
-    throw new Error(`Server readiness timed out after ${tuning.readinessTimeoutMs}ms at ${httpBaseUrl}`);
+    throw new Error(
+      `Server readiness timed out after ${tuning.readinessTimeoutMs}ms at ${httpBaseUrl}`,
+    );
   };
 
   const launch = async (): Promise<ServerHandle> => {
@@ -855,7 +922,9 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
 
   const scheduleRestart = async (code: number | null): Promise<void> => {
     const delay = restartDelay(restartAttempt, tuning);
-    deps.logger.warn(`Server exited (code=${String(code)}); restarting in ${delay}ms (attempt ${restartAttempt + 1})`);
+    deps.logger.warn(
+      `Server exited (code=${String(code)}); restarting in ${delay}ms (attempt ${restartAttempt + 1})`,
+    );
     restartAttempt += 1;
     await deps.sleep(delay);
     if (!desiredRunning) return;
@@ -903,10 +972,12 @@ git commit -m "feat(vscode): add server supervisor with fd-3 handshake and backo
 ## Task 6: URL resolver (asExternalUri wrapper)
 
 **Files:**
+
 - Create: `apps/vscode/src/transport/urlResolver.ts`
 - Test: `apps/vscode/src/transport/urlResolver.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing (the VSCode `asExternalUri` is injected as a plain async function so this is testable without `vscode`).
 - Produces:
   - `resolveExternalBaseUrls(input: { localHttpBaseUrl: string; asExternalUri: (url: string) => Promise<string> }): Promise<{ httpBaseUrl: string; wsBaseUrl: string; readinessUrl: string }>` — calls `asExternalUri` on the loopback http URL (identity locally, forwarded under Remote-SSH), derives the `ws`/`wss` base (`http→ws`, `https→wss`), and the readiness URL (`<httpBaseUrl>/.well-known/t3/environment`).
@@ -960,7 +1031,8 @@ export interface ResolvedBaseUrls {
   readonly readinessUrl: string;
 }
 
-const stripTrailingSlash = (value: string): string => (value.endsWith("/") ? value.slice(0, -1) : value);
+const stripTrailingSlash = (value: string): string =>
+  value.endsWith("/") ? value.slice(0, -1) : value;
 
 export const resolveExternalBaseUrls = async (
   input: ResolveExternalBaseUrlsInput,
@@ -994,11 +1066,13 @@ git commit -m "feat(vscode): resolve external server URLs via asExternalUri"
 Wires the pure modules to real VSCode APIs and proves connectivity. The status webview fetches `/.well-known/t3/environment` (via the resolved external URL) and renders the descriptor — the Phase 1 acceptance signal, working both locally and under Remote-SSH.
 
 **Files:**
+
 - Create: `apps/vscode/src/ui/statusPanel.ts`
 - Test: `apps/vscode/src/ui/statusPanel.test.ts`
 - Modify: `apps/vscode/src/extension.ts` (replace the Task 1 stub with full wiring)
 
 **Interfaces:**
+
 - Consumes: `createServerSupervisor` (Task 5), `findFreeLoopbackPort` (Task 2), `resolveServerEntry` (Task 4), `resolveExternalBaseUrls` (Task 6), `createOutputChannelLogger` (Task 1).
 - Produces: `renderStatusHtml(input: { ready: boolean; httpBaseUrl: string; wsBaseUrl: string; descriptorJson: string | null; error: string | null }): string` from `ui/statusPanel.ts` (pure, no `vscode`); a working `activate`/`deactivate`.
 
@@ -1026,7 +1100,10 @@ describe("renderStatusHtml", () => {
 
   it("escapes HTML in the error to avoid injection", () => {
     const html = renderStatusHtml({
-      ready: false, httpBaseUrl: "", wsBaseUrl: "", descriptorJson: null,
+      ready: false,
+      httpBaseUrl: "",
+      wsBaseUrl: "",
+      descriptorJson: null,
       error: "<script>alert(1)</script>",
     });
     expect(html).not.toContain("<script>alert(1)</script>");
@@ -1166,12 +1243,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     logger.info(`Server up at ${handle.httpBaseUrl}`);
   } catch (error) {
     logger.error("Failed to start the T3 Code server", error);
-    void vscode.window.showErrorMessage("T3 Code: failed to start the embedded server. See the T3 Code output channel.");
+    void vscode.window.showErrorMessage(
+      "T3 Code: failed to start the embedded server. See the T3 Code output channel.",
+    );
   }
 
   context.subscriptions.push(
     vscode.commands.registerCommand("t3code.showStatus", async () => {
-      const panel = vscode.window.createWebviewPanel("t3codeStatus", "T3 Code: Status", vscode.ViewColumn.Active, {});
+      const panel = vscode.window.createWebviewPanel(
+        "t3codeStatus",
+        "T3 Code: Status",
+        vscode.ViewColumn.Active,
+        {},
+      );
       const model = await buildStatusModel();
       panel.webview.html = renderStatusHtml(model);
     }),
@@ -1180,7 +1264,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 const buildStatusModel = async (): Promise<StatusViewModel> => {
   if (handle === null) {
-    return { ready: false, httpBaseUrl: "", wsBaseUrl: "", descriptorJson: null, error: "Server is not running." };
+    return {
+      ready: false,
+      httpBaseUrl: "",
+      wsBaseUrl: "",
+      descriptorJson: null,
+      error: "Server is not running.",
+    };
   }
   try {
     const resolved = await resolveExternalBaseUrls({
@@ -1198,7 +1288,10 @@ const buildStatusModel = async (): Promise<StatusViewModel> => {
     };
   } catch (error) {
     return {
-      ready: false, httpBaseUrl: handle.httpBaseUrl, wsBaseUrl: "", descriptorJson: null,
+      ready: false,
+      httpBaseUrl: handle.httpBaseUrl,
+      wsBaseUrl: "",
+      descriptorJson: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -1254,6 +1347,7 @@ git commit -m "feat(vscode): wire activation, supervisor lifecycle, and status w
 Each phase is independently testable and gets its own `docs/superpowers/plans/` file authored at the start of that phase (not now — later phases will be informed by what Phase 1 implementation reveals). Decisions are already locked by the approved design spec (`docs/superpowers/specs/2026-06-30-vscode-extension-design.md`); these are scope sketches, not plans.
 
 ### Phase 2 — Webview host + transport + first reused webview (live chat)
+
 - Add the **second build target**: a Vite webview bundle (same toolchain as `apps/web`) emitted into `apps/vscode/dist/webview/`, loaded into a `WebviewView`/`WebviewPanel` with a CSP whose `connect-src` includes the resolved ws/http origin.
 - Add `isVSCode` to `apps/web/src/env.ts` (alongside `isElectron`, sniffing the webview global), and extend the history ternary in `apps/web/src/main.ts` to `isElectron || isVSCode` → `createHashHistory()`.
 - Add an `exports` field to `@t3tools/web` (it has none today — mirror `@t3tools/client-runtime`'s source-only exports map) so `apps/vscode` can import its components + provider stack.
@@ -1261,11 +1355,13 @@ Each phase is independently testable and gets its own `docs/superpowers/plans/` 
 - Render `ChatView` (surface #2) for a thread. **Deliverable:** open a session and chat inside VSCode.
 
 ### Phase 3 — Remaining webviews + extension-host selection broker
+
 - Surfaces #1 (sidebar: session list + subagent tree, `Sidebar` + `SubagentWatchView`, scoped to `workspace.workspaceFolders[0]`), #3 (settings editor tab), #4 (comment-able diff, `DiffPanel` + `DiffWorkerPoolProvider`, re-themed via the `--diffs-*` vars).
 - The **extension-host selection broker**: holds active env/thread + open-diff/open-settings intents, broadcasts over `postMessage`, replays current selection to newly (re)loaded webviews.
 - Re-theme via CSS-variable overrides mapping the web token layer (`--background`, `--foreground`, …) + `--diffs-*` to VSCode theme vars. **Deliverable:** all four webviews working and coordinated.
 
 ### Phase 4 — Native bridge
+
 - `postMessage` → extension host → VSCode APIs implementing the needed slice of `LocalApi`/`EnvironmentApi` (`packages/contracts/src/ipc.ts`): `context.secrets` (provider keys/tokens), `showOpenDialog`, theme tokens, `env.openExternal`, `showTextDocument`, `createTerminal`, `workspace.workspaceFolders[0]`.
 - Delegate to native VSCode: interactive terminal, file opens, SCM status. Keep custom: comment-able diff, chat, list+tree, settings. **Deliverable:** secrets, pickers, file/terminal opens work natively.
 

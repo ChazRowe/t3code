@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "~/lib/utils";
+import { useVsCodeActiveThreadRef } from "~/vscode/activeThreadContext";
 import { buttonVariants } from "~/components/ui/button";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -428,6 +429,11 @@ interface ToastProviderProps extends Toast.Provider.Props {
 }
 
 function useActiveThreadRefFromRoute(): ScopedThreadRef | null {
+  const vscodeThreadRef = useVsCodeActiveThreadRef();
+  if (vscodeThreadRef !== undefined) {
+    return vscodeThreadRef;
+  }
+
   const routeTarget = useParams({
     strict: false,
     select: (params) => resolveThreadRouteTarget(params),

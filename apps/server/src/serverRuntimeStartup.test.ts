@@ -193,6 +193,70 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
   });
 });
 
+it.effect(
+  "resolveAutoBootstrapWelcomeTargets creates a new thread when configured to always bootstrap fresh",
+  () => {
+    const bootstrapProjectId = ProjectId.make("project-startup-bootstrap");
+    const bootstrapThreadId = ThreadId.make("thread-startup-bootstrap");
+
+    return Effect.gen(function* () {
+      const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
+      const targets = yield* resolveAutoBootstrapWelcomeTargets.pipe(
+        Effect.provideService(ServerConfig, {
+          cwd: "/tmp/startup-project",
+          autoBootstrapProjectFromCwd: true,
+          autoBootstrapCreateNewThread: true,
+        } as never),
+        Effect.provideService(ProjectionSnapshotQuery, {
+          getCommandReadModel: () => Effect.die("unused"),
+          getSnapshot: () => Effect.die("unused"),
+          getShellSnapshot: () => Effect.die("unused"),
+          getArchivedShellSnapshot: () => Effect.die("unused"),
+          getSnapshotSequence: () => Effect.die("unused"),
+          getCounts: () => Effect.die("unused"),
+          getActiveProjectByWorkspaceRoot: () =>
+            Effect.succeed(
+              Option.some({
+                id: bootstrapProjectId,
+                title: "Startup Project",
+                workspaceRoot: "/tmp/startup-project",
+                defaultModelSelection: getAutoBootstrapDefaultModelSelection(),
+                scripts: [],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+                deletedAt: null,
+              }),
+            ),
+          getProjectShellById: () => Effect.die("unused"),
+          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.some(bootstrapThreadId)),
+          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+          getFullThreadDiffContext: () => Effect.succeed(Option.none()),
+          getThreadShellById: () => Effect.die("unused"),
+          getThreadDetailById: () => Effect.die("unused"),
+          listSubagentChildActivityRows: () => Effect.die("unused"),
+          listSubagentRootRefRows: () => Effect.die("unused"),
+          getSubagentTree: () => Effect.die("unused"),
+          getSubagentActivities: () => Effect.die("unused"),
+        }),
+        Effect.provideService(OrchestrationEngineService, {
+          readEvents: () => Stream.empty,
+          dispatch: (command) =>
+            Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
+              Effect.as({ sequence: 1 }),
+            ),
+          streamDomainEvents: Stream.empty,
+        } satisfies OrchestrationEngineShape),
+        Effect.provide(NodeServices.layer),
+      );
+
+      assert.equal(typeof targets.bootstrapProjectId, "string");
+      assert.equal(typeof targets.bootstrapThreadId, "string");
+      assert.notEqual(targets.bootstrapThreadId, bootstrapThreadId);
+      assert.deepStrictEqual(yield* Ref.get(dispatchCalls), ["thread.create"]);
+    });
+  },
+);
+
 it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when missing", () =>
   Effect.gen(function* () {
     const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);

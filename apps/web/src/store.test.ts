@@ -1153,7 +1153,9 @@ describe("unattendedRun preservation across live shell upserts", () => {
     // waiting for a snapshot refresh.
     const thread = makeThread({ unattendedRun: null });
     const initialState = makeState(thread);
-    expect(localEnvironmentStateOf(initialState).threadShellById[thread.id]?.unattendedRun).toBeNull();
+    expect(
+      localEnvironmentStateOf(initialState).threadShellById[thread.id]?.unattendedRun,
+    ).toBeNull();
 
     const shellEvent = makeThreadUpsertedShellEvent({
       ...thread,
@@ -1178,9 +1180,7 @@ describe("unattendedRun preservation across live shell upserts", () => {
     const shellEvent = makeThreadUpsertedShellEvent({ ...thread, unattendedRun: null });
     const nextState = applyShellEvent(initialState, shellEvent, localEnvironmentId);
 
-    expect(
-      localEnvironmentStateOf(nextState).threadShellById[thread.id]?.unattendedRun,
-    ).toBeNull();
+    expect(localEnvironmentStateOf(nextState).threadShellById[thread.id]?.unattendedRun).toBeNull();
   });
 });
 

@@ -18,11 +18,19 @@ import {
   getPairingTokenFromUrl,
   stripPairingTokenFromUrl as stripPairingTokenUrl,
 } from "../../pairingUrl";
+import { isVSCode } from "../../env";
 
 import { PrimaryEnvironmentHttpClient } from "./httpClient";
-import { runPrimaryHttp } from "../../lib/runtime";
+import { runPrimaryHttp, webRuntime } from "../../lib/runtime";
+import { readPrimaryEnvironmentTarget } from "./target";
+import {
+  getVsCodePrimaryBearerToken,
+  setVsCodePrimaryBearerToken,
+  __resetVsCodePrimaryBearerTokenForTests,
+} from "./vscodeBearerAuth";
 import * as Data from "effect/Data";
 import * as Predicate from "effect/Predicate";
+import { bootstrapRemoteBearerSession, fetchRemoteSessionState } from "@t3tools/client-runtime";
 
 export class BootstrapHttpError extends Data.TaggedError("BootstrapHttpError")<{
   readonly message: string;
@@ -101,6 +109,33 @@ function getEmbeddedBootstrapCredential(): string | null {
 }
 
 export async function fetchSessionState(): Promise<AuthSessionState> {
+  const vscodeBearerToken = isVSCode ? getVsCodePrimaryBearerToken() : null;
+  if (vscodeBearerToken) {
+    const httpBaseUrl = readPrimaryEnvironmentTarget()?.target.httpBaseUrl;
+    if (!httpBaseUrl) {
+      throw new BootstrapHttpError({
+        message: "Unable to resolve the VSCode environment HTTP base URL.",
+        status: 500,
+      });
+    }
+    return retryTransientBootstrap(async () => {
+      try {
+        return await webRuntime.runPromise(
+          fetchRemoteSessionState({
+            httpBaseUrl,
+            bearerToken: vscodeBearerToken,
+          }),
+        );
+      } catch (error) {
+        const status = readHttpApiStatus(error);
+        throw new BootstrapHttpError({
+          message: `Failed to load server auth session state (${status ?? "unknown"}).`,
+          status: status ?? 500,
+        });
+      }
+    });
+  }
+
   return retryTransientBootstrap(async () => {
     try {
       return await runPrimaryHttp(
@@ -254,7 +289,42 @@ function isTransientBootstrapError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+async function exchangeVsCodeBootstrapCredential(credential: string): Promise<void> {
+  const httpBaseUrl = readPrimaryEnvironmentTarget()?.target.httpBaseUrl;
+  if (!httpBaseUrl) {
+    throw new Error("Unable to resolve the VSCode environment HTTP base URL.");
+  }
+
+  const tokenResponse = await retryTransientBootstrap(async () => {
+    try {
+      return await webRuntime.runPromise(
+        bootstrapRemoteBearerSession({
+          httpBaseUrl,
+          credential,
+          clientMetadata: {
+            label: "T3 Code VSCode",
+            deviceType: "unknown",
+          },
+        }),
+      );
+    } catch (error) {
+      const status = readHttpApiStatus(error) ?? 500;
+      const message = toFriendlyBootstrapErrorMessage(status, readHttpApiErrorMessage(error, ""));
+      throw new BootstrapHttpError({
+        message: message || `Failed to bootstrap auth session (${status}).`,
+        status,
+      });
+    }
+  });
+
+  setVsCodePrimaryBearerToken(tokenResponse.access_token);
+}
+
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
+  if (isVSCode) {
+    return bootstrapVsCodeServerAuth();
+  }
+
   const bootstrapCredential = getEmbeddedBootstrapCredential();
   const currentSession = await fetchSessionState();
   if (currentSession.authenticated) {
@@ -273,6 +343,61 @@ async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
     await waitForAuthenticatedSessionAfterBootstrap();
     return { status: "authenticated" };
   } catch (error) {
+    return {
+      status: "requires-auth",
+      auth: currentSession.auth,
+      errorMessage: error instanceof Error ? error.message : "Authentication failed.",
+    };
+  }
+}
+
+async function bootstrapVsCodeServerAuth(): Promise<ServerAuthGateState> {
+  const bootstrapCredential = getEmbeddedBootstrapCredential();
+  const existingBearerToken = getVsCodePrimaryBearerToken();
+
+  if (existingBearerToken) {
+    try {
+      const currentSession = await fetchSessionState();
+      if (currentSession.authenticated) {
+        return { status: "authenticated" };
+      }
+    } catch {
+      setVsCodePrimaryBearerToken(null);
+    }
+  }
+
+  let currentSession: AuthSessionState;
+  try {
+    currentSession = await fetchSessionState();
+  } catch {
+    currentSession = {
+      authenticated: false,
+      auth: {
+        policy: "desktop-managed-local",
+        bootstrapMethods: ["desktop-bootstrap"],
+        sessionMethods: ["bearer-access-token"],
+        sessionCookieName: "t3_session",
+      },
+    };
+  }
+
+  if (currentSession.authenticated) {
+    return { status: "authenticated" };
+  }
+
+  if (!bootstrapCredential) {
+    return {
+      status: "requires-auth",
+      auth: currentSession.auth,
+    };
+  }
+
+  try {
+    await exchangeVsCodeBootstrapCredential(bootstrapCredential);
+    await waitForAuthenticatedSessionAfterBootstrap();
+    return { status: "authenticated" };
+  } catch (error) {
+    setVsCodePrimaryBearerToken(null);
     return {
       status: "requires-auth",
       auth: currentSession.auth,
@@ -486,4 +611,5 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
 export function __resetServerAuthBootstrapForTests() {
   bootstrapPromise = null;
   resolvedAuthenticatedGateState = null;
+  __resetVsCodePrimaryBearerTokenForTests();
 }

@@ -79,9 +79,8 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   // Logged-in account identity the adapter pulls alongside the usage snapshot.
   public accountEmail: string | undefined;
 
-  readonly accountInfo = async (): Promise<{ readonly email?: string | undefined }> => ({
-    ...(this.accountEmail !== undefined ? { email: this.accountEmail } : {}),
-  });
+  readonly accountInfo = async (): Promise<{ readonly email?: string | undefined }> =>
+    this.accountEmail !== undefined ? { email: this.accountEmail } : {};
 
   emit(message: SDKMessage): void {
     if (this.done) {

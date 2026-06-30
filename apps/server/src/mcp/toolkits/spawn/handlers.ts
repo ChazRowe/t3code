@@ -173,11 +173,12 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
     readonly error: string | null;
   }): string => {
     const head = `[Subagent "${input.summary}" (${input.childThreadId})`;
-    const body =
-      input.resultText !== null && input.resultText.length > 0 ? input.resultText : null;
+    const body = input.resultText !== null && input.resultText.length > 0 ? input.resultText : null;
     switch (input.status) {
       case "completed":
-        return body !== null ? `${head} finished]\n\n${body}` : `${head} finished with no text output.]`;
+        return body !== null
+          ? `${head} finished]\n\n${body}`
+          : `${head} finished with no text output.]`;
       case "failed":
         return (
           `${head} failed: ${input.error ?? "ended in a failed state"}.]` +
@@ -298,7 +299,9 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
         // (intermittently losing a subagent's entire reply); `subscribeRuntimeEvents` attaches
         // synchronously here. `done` carries either the turn state or a send failure.
         const textRef = yield* Ref.make("");
-        const done = yield* Deferred.make<{ readonly state: string } | { readonly sendError: string }>();
+        const done = yield* Deferred.make<
+          { readonly state: string } | { readonly sendError: string }
+        >();
         const events = yield* providerService.subscribeRuntimeEvents;
         yield* Effect.forkScoped(
           // `events` is a PubSub `Subscription`, NOT a `Queue.Dequeue` — it must be consumed with
@@ -613,9 +616,7 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
             : `Subagent '${agentId}' completed but produced no text output.`;
         case "timedOut":
           return (
-            (job.resultText !== null && job.resultText.length > 0
-              ? `${job.resultText}\n\n`
-              : "") +
+            (job.resultText !== null && job.resultText.length > 0 ? `${job.resultText}\n\n` : "") +
             `[Subagent '${agentId}' timed out after ${spawnMaxWaitMinutes} minutes; ` +
             `it may still be running on thread ${job.childThreadId}.]`
           );

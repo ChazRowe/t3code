@@ -1213,12 +1213,8 @@ function ChatViewContent(props: ChatViewProps) {
   const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
 
-  const {
-    startUnattendedRun,
-    pauseUnattendedRun,
-    resumeUnattendedRun,
-    stopUnattendedRun,
-  } = useThreadActions();
+  const { startUnattendedRun, pauseUnattendedRun, resumeUnattendedRun, stopUnattendedRun } =
+    useThreadActions();
 
   const fallbackDraftProjectRef = draftThread
     ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)

@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* The VS Code embedded chat webview (apps/vscode/webview) roots Vite at
+   webview/chat, so Tailwind v4's automatic content detection never reaches the
+   shared web components and emits no utility classes for them. Register the web
+   source tree explicitly so utilities are generated for both the main app
+   (whose Vite root is already apps/web — this is a no-op there) and the
+   embedded webview build. Directory form keeps node_modules/.gitignore
+   heuristics applied. */
+@source "../";
+
 @custom-variant dark (&:is(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));

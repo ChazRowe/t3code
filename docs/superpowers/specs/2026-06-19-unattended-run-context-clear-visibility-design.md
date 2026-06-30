@@ -72,13 +72,13 @@ The clear path today is: `session.stop` → poll until stopped →
 1. **Before-marker** — at the clear, dispatch `thread.activity.append` with kind
    `unattended.context-cleared` and payload
    `{ fromIteration, toIteration, usedTokens, maxTokens }`. Renders inline as:
-   *"⏳ Context cleared · iter 4 → 5 · before 517k / 1M (52%)."*
+   _"⏳ Context cleared · iter 4 → 5 · before 517k / 1M (52%)."_
 2. Set a per-thread "awaiting fresh reading" flag.
 3. **After-marker** — when the fresh session emits its **first**
    `context-window.updated` after the clear, dispatch `unattended.context-fresh`
    with the new `{ iteration, usedTokens, maxTokens }`, then clear the flag
    (strictly one-shot). Renders inline as:
-   *"✓ Fresh context · iter 5 · now 4k / 1M (0.4%)."*
+   _"✓ Fresh context · iter 5 · now 4k / 1M (0.4%)."_
 
 The reactor emitting `thread.activity.append` produces more
 `thread.activity-appended` events, but their kinds (`unattended.context-cleared`

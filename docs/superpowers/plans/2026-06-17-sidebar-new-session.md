@@ -25,10 +25,12 @@
 A pure, props-driven split-button component, exported from `Sidebar.tsx` (mirrors the existing exported-for-test `SidebarThreadRow` pattern) and verified with a browser component test using spy callbacks.
 
 **Files:**
+
 - Modify: `apps/web/src/components/Sidebar.tsx` (add exported component; add `GitBranchPlusIcon` to the existing `lucide-react` import block at lines 1-13)
 - Test: `apps/web/src/components/Sidebar.newSession.browser.tsx` (create)
 
 **Interfaces:**
+
 - Produces: `export function SidebarNewSessionButton(props: SidebarNewSessionButtonProps)` where
   ```ts
   interface SidebarNewSessionButtonProps {
@@ -168,9 +170,7 @@ export function SidebarNewSessionButton({
         <SquarePenIcon className="size-3.5" />
         <span className="flex-1 truncate text-left text-xs">New Session</span>
         {newSessionShortcutLabel ? (
-          <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
-            {newSessionShortcutLabel}
-          </Kbd>
+          <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">{newSessionShortcutLabel}</Kbd>
         ) : null}
       </SidebarMenuButton>
       <Tooltip>
@@ -223,6 +223,7 @@ git commit -m "feat(web): add SidebarNewSessionButton presentational component"
 Build the action context in the parent `Sidebar` component, derive the two click handlers and the disabled state, thread them through `SidebarProjectsContent`, and render `SidebarNewSessionButton` at the top of `SidebarContent`.
 
 **Files:**
+
 - Modify: `apps/web/src/components/Sidebar.tsx`
   - Imports (top of file).
   - `SidebarProjectsContentProps` interface (`~line 2625`) and its destructure (`~line 2666`).
@@ -230,14 +231,17 @@ Build the action context in the parent `Sidebar` component, derive the two click
   - Parent `Sidebar` component body (`~line 2895+`): hook call (`~line 2910`), new context/handlers/labels, and the `<SidebarProjectsContent .../>` render site (`~line 3529`).
 
 **Interfaces:**
+
 - Consumes: `SidebarNewSessionButton` (Task 1); `useHandleNewThread` from `../hooks/useHandleNewThread`; `startNewLocalThreadFromContext`, `startNewThreadFromContext`, `resolveThreadActionProjectRef`, and type `ChatThreadActionContext` from `../lib/chatThreadActions`; the in-file `resolveSidebarNewThreadEnvMode` (already imported, used at `Sidebar.tsx:1764`) and `shortcutLabelForCommand` (already imported); `defaultThreadEnvMode` (already in scope in the parent component, used at `Sidebar.tsx:1796`).
 - Produces: no new exported interface; new props added to the internal `SidebarProjectsContentProps`:
+
   ```ts
   onNewSession: () => void;
   onNewSessionWithContext: () => void;
   canCreateNewSession: boolean;
   newSessionWithContextShortcutLabel: string | null;
   ```
+
   (`newSessionShortcutLabel` already exists on the props as `newThreadShortcutLabel` and is reused.)
 
 - [ ] **Step 1: Add imports**
@@ -268,18 +272,18 @@ import {
 In the parent `Sidebar` component, replace line 2910:
 
 ```tsx
-  const { handleNewThread } = useNewThreadHandler();
+const { handleNewThread } = useNewThreadHandler();
 ```
 
 with:
 
 ```tsx
-  const {
-    activeThread: newSessionActiveThread,
-    activeDraftThread: newSessionActiveDraftThread,
-    defaultProjectRef: newSessionDefaultProjectRef,
-    handleNewThread,
-  } = useHandleNewThread();
+const {
+  activeThread: newSessionActiveThread,
+  activeDraftThread: newSessionActiveDraftThread,
+  defaultProjectRef: newSessionDefaultProjectRef,
+  handleNewThread,
+} = useHandleNewThread();
 ```
 
 `handleNewThread` is the same `useNewThreadState()` callback as before, so all existing usages are unaffected.
@@ -289,49 +293,50 @@ with:
 Add the following inside the parent `Sidebar` component, after the existing `newThreadShortcutLabel` computation (`~line 3054-3056`, which uses `keybindings` and `newThreadShortcutLabelOptions`):
 
 ```tsx
-  const newSessionWithContextShortcutLabel = shortcutLabelForCommand(
-    keybindings,
-    "chat.new",
-    newThreadShortcutLabelOptions,
-  );
+const newSessionWithContextShortcutLabel = shortcutLabelForCommand(
+  keybindings,
+  "chat.new",
+  newThreadShortcutLabelOptions,
+);
 
-  const newSessionContext = useMemo<ChatThreadActionContext>(
-    () => ({
-      activeThread: newSessionActiveThread,
-      activeDraftThread: newSessionActiveDraftThread,
-      defaultProjectRef: newSessionDefaultProjectRef,
-      defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
-        defaultEnvMode: defaultThreadEnvMode,
-      }),
-      handleNewThread,
+const newSessionContext = useMemo<ChatThreadActionContext>(
+  () => ({
+    activeThread: newSessionActiveThread,
+    activeDraftThread: newSessionActiveDraftThread,
+    defaultProjectRef: newSessionDefaultProjectRef,
+    defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
+      defaultEnvMode: defaultThreadEnvMode,
     }),
-    [
-      newSessionActiveThread,
-      newSessionActiveDraftThread,
-      newSessionDefaultProjectRef,
-      defaultThreadEnvMode,
-      handleNewThread,
-    ],
-  );
+    handleNewThread,
+  }),
+  [
+    newSessionActiveThread,
+    newSessionActiveDraftThread,
+    newSessionDefaultProjectRef,
+    defaultThreadEnvMode,
+    handleNewThread,
+  ],
+);
 
-  const canCreateNewSession = resolveThreadActionProjectRef(newSessionContext) != null;
+const canCreateNewSession = resolveThreadActionProjectRef(newSessionContext) != null;
 
-  const handleNewSessionClick = useCallback(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    void startNewLocalThreadFromContext(newSessionContext);
-  }, [isMobile, setOpenMobile, newSessionContext]);
+const handleNewSessionClick = useCallback(() => {
+  if (isMobile) {
+    setOpenMobile(false);
+  }
+  void startNewLocalThreadFromContext(newSessionContext);
+}, [isMobile, setOpenMobile, newSessionContext]);
 
-  const handleNewSessionWithContextClick = useCallback(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    void startNewThreadFromContext(newSessionContext);
-  }, [isMobile, setOpenMobile, newSessionContext]);
+const handleNewSessionWithContextClick = useCallback(() => {
+  if (isMobile) {
+    setOpenMobile(false);
+  }
+  void startNewThreadFromContext(newSessionContext);
+}, [isMobile, setOpenMobile, newSessionContext]);
 ```
 
 Notes:
+
 - `defaultThreadEnvMode`, `isMobile`, `setOpenMobile`, `keybindings`, and `newThreadShortcutLabelOptions` are already in scope in this component.
 - The `ChatThreadActionContext` shape (`activeThread?: ThreadContextLike | undefined`, `activeDraftThread: ... | null`, `defaultProjectRef: ScopedProjectRef | null`) matches exactly what `useHandleNewThread()` returns — this is the same wiring `_chat.tsx` uses, so no casts are needed.
 
@@ -362,19 +367,19 @@ In the `SidebarProjectsContent` destructure (`~line 2666-2702`), add the matchin
 In `SidebarProjectsContent`'s return, insert a new `SidebarGroup` as the FIRST child of `<SidebarContent className="gap-0">` (immediately before the search `SidebarGroup` at `~line 2731`):
 
 ```tsx
-      <SidebarGroup className="px-2 pt-2 pb-1">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarNewSessionButton
-              onNewSession={onNewSession}
-              onNewSessionWithContext={onNewSessionWithContext}
-              disabled={!canCreateNewSession}
-              newSessionShortcutLabel={newThreadShortcutLabel}
-              newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}
-            />
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
+<SidebarGroup className="px-2 pt-2 pb-1">
+  <SidebarMenu>
+    <SidebarMenuItem>
+      <SidebarNewSessionButton
+        onNewSession={onNewSession}
+        onNewSessionWithContext={onNewSessionWithContext}
+        disabled={!canCreateNewSession}
+        newSessionShortcutLabel={newThreadShortcutLabel}
+        newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}
+      />
+    </SidebarMenuItem>
+  </SidebarMenu>
+</SidebarGroup>
 ```
 
 - [ ] **Step 6: Pass the new props at the `SidebarProjectsContent` render site**
@@ -382,10 +387,10 @@ In `SidebarProjectsContent`'s return, insert a new `SidebarGroup` as the FIRST c
 At the `<SidebarProjectsContent .../>` render (`~line 3529`), add:
 
 ```tsx
-          onNewSession={handleNewSessionClick}
-          onNewSessionWithContext={handleNewSessionWithContextClick}
-          canCreateNewSession={canCreateNewSession}
-          newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}
+onNewSession = { handleNewSessionClick };
+onNewSessionWithContext = { handleNewSessionWithContextClick };
+canCreateNewSession = { canCreateNewSession };
+newSessionWithContextShortcutLabel = { newSessionWithContextShortcutLabel };
 ```
 
 (The existing `newThreadShortcutLabel={...}` prop already supplies the primary label.)
@@ -398,6 +403,7 @@ Expected: PASS with no new errors.
 - [ ] **Step 8: Run the affected tests**
 
 Run (from `apps/web`):
+
 - `pnpm exec vp test run --project browser src/components/Sidebar.newSession.browser.tsx`
 - `pnpm exec vp test run --project unit src/components/Sidebar.logic.test.ts`
 
@@ -406,6 +412,7 @@ Expected: PASS — the presentational test still passes and existing sidebar log
 - [ ] **Step 9: Manual verification (use the `run` skill)**
 
 Launch the web app, open the sidebar, and confirm:
+
 - A full-width "New Session" button appears at the top of the sidebar with a small branch icon to its right.
 - Clicking "New Session" opens a fresh draft in the active/first project (resets to default env mode).
 - Clicking the branch icon opens a new draft inheriting the current thread's branch/worktree/env when a thread is active.

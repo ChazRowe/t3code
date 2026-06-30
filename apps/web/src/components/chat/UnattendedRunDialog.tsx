@@ -55,7 +55,9 @@ export function UnattendedRunDialog({ open, onOpenChange, onConfirm }: Unattende
             value={count}
             min={1}
             max={UNATTENDED_RUN_MAX_ITERATIONS}
-            onValueChange={(value) => { if (value !== null) setCount(value); }}
+            onValueChange={(value) => {
+              if (value !== null) setCount(value);
+            }}
           >
             <NumberFieldGroup>
               <NumberFieldDecrement aria-label="Decrease iterations" />

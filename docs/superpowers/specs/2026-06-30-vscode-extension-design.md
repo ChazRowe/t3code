@@ -107,12 +107,12 @@ support without touching the UI.
 Four webviews, all rendering reused `apps/web` React components re-themed to
 VSCode tokens:
 
-| # | Surface | Location | Content |
-|---|---------|----------|---------|
-| 1 | Session list + subagent tree | Sidebar (activity-bar view container) | Threads for the current workspace folder only; subagent tree of the selected session. |
-| 2 | Live session chat | Sidebar (docked) | The chat/conversation view (`ChatView`), including the changed-files / diff tree. |
-| 3 | Settings | Editor tab (webview panel) | The settings route with its existing internal settings-type sidebar. |
-| 4 | Comment-able diff | Editor area (webview panel) | Opened when a file in the diff tree (surface 2) is clicked. Custom — kept instead of VSCode's native diff editor specifically because it supports inline comments on the diff. |
+| #   | Surface                      | Location                              | Content                                                                                                                                                                        |
+| --- | ---------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Session list + subagent tree | Sidebar (activity-bar view container) | Threads for the current workspace folder only; subagent tree of the selected session.                                                                                          |
+| 2   | Live session chat            | Sidebar (docked)                      | The chat/conversation view (`ChatView`), including the changed-files / diff tree.                                                                                              |
+| 3   | Settings                     | Editor tab (webview panel)            | The settings route with its existing internal settings-type sidebar.                                                                                                           |
+| 4   | Comment-able diff            | Editor area (webview panel)           | Opened when a file in the diff tree (surface 2) is clicked. Custom — kept instead of VSCode's native diff editor specifically because it supports inline comments on the diff. |
 
 ### Cross-webview selection broker
 
@@ -125,7 +125,7 @@ isolated documents with independent stores and WS connections, so a small
   open-intent events ("open this diff", "open settings").
 - Broadcasts changes to all webviews over `postMessage`.
 - Webviews own their own server-derived state (from their own WS connection);
-  they sync only *selection/navigation* through the broker, not data.
+  they sync only _selection/navigation_ through the broker, not data.
 
 This is the main net-new glue versus the desktop app.
 
@@ -135,15 +135,15 @@ A thin replacement for the Electron `desktopBridge`/`LocalApi` surface,
 implemented over webview `postMessage` → extension host → VSCode APIs. Only what
 VSCode actually needs:
 
-| Capability | VSCode mapping |
-|---|---|
-| Secret storage (provider keys, tokens) | `context.secrets` |
-| Folder / file picker | `window.showOpenDialog` |
-| Theme tokens | webview CSS vars derived from the active VSCode theme |
-| Open external URL | `env.openExternal` |
-| Open file in editor | `window.showTextDocument` |
-| Open VSCode terminal | `window.createTerminal` |
-| Workspace folder (single-project scope) | `workspace.workspaceFolders[0]` |
+| Capability                              | VSCode mapping                                        |
+| --------------------------------------- | ----------------------------------------------------- |
+| Secret storage (provider keys, tokens)  | `context.secrets`                                     |
+| Folder / file picker                    | `window.showOpenDialog`                               |
+| Theme tokens                            | webview CSS vars derived from the active VSCode theme |
+| Open external URL                       | `env.openExternal`                                    |
+| Open file in editor                     | `window.showTextDocument`                             |
+| Open VSCode terminal                    | `window.createTerminal`                               |
+| Workspace folder (single-project scope) | `workspace.workspaceFolders[0]`                       |
 
 ### Native delegation vs. custom
 

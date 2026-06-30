@@ -2372,8 +2372,7 @@ describe("ProviderRuntimeIngestion", () => {
         thread.session?.activeTurnId === null &&
         thread.messages.some(
           (message: ProviderRuntimeTestMessage) =>
-            message.id === "assistant:item-ordering" &&
-            message.text.includes("<<WRAP_COMPLETE>>"),
+            message.id === "assistant:item-ordering" && message.text.includes("<<WRAP_COMPLETE>>"),
         ),
     );
 
@@ -2867,8 +2866,7 @@ describe("ProviderRuntimeIngestion", () => {
     await waitForThread(
       harness.readModel,
       (thread) =>
-        thread.session?.status === "running" &&
-        thread.session?.activeTurnId === "turn-claude-diff",
+        thread.session?.status === "running" && thread.session?.activeTurnId === "turn-claude-diff",
     );
 
     harness.emit({
@@ -2883,13 +2881,10 @@ describe("ProviderRuntimeIngestion", () => {
       },
     });
 
-    const thread = await waitForThread(
-      harness.readModel,
-      (entry) =>
-        entry.checkpoints.some(
-          (checkpoint: ProviderRuntimeTestCheckpoint) =>
-            checkpoint.turnId === "turn-claude-diff",
-        ),
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.checkpoints.some(
+        (checkpoint: ProviderRuntimeTestCheckpoint) => checkpoint.turnId === "turn-claude-diff",
+      ),
     );
 
     const checkpoint = thread.checkpoints.find(

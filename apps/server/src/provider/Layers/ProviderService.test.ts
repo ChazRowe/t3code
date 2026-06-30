@@ -1905,136 +1905,125 @@ validation.layer("ProviderServiceLive validation", (it) => {
   );
 });
 
-it.effect(
-  "recovery fails visibly when the persisted cursor is non-resumable",
-  () =>
-    Effect.gen(function* () {
-      const codex = makeFakeCodexAdapter(CODEX_DRIVER, {
-        // Mirror Claude semantics: resumable iff the cursor carries a `resume`.
-        isResumableCursor: (cursor) =>
-          typeof cursor === "object" &&
-          cursor !== null &&
-          typeof (cursor as { resume?: unknown }).resume === "string",
+it.effect("recovery fails visibly when the persisted cursor is non-resumable", () =>
+  Effect.gen(function* () {
+    const codex = makeFakeCodexAdapter(CODEX_DRIVER, {
+      // Mirror Claude semantics: resumable iff the cursor carries a `resume`.
+      isResumableCursor: (cursor) =>
+        typeof cursor === "object" &&
+        cursor !== null &&
+        typeof (cursor as { resume?: unknown }).resume === "string",
+    });
+    const registry = makeAdapterRegistryMock({
+      [CODEX_DRIVER]: codex.adapter,
+    });
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = Layer.mergeAll(
+      makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provideMerge(AnalyticsService.layerTest),
+        Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+      ),
+      directoryLayer,
+      runtimeRepositoryLayer,
+      NodeServices.layer,
+    );
+    const scope = yield* Scope.make();
+    const services = yield* Layer.build(providerLayer).pipe(Scope.provide(scope));
+
+    const result = yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-nonresumable");
+
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/project-nonresumable",
+        runtimeMode: "full-access",
       });
-      const registry = makeAdapterRegistryMock({
-        [CODEX_DRIVER]: codex.adapter,
-      });
-      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-        Layer.provide(SqlitePersistenceMemory),
-      );
-      const directoryLayer = ProviderSessionDirectoryLive.pipe(
-        Layer.provide(runtimeRepositoryLayer),
-      );
-      const providerLayer = Layer.mergeAll(
-        makeProviderServiceLive().pipe(
-          Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
-          Layer.provide(directoryLayer),
-          Layer.provide(defaultServerSettingsLayer),
-          Layer.provideMerge(AnalyticsService.layerTest),
-          Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
-        ),
-        directoryLayer,
-        runtimeRepositoryLayer,
-        NodeServices.layer,
-      );
-      const scope = yield* Scope.make();
-      const services = yield* Layer.build(providerLayer).pipe(Scope.provide(scope));
 
-      const result = yield* Effect.gen(function* () {
-        const provider = yield* ProviderService;
-        const threadId = asThreadId("thread-nonresumable");
+      // Loop torn down before a durable session id landed: live cursor has no
+      // `resume`. Part B flushes this non-resumable cursor on stop.
+      codex.updateSession(threadId, (existing) => ({
+        ...existing,
+        resumeCursor: { threadId: String(threadId), turnCount: 0 },
+        updatedAt: "2026-01-01T00:00:05.000Z",
+      }));
+      yield* provider.stopSession({ threadId });
 
-        yield* provider.startSession(threadId, {
-          provider: CODEX_DRIVER,
-          providerInstanceId: codexInstanceId,
-          threadId,
-          cwd: "/tmp/project-nonresumable",
-          runtimeMode: "full-access",
-        });
+      // Next user turn triggers recovery; the guard must refuse the cursor.
+      return yield* provider
+        .sendTurn({ threadId, input: "next message", attachments: [] })
+        .pipe(Effect.exit);
+    }).pipe(Effect.provide(services));
 
-        // Loop torn down before a durable session id landed: live cursor has no
-        // `resume`. Part B flushes this non-resumable cursor on stop.
-        codex.updateSession(threadId, (existing) => ({
-          ...existing,
-          resumeCursor: { threadId: String(threadId), turnCount: 0 },
-          updatedAt: "2026-01-01T00:00:05.000Z",
-        }));
-        yield* provider.stopSession({ threadId });
+    yield* Scope.close(scope, Exit.void);
 
-        // Next user turn triggers recovery; the guard must refuse the cursor.
-        return yield* provider
-          .sendTurn({ threadId, input: "next message", attachments: [] })
-          .pipe(Effect.exit);
-      }).pipe(Effect.provide(services));
-
-      yield* Scope.close(scope, Exit.void);
-
-      assert.equal(result._tag, "Failure");
-      if (result._tag === "Failure") {
-        assert.match(
-          Cause.pretty(result.cause),
-          /no provider resume state is persisted/,
-        );
-      }
-    }),
+    assert.equal(result._tag, "Failure");
+    if (result._tag === "Failure") {
+      assert.match(Cause.pretty(result.cause), /no provider resume state is persisted/);
+    }
+  }),
 );
 
-it.effect(
-  "recovery still succeeds for adapters that do not implement isResumableCursor",
-  () =>
-    Effect.gen(function* () {
-      // No `isResumableCursor` option -> adapter omits the method entirely.
-      const codex = makeFakeCodexAdapter(CODEX_DRIVER);
-      const registry = makeAdapterRegistryMock({
-        [CODEX_DRIVER]: codex.adapter,
+it.effect("recovery still succeeds for adapters that do not implement isResumableCursor", () =>
+  Effect.gen(function* () {
+    // No `isResumableCursor` option -> adapter omits the method entirely.
+    const codex = makeFakeCodexAdapter(CODEX_DRIVER);
+    const registry = makeAdapterRegistryMock({
+      [CODEX_DRIVER]: codex.adapter,
+    });
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = Layer.mergeAll(
+      makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(defaultServerSettingsLayer),
+        Layer.provideMerge(AnalyticsService.layerTest),
+        Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+      ),
+      directoryLayer,
+      runtimeRepositoryLayer,
+      NodeServices.layer,
+    );
+    const scope = yield* Scope.make();
+    const services = yield* Layer.build(providerLayer).pipe(Scope.provide(scope));
+
+    const turn = yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-default-recover");
+
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/project-default-recover",
+        runtimeMode: "full-access",
       });
-      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-        Layer.provide(SqlitePersistenceMemory),
-      );
-      const directoryLayer = ProviderSessionDirectoryLive.pipe(
-        Layer.provide(runtimeRepositoryLayer),
-      );
-      const providerLayer = Layer.mergeAll(
-        makeProviderServiceLive().pipe(
-          Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
-          Layer.provide(directoryLayer),
-          Layer.provide(defaultServerSettingsLayer),
-          Layer.provideMerge(AnalyticsService.layerTest),
-          Layer.provide(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
-        ),
-        directoryLayer,
-        runtimeRepositoryLayer,
-        NodeServices.layer,
-      );
-      const scope = yield* Scope.make();
-      const services = yield* Layer.build(providerLayer).pipe(Scope.provide(scope));
+      // Stop with the fake's default opaque (non-null) cursor intact.
+      yield* provider.stopSession({ threadId });
 
-      const turn = yield* Effect.gen(function* () {
-        const provider = yield* ProviderService;
-        const threadId = asThreadId("thread-default-recover");
+      codex.startSession.mockClear();
+      return yield* provider.sendTurn({
+        threadId,
+        input: "resume please",
+        attachments: [],
+      });
+    }).pipe(Effect.provide(services));
 
-        yield* provider.startSession(threadId, {
-          provider: CODEX_DRIVER,
-          providerInstanceId: codexInstanceId,
-          threadId,
-          cwd: "/tmp/project-default-recover",
-          runtimeMode: "full-access",
-        });
-        // Stop with the fake's default opaque (non-null) cursor intact.
-        yield* provider.stopSession({ threadId });
+    yield* Scope.close(scope, Exit.void);
 
-        codex.startSession.mockClear();
-        return yield* provider.sendTurn({
-          threadId,
-          input: "resume please",
-          attachments: [],
-        });
-      }).pipe(Effect.provide(services));
-
-      yield* Scope.close(scope, Exit.void);
-
-      // Recovery re-started the session (no validation failure).
-      assert.equal(codex.startSession.mock.calls.length, 1);
-      assert.equal(String(turn.threadId), "thread-default-recover");
-    }),
+    // Recovery re-started the session (no validation failure).
+    assert.equal(codex.startSession.mock.calls.length, 1);
+    assert.equal(String(turn.threadId), "thread-default-recover");
+  }),
 );

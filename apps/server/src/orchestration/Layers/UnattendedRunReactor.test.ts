@@ -909,20 +909,22 @@ effectIt.effect("uses a custom continue message verbatim when configured", () =>
   }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ continueMessage: "RESUME NOW" })))),
 );
 
-effectIt.effect("appends the last assistant message (sentinel stripped) when the toggle is on", () =>
-  Effect.gen(function* () {
-    const harness = yield* setupHarness();
-    yield* harness.startUnattendedRun(2);
+effectIt.effect(
+  "appends the last assistant message (sentinel stripped) when the toggle is on",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* setupHarness();
+      yield* harness.startUnattendedRun(2);
 
-    yield* harness.driveTurnEnd("wrap", `did real work\n${WRAP_SENTINEL}`);
+      yield* harness.driveTurnEnd("wrap", `did real work\n${WRAP_SENTINEL}`);
 
-    const thread = yield* harness.readThread;
-    const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
-    const continueText = userMessages.find((m) => m.text.includes(CONTINUE_MESSAGE))?.text ?? "";
-    assert.ok(continueText.includes(CONTINUE_MESSAGE), continueText);
-    assert.ok(continueText.endsWith("\n\ndid real work"), continueText);
-    assert.ok(!continueText.includes(WRAP_SENTINEL), continueText);
-  }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ appendLastAgentMessage: true })))),
+      const thread = yield* harness.readThread;
+      const userMessages = thread?.messages.filter((m) => m.role === "user") ?? [];
+      const continueText = userMessages.find((m) => m.text.includes(CONTINUE_MESSAGE))?.text ?? "";
+      assert.ok(continueText.includes(CONTINUE_MESSAGE), continueText);
+      assert.ok(continueText.endsWith("\n\ndid real work"), continueText);
+      assert.ok(!continueText.includes(WRAP_SENTINEL), continueText);
+    }).pipe(Effect.provide(Layer.fresh(makeTestLayer({ appendLastAgentMessage: true })))),
 );
 
 effectIt.effect("does not append the last assistant message when the toggle is off", () =>

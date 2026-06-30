@@ -2,6 +2,7 @@ import type { DesktopEnvironmentBootstrap } from "@t3tools/contracts";
 
 export interface VsCodeBridge {
   getLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null;
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
 export const readVsCodeBridge = (): VsCodeBridge | null => {

@@ -523,10 +523,10 @@ export function derivePendingUserInputs(
 // (`unattended.context-cleared`) or a user `/clear`/`/new` (`context.cleared`). Kept in
 // sync with apps/server/src/orchestration/contextClearMarker.ts; the web app can't import
 // server modules, and activity kinds are already plain strings on this side.
-const CONTEXT_CLEARED_ACTIVITY_KINDS: ReadonlyArray<string> = [
+const CONTEXT_CLEARED_ACTIVITY_KINDS: ReadonlySet<string> = new Set([
   "unattended.context-cleared",
   "context.cleared",
-];
+]);
 
 export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -537,7 +537,7 @@ export function deriveActivePlanState(
   // drop out — mirroring how the subagent tree rebases to the latest clear marker. Consider
   // only plan updates recorded after the most recent context-clear boundary.
   const lastClearIndex = Arr.findLastIndex(ordered, (activity) =>
-    CONTEXT_CLEARED_ACTIVITY_KINDS.includes(activity.kind),
+    CONTEXT_CLEARED_ACTIVITY_KINDS.has(activity.kind),
   ).pipe(Option.getOrElse(() => -1));
   const scopedActivities = lastClearIndex >= 0 ? ordered.slice(lastClearIndex + 1) : ordered;
   const allPlanActivities = scopedActivities.filter(

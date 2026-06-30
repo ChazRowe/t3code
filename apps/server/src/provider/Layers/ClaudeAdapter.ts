@@ -4603,9 +4603,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   // terminal state. A non-empty set means the SDK query is still hosting work
   // that outlives the active turn, so the session must not be reaped — its
   // completion is what re-invokes the agent.
-  const hasPendingBackgroundWork: NonNullable<
-    ClaudeAdapterShape["hasPendingBackgroundWork"]
-  > = (threadId) =>
+  const hasPendingBackgroundWork: NonNullable<ClaudeAdapterShape["hasPendingBackgroundWork"]> = (
+    threadId,
+  ) =>
     Effect.sync(() => {
       const context = sessions.get(threadId);
       return context !== undefined && !context.stopped && context.workflowWatchers.size > 0;
@@ -4616,9 +4616,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   // cursor (e.g. `{ turnCount: 0 }`, which is what a loop torn down before its
   // first durable session id flushes) is NOT resumable, so recovery must fail
   // visibly rather than silently start a fresh conversation.
-  const isResumableCursor: NonNullable<ClaudeAdapterShape["isResumableCursor"]> = (
-    resumeCursor,
-  ) => Effect.sync(() => readClaudeResumeState(resumeCursor)?.resume !== undefined);
+  const isResumableCursor: NonNullable<ClaudeAdapterShape["isResumableCursor"]> = (resumeCursor) =>
+    Effect.sync(() => readClaudeResumeState(resumeCursor)?.resume !== undefined);
 
   const stopAll: ClaudeAdapterShape["stopAll"] = () =>
     Effect.forEach(

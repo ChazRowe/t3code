@@ -9,6 +9,7 @@
 **Tech Stack:** TypeScript, Effect (effect/Schema, effect/Stream, effect/unstable/rpc/Rpc), Vitest (`@effect/vitest`).
 
 **Phase-1 dependencies (ASSUMED to already exist — do not re-implement):**
+
 - `OrchestrationThreadActivity` (`packages/contracts/src/orchestration.ts` ~345) has optional top-level `itemId`, `parentItemId` (`Schema.NullOr(RuntimeItemId)` / `Schema.optional`), and `iteration` (`Schema.NullOr(PositiveInt)`).
 - `ProjectionSnapshotQuery` exposes `listSubagentChildActivityRows({ threadId, parentItemId })` and `listSubagentRootRefRows({ threadId })` (row-level queries against `projection_thread_activities` using the Phase-1 `item_id` / `parent_item_id` / `iteration` columns).
 - `getThreadDetailById`'s activity query already excludes `parent_item_id IS NOT NULL` (subagent transcripts are off the parent snapshot).
@@ -20,6 +21,7 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 ## Task 1: Contract schemas, method constants, RPC entries
 
 **Files:**
+
 - Modify: `packages/contracts/src/orchestration.ts` (imports ~9–24; `ORCHESTRATION_WS_METHODS` ~26–34; new schemas after `OrchestrationThreadStreamItem` ~1280; `OrchestrationRpcSchemas` ~1376–1405)
 - Modify: `packages/contracts/src/rpc.ts` (after `WsOrchestrationSubscribeThreadRpc` ~644; `WsRpcGroup.make(...)` arg list ~748–749)
 - Test: `packages/contracts/src/orchestration.test.ts`
@@ -27,6 +29,7 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 1. - [ ] **Step 1 — Add the import for `RuntimeItemId`.** Open `packages/contracts/src/orchestration.ts`. The base-schema import block (lines ~9–24) currently imports from `./baseSchemas.ts`. Add `RuntimeItemId` to that list (alphabetical-ish, next to `ProviderItemId`):
 
    Find:
+
    ```ts
    import {
      ApprovalRequestId,
@@ -44,7 +47,9 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      TurnId,
    } from "./baseSchemas.ts";
    ```
+
    Replace with (adds `RuntimeItemId`):
+
    ```ts
    import {
      ApprovalRequestId,
@@ -63,9 +68,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      TurnId,
    } from "./baseSchemas.ts";
    ```
+
    (`RuntimeItemId` is defined at `packages/contracts/src/baseSchemas.ts:51` — `export const RuntimeItemId = makeEntityId("RuntimeItemId");`)
 
 2. - [ ] **Step 2 — Add the two method-name constants.** Find `ORCHESTRATION_WS_METHODS` (lines ~26–34):
+
    ```ts
    export const ORCHESTRATION_WS_METHODS = {
      dispatchCommand: "orchestration.dispatchCommand",
@@ -77,7 +84,9 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      subscribeThread: "orchestration.subscribeThread",
    } as const;
    ```
+
    Replace with:
+
    ```ts
    export const ORCHESTRATION_WS_METHODS = {
      dispatchCommand: "orchestration.dispatchCommand",
@@ -93,6 +102,7 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
    ```
 
 3. - [ ] **Step 3 — Add the new schemas.** Insert the following block immediately AFTER `OrchestrationThreadStreamItem` / its `export type` (line ~1280, right before `export const OrchestrationCommandReceiptStatus`). These are the LOCKED CONTRACT shapes:
+
    ```ts
    export const OrchestrationSubagentStatus = Schema.Literals([
      "inProgress",
@@ -179,9 +189,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
    export type OrchestrationSubagentActivitiesStreamItem =
      typeof OrchestrationSubagentActivitiesStreamItem.Type;
    ```
+
    Note: `OrchestrationEvent` is defined at line ~1131–1268 (above the insertion point), and `OrchestrationThreadActivity` at ~345, so both are in scope. This mirrors `OrchestrationThreadStreamItem` (the snapshot/event union template, ~1270) and `OrchestrationShellStreamItem` (the multi-arm `kind`-discriminated union template, ~480) — `ref-changed`/`ref-removed` mirror `project-upserted`/`project-removed`.
 
 4. - [ ] **Step 4 — Add `OrchestrationRpcSchemas` entries.** Find `OrchestrationRpcSchemas` (lines ~1376–1405) and add two entries before the closing `} as const;`:
+
    ```ts
      subscribeThread: {
        input: OrchestrationSubscribeThreadInput,
@@ -193,7 +205,9 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      },
    } as const;
    ```
+
    Replace with:
+
    ```ts
      subscribeThread: {
        input: OrchestrationSubscribeThreadInput,
@@ -215,6 +229,7 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
    ```
 
 5. - [ ] **Step 5 — Add `Rpc.make` stream definitions in `rpc.ts`.** Open `packages/contracts/src/rpc.ts`. The `OrchestrationGetSnapshotError`, `EnvironmentAuthorizationError`, `Rpc`, `Schema`, `ORCHESTRATION_WS_METHODS`, and `OrchestrationRpcSchemas` symbols are already imported (lines 1–2, 9, 54, and the `from "./orchestration.ts"` block). After `WsOrchestrationSubscribeThreadRpc` (ends line ~644), add:
+
    ```ts
    export const WsOrchestrationSubscribeSubagentTreeRpc = Rpc.make(
      ORCHESTRATION_WS_METHODS.subscribeSubagentTree,
@@ -236,14 +251,18 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      },
    );
    ```
+
    This mirrors `WsOrchestrationSubscribeThreadRpc`/`WsOrchestrationSubscribeShellRpc` (~629–644). Confirm `OrchestrationRpcSchemas` is in the `./orchestration.ts` import block at the top of `rpc.ts` (search `OrchestrationRpcSchemas` in the imports; if absent, add it to that import block).
 
 6. - [ ] **Step 6 — Register the two RPCs in `WsRpcGroup`.** In `packages/contracts/src/rpc.ts`, find the `RpcGroup.make(` call (~681) and its argument list. Find:
+
    ```ts
      WsOrchestrationSubscribeShellRpc,
      WsOrchestrationSubscribeThreadRpc,
    ```
+
    Replace with:
+
    ```ts
      WsOrchestrationSubscribeShellRpc,
      WsOrchestrationSubscribeThreadRpc,
@@ -252,6 +271,7 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
    ```
 
 7. - [ ] **Step 7 — Write the contract test.** Open `packages/contracts/src/orchestration.test.ts`. At the top, extend the import from `./orchestration.ts` to include the new symbols:
+
    ```ts
    import {
      ORCHESTRATION_WS_METHODS,
@@ -261,9 +281,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      OrchestrationSubagentActivitiesStreamItem,
    } from "./orchestration.ts";
    ```
+
    (Add these names to the existing import block — do not create a second import statement; some may already be imported.)
 
    Then append these tests (use the file's existing `it`/`assert` + `Schema.decodeUnknownEffect` idiom — see the top of the file, ~lines 1–40):
+
    ```ts
    const decodeSubagentRef = Schema.decodeUnknownEffect(OrchestrationSubagentRef);
    const decodeSubagentTreeStreamItem = Schema.decodeUnknownEffect(
@@ -338,18 +360,23 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      assert.equal("subscribeSubagent" in OrchestrationRpcSchemas, true);
    });
    ```
+
    Note: `it`, `assert`, `Effect`, and `Schema` are already imported at the top of the file.
 
 8. - [ ] **Step 8 — Run the contract test (expect PASS).**
+
    ```
    pnpm --filter @t3tools/contracts test orchestration
    ```
+
    Expected: the new tests PASS. If a decode fails on `iteration`/`turnId`, re-check the `Schema.NullOr` wrappers match the LOCKED shape exactly.
 
 9. - [ ] **Step 9 — Typecheck the contracts package (expect PASS).**
+
    ```
    cd packages/contracts && npx tsgo --noEmit
    ```
+
    Expected: no errors. (If `RuntimeItemId` is reported unused or missing, re-check Step 1.)
 
 10. - [ ] **Step 10 — Commit.**
@@ -363,11 +390,13 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 ## Task 2: `getSubagentTree` in ProjectionSnapshotQuery
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts` (`ProjectionSnapshotQueryShape` interface ~56–160 — add method signature)
 - Modify: `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts` (imports ~1–60; new helper + `getSubagentTree` impl before the final `return { ... } satisfies ProjectionSnapshotQueryShape` ~2045; add to returned object)
 - Test: `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.test.ts`
 
 1. - [ ] **Step 1 — Add the method signature to the shape interface.** Open `apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts`. After `getThreadDetailById` (the last member, ~157–159) and before the closing `}` of `ProjectionSnapshotQueryShape` (~160), add:
+
    ```ts
      /**
       * Read the compact subagent ref tree for a thread (refs only, no transcripts).
@@ -376,9 +405,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
        readonly threadId: ThreadId;
      }) => Effect.Effect<ReadonlyArray<OrchestrationSubagentRef>, ProjectionRepositoryError>;
    ```
+
    At the top of that file, add `OrchestrationSubagentRef` to the existing `@t3tools/contracts` import (it sits alongside `ThreadId`, `OrchestrationThread`, etc. — search the import block and add `OrchestrationSubagentRef`).
 
 2. - [ ] **Step 2 — Write the unit test FIRST (TDD).** Open `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.test.ts`. Add a new test inside the existing `projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => { ... })` block. It seeds: one root `collab_agent_tool_call` activity (`item_id = 'item-root-a'`, `parent_item_id NULL`, `iteration 1`), one child activity under it, and one nested root `collab_agent_tool_call` whose `parent_item_id = 'item-root-a'` (depth 1). The activity-row columns are `activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at` plus the Phase-1 columns `item_id, parent_item_id, iteration` (confirm exact column names against the Phase-1 migration before running; adjust the INSERT column list if Phase 1 named them differently):
+
    ```ts
    it.effect("getSubagentTree builds refs with depth, child counts, and status", () =>
      Effect.gen(function* () {
@@ -485,15 +516,19 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      }),
    );
    ```
+
    Add `RuntimeItemId` to the `@t3tools/contracts` import at the top of the test file if you reference it; otherwise the string literals above decode through the row queries.
 
 3. - [ ] **Step 3 — Run the test (expect FAIL — method not implemented).**
+
    ```
    pnpm --filter t3 test ProjectionSnapshotQuery
    ```
+
    Expected: FAIL with a TypeError/"getSubagentTree is not a function" or a typecheck error. This confirms the test exercises the new method.
 
 4. - [ ] **Step 4 — Implement the server-side label parser + status helper.** Open `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts`. Near the top-of-module helpers (after the `decode*`/row-schema declarations, before `makeProjectionSnapshotQuery`), add a module-level helper mirroring the client `parseSubagentLabel` (`apps/web/src/components/chat/MessagesTimeline.tsx:738`):
+
    ```ts
    const parseSubagentLabel = (
      label: string,
@@ -515,11 +550,13 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      return "inProgress";
    };
    ```
+
    Add `OrchestrationSubagentRef` and `OrchestrationSubagentStatus` to the `@t3tools/contracts` import block at the top of this layer file.
 
    Implementation notes for the parser source: the root ref's display label is the activity `summary` (e.g. `"Explore: find the bug"`); the Phase-1 `listSubagentRootRefRows` row should already expose a `summary`/`label` field plus `kind`, `turnId`, `iteration`, `parentItemId`, `createdAt`. If `listSubagentRootRefRows` does not return `kind`/latest-status, derive status from the latest lifecycle activity for that `itemId` via `listSubagentChildActivityRows` (Step 5) — but prefer reading it directly from the root-ref row if available.
 
 5. - [ ] **Step 5 — Implement `getSubagentTree`.** Add this just before the final `return { ... } satisfies ProjectionSnapshotQueryShape;` (~2045):
+
    ```ts
    const getSubagentTree: ProjectionSnapshotQueryShape["getSubagentTree"] = ({ threadId }) =>
      Effect.gen(function* () {
@@ -545,9 +582,7 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 
        // depth: walk the parentItemId chain among the known root refs.
        const itemIds = new Set(rootRows.map((row) => row.itemId));
-       const parentByItem = new Map(
-         rootRows.map((row) => [row.itemId, row.parentItemId] as const),
-       );
+       const parentByItem = new Map(rootRows.map((row) => [row.itemId, row.parentItemId] as const));
        const depthOf = (itemId: string): number => {
          let depth = 0;
          let current = parentByItem.get(itemId) ?? null;
@@ -565,8 +600,7 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
          return {
            threadId,
            rootItemId: RuntimeItemId.make(row.itemId),
-           parentItemId:
-             row.parentItemId === null ? null : RuntimeItemId.make(row.parentItemId),
+           parentItemId: row.parentItemId === null ? null : RuntimeItemId.make(row.parentItemId),
            label: row.summary,
            subagentType: type,
            description,
@@ -583,9 +617,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
        return refs;
      });
    ```
+
    IMPORTANT: this references the exact field names returned by the Phase-1 `listSubagentRootRefRows` row schema. Before running, open the Phase-1 row-schema definition and confirm the property names (`itemId`, `parentItemId`, `summary`, `kind`, `turnId`, `iteration`, `createdAt`). If Phase 1 returns the latest-status row only once per `itemId`, `subagentStatusFromKind(row.kind)` reflects the latest lifecycle. If the row exposes the label under a different key (e.g. `label` instead of `summary`), substitute it consistently in both the `label:` and `parseSubagentLabel(...)` lines. Use `TrimmedNonEmptyString.make(...)` if the contract decode rejects an untrimmed/empty `label`; in practice the activity `summary` is already `TrimmedNonEmptyString`.
 
 6. - [ ] **Step 6 — Add `getSubagentTree` to the returned object.** In the final return object (~2045–2059), add `getSubagentTree,` after `getThreadDetailById,`:
+
    ```ts
      getThreadShellById,
      getThreadDetailById,
@@ -594,15 +630,19 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
    ```
 
 7. - [ ] **Step 7 — Run the test (expect PASS).**
+
    ```
    pnpm --filter t3 test ProjectionSnapshotQuery
    ```
+
    Expected: PASS. If `depth` for `rootB` is `0` instead of `1`, verify the seeded `item_id`/`parent_item_id` columns and the `depthOf` chain. If `childSubagentCount` for `rootA` is `0`, verify `rootB.parentItemId === 'item-root-a'` in the seed.
 
 8. - [ ] **Step 8 — Typecheck the server package (expect PASS).**
+
    ```
    cd apps/server && npx tsgo --noEmit
    ```
+
    Expected: no errors.
 
 9. - [ ] **Step 9 — Commit.**
@@ -616,11 +656,13 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 ## Task 3: `getSubagentActivities` in ProjectionSnapshotQuery
 
 **Files:**
+
 - Modify: `apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts` (`ProjectionSnapshotQueryShape` — add signature after `getSubagentTree`)
 - Modify: `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts` (new impl + add to returned object)
 - Test: `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.test.ts`
 
 1. - [ ] **Step 1 — Add the signature to the shape interface.** In `apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts`, after the `getSubagentTree` signature (added in Task 2), add:
+
    ```ts
      /**
       * Read a single subagent's direct child activities (one level), ordered chronologically.
@@ -633,9 +675,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
        ProjectionRepositoryError
      >;
    ```
+
    Add `RuntimeItemId` and `OrchestrationThreadActivity` to the `@t3tools/contracts` import in this file if not already present.
 
 2. - [ ] **Step 2 — Write the unit test FIRST (TDD).** In `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.test.ts`, add:
+
    ```ts
    it.effect("getSubagentActivities returns only the direct children of a subagent root", () =>
      Effect.gen(function* () {
@@ -717,15 +761,19 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      }),
    );
    ```
+
    Ensure `RuntimeItemId` is imported from `@t3tools/contracts` at the top of the test file.
 
 3. - [ ] **Step 3 — Run the test (expect FAIL — method not implemented).**
+
    ```
    pnpm --filter t3 test ProjectionSnapshotQuery
    ```
+
    Expected: FAIL ("getSubagentActivities is not a function" or typecheck error).
 
 4. - [ ] **Step 4 — Implement `getSubagentActivities`.** In `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts`, add before the final return object (after `getSubagentTree`):
+
    ```ts
    const getSubagentActivities: ProjectionSnapshotQueryShape["getSubagentActivities"] = ({
      threadId,
@@ -767,9 +815,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
        });
      });
    ```
+
    IMPORTANT: this maps the Phase-1 `listSubagentChildActivityRows` row to `OrchestrationThreadActivity` exactly the way `getThreadDetailById` maps activity rows (`apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts:2008–2022`). Confirm the row's `itemId`/`parentItemId`/`iteration` property names against the Phase-1 row schema and adjust the `Object.assign` keys to match. The promoted top-level activity fields (`itemId`, `parentItemId`, `iteration`) are the Phase-1 additions to `OrchestrationThreadActivity`; if Phase 1 mapped these differently, mirror that mapping. If those fields are NOT yet on `OrchestrationThreadActivity`, drop the `withItemFields` assignment and return `activity` directly (the watch view only needs the activity body), but keep the test asserting `id`/`summary`.
 
 5. - [ ] **Step 5 — Add `getSubagentActivities` to the returned object.** After `getSubagentTree,` in the return object:
+
    ```ts
      getSubagentTree,
      getSubagentActivities,
@@ -777,12 +827,15 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
    ```
 
 6. - [ ] **Step 6 — Run the test (expect PASS).**
+
    ```
    pnpm --filter t3 test ProjectionSnapshotQuery
    ```
+
    Expected: PASS. If the grandchild row leaks in, verify `listSubagentChildActivityRows` filters on `parent_item_id = :parentItemId` (one level) — that is a Phase-1 query and should already be correct.
 
 7. - [ ] **Step 7 — Typecheck (expect PASS).**
+
    ```
    cd apps/server && npx tsgo --noEmit
    ```
@@ -798,20 +851,24 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 ## Task 4: `subscribeSubagentTree` WS handler
 
 **Files:**
+
 - Modify: `apps/server/src/ws.ts` (imports from `@t3tools/contracts`; `RPC_REQUIRED_SCOPE` map ~140–209; new filter helper near `isThreadDetailEvent` ~116–136; handler in `WsRpcGroup.of({...})` after `subscribeThread` ~1015)
 - Test: `apps/server/src/server.test.ts`
 
 1. - [ ] **Step 1 — Wire imports.** In `apps/server/src/ws.ts`, the `@t3tools/contracts` import block already brings in `ORCHESTRATION_WS_METHODS`, `OrchestrationEvent`, `OrchestrationGetSnapshotError`, `AuthOrchestrationReadScope`, etc. Confirm `RuntimeItemId` and `OrchestrationSubagentTreeStreamItem` are importable; you do not need the stream-item type at runtime (handlers return plain objects validated by the RPC success schema), so no new value import is strictly required. Add `RuntimeItemId` to the contracts import only if you reference it in a type annotation below (the handler below does not).
 
 2. - [ ] **Step 2 — Add the auth scope.** In the `RPC_REQUIRED_SCOPE` map (~140–209), add after the `subscribeThread` entry (~147):
+
    ```ts
      [ORCHESTRATION_WS_METHODS.subscribeThread, AuthOrchestrationReadScope],
      [ORCHESTRATION_WS_METHODS.subscribeSubagentTree, AuthOrchestrationReadScope],
      [ORCHESTRATION_WS_METHODS.subscribeSubagent, AuthOrchestrationReadScope],
    ```
+
    (Add both here so Task 5 does not need to touch the map again.)
 
 3. - [ ] **Step 3 — Add a tree-ref event filter helper.** Near `isThreadDetailEvent` (~116–136), add a predicate that recognizes a `thread.activity-appended` event that represents a subagent root ref status change. The root ref activity is a `collab_agent_tool_call` whose `itemId` is set; its `kind` lifecycle transitions (`tool.started`/`tool.updated`/`tool.completed`/`tool.failed`/`tool.denied`) change the ref status. Subagent CHILD activities (which carry `parentItemId`) are NOT tree-ref changes — they belong to `subscribeSubagent`:
+
    ```ts
    function isSubagentRootRefEvent(
      event: OrchestrationEvent,
@@ -835,11 +892,13 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      );
    }
    ```
+
    NOTE on `itemType`: confirm where the provider stamps `collab_agent_tool_call` — Phase-1 grounding says the root `Task` tool call is `itemType: "collab_agent_tool_call"` with `parentItemId` absent. In the current ingestion (`ProviderRuntimeIngestion.ts`), `itemType` is carried on the activity `payload` (e.g. `payload.itemType`), and `itemId` is promoted to the top-level activity by Phase 1. If Phase 1 also promoted `itemType` to the top level, prefer reading `activity.itemType` directly. Keep the predicate matching exactly the root ref so child activities never produce a `ref-changed`.
 
    ALSO add a small mapper that turns the matched event into a `ref-changed` stream item by re-reading the ref from `ProjectionSnapshotQuery.getSubagentTree` and selecting the changed ref (so `depth`/`childSubagentCount`/`status` are always consistent). Define it inside the handler (Step 4) where `projectionSnapshotQuery` is in scope.
 
 4. - [ ] **Step 4 — Add the handler.** In the `WsRpcGroup.of({ ... })` map (~788+), after the `subscribeThread` handler (ends ~1015), add:
+
    ```ts
    [ORCHESTRATION_WS_METHODS.subscribeSubagentTree]: (input) =>
      observeRpcStreamEffect(
@@ -912,9 +971,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
        { "rpc.aggregate": "orchestration" },
      ),
    ```
+
    This mirrors `subscribeThread` (~957–1015) exactly: `observeRpcStreamEffect` wrapper, `Effect.all([snapshot, getSnapshotSequence])`, mapError → `OrchestrationGetSnapshotError`, `streamDomainEvents.pipe(Stream.filter(...))`, `Stream.concat(Stream.make({ kind: "snapshot", ... }), liveStream)`. The `Stream.mapEffect` + `Stream.flatMap` over `Option` mirrors `subscribeShell`'s `toShellStreamEvent` (~923–928). Note there is no `Option.isNone` "not found" guard for the tree — an empty thread legitimately has zero refs and should return `{ refs: [] }` (do NOT fail with `OrchestrationGetSnapshotError` on empty).
 
 5. - [ ] **Step 5 — Write the integration test.** In `apps/server/src/server.test.ts`, add a test in the same describe block as the existing orchestration ws tests (the `subscribeShell` error test is at ~5407; the harness helpers `buildAppUnderTest`, `withWsRpcClient`, `getWsServerUrl` are defined in this file). Override `getSubagentTree` to return one ref, and `streamDomainEvents` to emit a single `thread.activity-appended` root-ref event so the handler emits a live `ref-changed`:
+
    ```ts
    it.effect("routes websocket rpc subscribeSubagentTree emits snapshot then ref-changed", () =>
      Effect.gen(function* () {
@@ -999,15 +1060,19 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
    );
    ```
+
    Ensure `RuntimeItemId` is in the `@t3tools/contracts` import at the top of `server.test.ts` (`ThreadId`, `EventId` are already imported). Confirm the activity object shape matches `OrchestrationThreadActivity` after Phase 1 (the `itemId` top-level field) — if `itemId` is not yet a top-level activity field, drop it from the seed and have `isSubagentRootRefEvent` read `activity.payload.itemId` instead, and make the handler's `changedItemId` read the same path consistently.
 
 6. - [ ] **Step 6 — Run the integration test (expect PASS).**
+
    ```
    pnpm --filter t3 test server
    ```
+
    (Or narrow: `pnpm --filter t3 test server.test`.) Expected: PASS. If only the snapshot arrives and the stream hangs on `Stream.take(2)`, the live filter rejected the event — log the event in `isSubagentRootRefEvent` and confirm `itemType`/`itemId` are read from the right location.
 
 7. - [ ] **Step 7 — Typecheck (expect PASS).**
+
    ```
    cd apps/server && npx tsgo --noEmit
    ```
@@ -1023,10 +1088,12 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 ## Task 5: `subscribeSubagent` WS handler
 
 **Files:**
+
 - Modify: `apps/server/src/ws.ts` (new filter helper near `isThreadDetailEvent`; handler after `subscribeSubagentTree`)
 - Test: `apps/server/src/server.test.ts`
 
 1. - [ ] **Step 1 — Add a direct-child event filter helper.** Near `isThreadDetailEvent` / `isSubagentRootRefEvent` (~116–136), add a predicate factory that matches a `thread.activity-appended` whose activity's `parentItemId === rootItemId` (the subagent's direct children only):
+
    ```ts
    function isSubagentDirectChildEvent(
      event: OrchestrationEvent,
@@ -1040,9 +1107,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      return parentItemId === rootItemId;
    }
    ```
+
    If Phase 1 carries `parentItemId` on the activity `payload` rather than the top level, read `(activity.payload as { parentItemId?: string }).parentItemId` instead — match whatever Task 3's `getSubagentActivities` mapping uses, so snapshot and live stream agree.
 
 2. - [ ] **Step 2 — Add the handler.** In the `WsRpcGroup.of({ ... })` map, after the `subscribeSubagentTree` handler, add:
+
    ```ts
    [ORCHESTRATION_WS_METHODS.subscribeSubagent]: (input) =>
      observeRpcStreamEffect(
@@ -1104,9 +1173,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
        { "rpc.aggregate": "orchestration" },
      ),
    ```
+
    This mirrors `subscribeThread` exactly (snapshot + `getSnapshotSequence`, `streamDomainEvents.pipe(Stream.filter(...), Stream.map(...))`, `Stream.concat`). Like the tree handler, an empty subagent legitimately returns `{ activities: [] }` — do NOT fail on empty. (`input.rootItemId` is a `RuntimeItemId` brand; compare against `parentItemId` as strings — branded ids are strings at runtime, so `parentItemId === input.rootItemId` works; if TS complains in the helper, type the `rootItemId` param as `string`.)
 
 3. - [ ] **Step 3 — Write the integration test.** In `apps/server/src/server.test.ts`, add:
+
    ```ts
    it.effect("routes websocket rpc subscribeSubagent emits snapshot then a live child event", () =>
      Effect.gen(function* () {
@@ -1183,15 +1254,19 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
    );
    ```
+
    Confirm the seeded child activity (with `parentItemId`) decodes against `OrchestrationThreadActivity` after Phase 1; if `parentItemId` lives on `payload`, move it there and have `isSubagentDirectChildEvent` read it from `payload`.
 
 4. - [ ] **Step 4 — Run the integration test (expect PASS).**
+
    ```
    pnpm --filter t3 test server
    ```
+
    Expected: PASS. If the live event never arrives, the `parentItemId === rootItemId` comparison failed — log both values and confirm the read path matches Task 3.
 
 5. - [ ] **Step 5 — Typecheck (expect PASS).**
+
    ```
    cd apps/server && npx tsgo --noEmit
    ```
@@ -1207,9 +1282,11 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
 ## Task 6: Phase verification — deep (2-level) structure end-to-end
 
 **Files:**
+
 - Test: `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.test.ts` (one combined test exercising both queries against a 2-level structure)
 
 1. - [ ] **Step 1 — Add the deep-structure verification test.** This is a query-level test (no ws needed) proving depth 0/1 in `getSubagentTree` and that `getSubagentActivities` on the level-1 root returns only its direct children:
+
    ```ts
    it.effect("deep 2-level subagent structure: correct depths and direct-children isolation", () =>
      Effect.gen(function* () {
@@ -1318,29 +1395,37 @@ If a Phase-1 symbol is missing when you start a task, STOP and confirm Phase 1 i
      }),
    );
    ```
+
    Note: whether `getSubagentActivities({ rootItemId: "item-L1" })` includes the nested subagent ref row itself depends on whether Phase-1 `listSubagentChildActivityRows` returns rows where `parent_item_id = :parentItemId` regardless of `itemType`. The watch view shows the subagent's transcript including nested refs to drill into — so including the ref row is acceptable. The load-bearing assertions are: `act-L1-child` IS present and `act-L0-child` is NOT.
 
 2. - [ ] **Step 2 — Run the verification test (expect PASS).**
+
    ```
    pnpm --filter t3 test ProjectionSnapshotQuery
    ```
+
    Expected: PASS, plus all earlier ProjectionSnapshotQuery tests still green.
 
 3. - [ ] **Step 3 — Run the full affected test surface (expect PASS).**
+
    ```
    pnpm --filter @t3tools/contracts test orchestration
    pnpm --filter t3 test ProjectionSnapshotQuery
    pnpm --filter t3 test server
    ```
+
    Expected: all PASS.
 
 4. - [ ] **Step 4 — Lint + typecheck the whole repo (expect PASS).**
+
    ```
    pnpm lint
    cd packages/contracts && npx tsgo --noEmit
    cd ../../apps/server && npx tsgo --noEmit
    ```
+
    Expected: clean. Per repo convention (`AGENTS.md`), `vp check` and `vp run typecheck` must also pass before the phase is considered complete:
+
    ```
    vp check
    vp run typecheck

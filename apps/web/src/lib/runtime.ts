@@ -10,7 +10,10 @@ import {
   PrimaryEnvironmentHttpClient,
   primaryEnvironmentHttpClientLive,
 } from "../environments/primary/httpClient";
-import { primaryEnvironmentRequestInit } from "../environments/primary/requestInit";
+import {
+  primaryEnvironmentRequestInit,
+  resolvePrimaryEnvironmentRequestInit,
+} from "../environments/primary/requestInit";
 
 import { browserCryptoLayer } from "../cloud/dpop";
 import { webManagedRelayClientLayer } from "../cloud/managedRelayLayer";
@@ -20,7 +23,33 @@ function configuredRelayUrl(): string {
   return resolveCloudPublicConfig().relayUrl ?? "http://relay.invalid";
 }
 
-const webHttpClientLayer = remoteHttpClientLayer(globalThis.fetch);
+const isLoopbackFetchTarget = (input: RequestInfo | URL): boolean => {
+  try {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+};
+
+const readVsCodeBridgeFetch = (): typeof fetch | undefined => {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  const bridge = window.vscodeBridge;
+  return bridge?.fetch ? bridge.fetch.bind(bridge) : undefined;
+};
+
+const resolvedBrowserFetch: typeof fetch = (input, init) => {
+  const bridgeFetch = readVsCodeBridgeFetch();
+  if (bridgeFetch && isLoopbackFetchTarget(input)) {
+    return bridgeFetch(input, init);
+  }
+  return globalThis.fetch(input, init);
+};
+
+const webHttpClientLayer = remoteHttpClientLayer(resolvedBrowserFetch);
 const webRelayTracingLayer = makeRelayClientTracingLayer(resolveRelayTracingConfig(), {
   serviceName: "t3-web-relay-client",
   serviceVersion: import.meta.env.APP_VERSION,
@@ -30,11 +59,20 @@ const webRelayTracingLayer = makeRelayClientTracingLayer(resolveRelayTracingConf
 
 export const remoteHttpRuntime = ManagedRuntime.make(webHttpClientLayer);
 
+const primaryFetch: typeof fetch = (input, init) => {
+  const resolvedInit = resolvePrimaryEnvironmentRequestInit(init);
+  const bridgeFetch = readVsCodeBridgeFetch();
+  if (bridgeFetch) {
+    return bridgeFetch(input, resolvedInit);
+  }
+  return globalThis.fetch(input, resolvedInit);
+};
+
 const primaryHttpRuntime = ManagedRuntime.make(
   primaryEnvironmentHttpClientLive.pipe(
     Layer.provide(
       Layer.mergeAll(
-        remoteHttpClientLayer((input, init) => globalThis.fetch(input, init)),
+        remoteHttpClientLayer(primaryFetch),
         Layer.succeed(FetchHttpClient.RequestInit, primaryEnvironmentRequestInit),
         httpHeaderRedactionLayer,
       ),

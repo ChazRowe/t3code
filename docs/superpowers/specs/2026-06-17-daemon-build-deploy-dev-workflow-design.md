@@ -93,15 +93,15 @@ Plain `bash` scripts under `ops/` (kept out of the TypeScript `scripts/`
 workspace package), fronted by `package.json` scripts for discoverability. A
 shared `ops/lib.sh` holds the service name, repo path, and helpers.
 
-| Command | Script | Behavior |
-| --- | --- | --- |
-| `pnpm daemon:deploy` | `ops/deploy.sh` | `set -euo pipefail`; `vp run --filter t3 build`; on success `systemctl --user restart t3code.service`; print status. Build failure aborts before restart. |
-| `pnpm daemon:dev` | `ops/dev.sh` | Stop the service; run `pnpm dev` (foreground); on exit leave the service stopped and print next-step commands (`pnpm daemon:deploy` / `pnpm daemon:start`). |
-| `pnpm daemon:start` | `ops/daemon.sh start` | `systemctl --user start` (restore last-deployed build, no rebuild). |
-| `pnpm daemon:stop` | `ops/daemon.sh stop` | `systemctl --user stop`. |
-| `pnpm daemon:restart` | `ops/daemon.sh restart` | `systemctl --user restart`. |
-| `pnpm daemon:status` | `ops/daemon.sh status` | `is-active` + resolved `ExecStart` + whether `:3773` is listening. |
-| `pnpm daemon:logs` | `ops/daemon.sh logs` | `journalctl --user -u t3code.service -f`. |
+| Command               | Script                  | Behavior                                                                                                                                                    |
+| --------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm daemon:deploy`  | `ops/deploy.sh`         | `set -euo pipefail`; `vp run --filter t3 build`; on success `systemctl --user restart t3code.service`; print status. Build failure aborts before restart.   |
+| `pnpm daemon:dev`     | `ops/dev.sh`            | Stop the service; run `pnpm dev` (foreground); on exit leave the service stopped and print next-step commands (`pnpm daemon:deploy` / `pnpm daemon:start`). |
+| `pnpm daemon:start`   | `ops/daemon.sh start`   | `systemctl --user start` (restore last-deployed build, no rebuild).                                                                                         |
+| `pnpm daemon:stop`    | `ops/daemon.sh stop`    | `systemctl --user stop`.                                                                                                                                    |
+| `pnpm daemon:restart` | `ops/daemon.sh restart` | `systemctl --user restart`.                                                                                                                                 |
+| `pnpm daemon:status`  | `ops/daemon.sh status`  | `is-active` + resolved `ExecStart` + whether `:3773` is listening.                                                                                          |
+| `pnpm daemon:logs`    | `ops/daemon.sh logs`    | `journalctl --user -u t3code.service -f`.                                                                                                                   |
 
 ### Typical loop
 

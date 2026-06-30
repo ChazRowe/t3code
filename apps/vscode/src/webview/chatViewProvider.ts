@@ -6,20 +6,32 @@ import type { Logger } from "../logger.ts";
 import type { ResolvedServerSession } from "../session/serverSession.ts";
 import { buildConnectSrcOrigins, renderWebviewHtml } from "../ui/webviewHtml.ts";
 import { resolveWebviewEntryAssets } from "./resolveWebviewAssets.ts";
+import {
+  isLoopbackHttpUrl,
+  resolveWebviewPortMappings,
+  toWebviewLoopbackUrl,
+} from "./webviewPortMapping.ts";
+import { isWebviewWsInboundMessage, WebviewWsProxy } from "./webviewWsProxy.ts";
+import { isWebviewHttpFetchMessage, proxyWebviewHttpFetch } from "./webviewHttpProxy.ts";
 
 export interface ChatViewProviderDeps {
   readonly logger: Logger;
   readonly extensionUri: vscode.Uri;
   readonly getSession: () => Promise<ResolvedServerSession | null>;
+  readonly getWorkspaceCwd?: () => string | undefined;
   readonly randomBytes?: (size: number) => Buffer;
+  readonly wsProxy?: WebviewWsProxy;
 }
 
 export class ChatWebviewViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
+  private localHttpBaseUrl: string | null = null;
   private readonly deps: ChatViewProviderDeps;
+  private readonly wsProxy: WebviewWsProxy;
 
   constructor(deps: ChatViewProviderDeps) {
     this.deps = deps;
+    this.wsProxy = deps.wsProxy ?? new WebviewWsProxy();
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -31,6 +43,27 @@ export class ChatWebviewViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidDispose(() => {
       if (this.view === webviewView) {
         this.view = undefined;
+        this.localHttpBaseUrl = null;
+        this.wsProxy.dispose();
+      }
+    });
+    webviewView.webview.onDidReceiveMessage((message) => {
+      const localHttpBaseUrl = this.localHttpBaseUrl;
+      if (localHttpBaseUrl === null) {
+        return;
+      }
+      if (isWebviewHttpFetchMessage(message)) {
+        void proxyWebviewHttpFetch(message, localHttpBaseUrl).then((result) => {
+          // eslint-disable-next-line unicorn/require-post-message-target-origin -- VS Code Webview.postMessage is not window.postMessage.
+          void webviewView.webview.postMessage(result);
+        });
+        return;
+      }
+      if (isWebviewWsInboundMessage(message)) {
+        this.wsProxy.handle(message, localHttpBaseUrl, (result) => {
+          // eslint-disable-next-line unicorn/require-post-message-target-origin -- VS Code Webview.postMessage is not window.postMessage.
+          void webviewView.webview.postMessage(result);
+        });
       }
     });
     void this.refresh(webviewView.webview);
@@ -49,6 +82,12 @@ export class ChatWebviewViewProvider implements vscode.WebviewViewProvider {
     if (session === null) {
       return `<!doctype html><html><body style="font-family:var(--vscode-font-family);padding:12px">
         <p>Embedded server is starting…</p>
+      </body></html>`;
+    }
+
+    if (this.deps.getWorkspaceCwd?.() === undefined) {
+      return `<!doctype html><html><body style="font-family:var(--vscode-font-family);padding:12px">
+        <p>Open a folder workspace to start a T3 Code chat session.</p>
       </body></html>`;
     }
 
@@ -72,17 +111,34 @@ export class ChatWebviewViewProvider implements vscode.WebviewViewProvider {
       webview.asWebviewUri(vscode.Uri.joinPath(webviewRoot, "assets", name)).toString(),
     );
 
+    const useLoopbackPortMapping = isLoopbackHttpUrl(session.httpBaseUrl);
+    if (useLoopbackPortMapping) {
+      webview.options = {
+        ...webview.options,
+        portMapping: [...resolveWebviewPortMappings(session.httpBaseUrl)],
+      };
+    }
+
+    const httpBaseUrl = useLoopbackPortMapping
+      ? toWebviewLoopbackUrl(session.httpBaseUrl)
+      : session.httpBaseUrl;
+    const wsBaseUrl = useLoopbackPortMapping
+      ? toWebviewLoopbackUrl(session.wsBaseUrl)
+      : session.wsBaseUrl;
+
+    this.localHttpBaseUrl = session.localHttpBaseUrl;
+
     return renderWebviewHtml({
       nonce,
       bootstrap: {
         label: session.label,
-        httpBaseUrl: session.httpBaseUrl,
-        wsBaseUrl: session.wsBaseUrl,
+        httpBaseUrl,
+        wsBaseUrl,
         bootstrapToken: session.bootstrapToken,
       },
       scriptUri,
       styleUris,
-      connectSrcOrigins: buildConnectSrcOrigins(session.httpBaseUrl, session.wsBaseUrl),
+      connectSrcOrigins: buildConnectSrcOrigins(httpBaseUrl, wsBaseUrl),
       cspSource: webview.cspSource,
     });
   }

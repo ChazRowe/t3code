@@ -33,7 +33,19 @@ export default mergeConfig(
         onlyBundle: false,
       },
       banner: {
-        js: "#!/usr/bin/env node\n",
+        // The shebang MUST stay on line 1. The lines after it force the bundled
+        // `ws` onto its pure-JS mask/unmask path: the native `bufferutil` /
+        // `utf-8-validate` addons can resolve to broken stubs inside this
+        // single-file bundle and crash the server on the first inbound WS frame
+        // (`TypeError: bufferUtil.unmask is not a function`). `ws` reads these env
+        // vars at module-init time, and the banner is emitted above all bundled
+        // module code, so it is the only place guaranteed to run first.
+        js: [
+          "#!/usr/bin/env node",
+          'process.env.WS_NO_BUFFER_UTIL ??= "1";',
+          'process.env.WS_NO_UTF_8_VALIDATE ??= "1";',
+          "",
+        ].join("\n"),
       },
       define: {
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),

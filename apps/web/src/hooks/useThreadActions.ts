@@ -305,21 +305,24 @@ export function useThreadActions() {
     [confirmThreadDelete, deleteThread, resolveThreadTarget],
   );
 
-  const startUnattendedRun = useCallback(async (target: ScopedThreadRef, totalIterations: number) => {
-    const api = readEnvironmentApi(target.environmentId);
-    if (!api) return;
-    try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.unattended-run.start",
-        commandId: newCommandId(),
-        threadId: target.threadId,
-        totalIterations,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      notifyUnattendedRunActionFailed("start", error);
-    }
-  }, []);
+  const startUnattendedRun = useCallback(
+    async (target: ScopedThreadRef, totalIterations: number) => {
+      const api = readEnvironmentApi(target.environmentId);
+      if (!api) return;
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.unattended-run.start",
+          commandId: newCommandId(),
+          threadId: target.threadId,
+          totalIterations,
+          createdAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        notifyUnattendedRunActionFailed("start", error);
+      }
+    },
+    [],
+  );
 
   const pauseUnattendedRun = useCallback(async (target: ScopedThreadRef) => {
     const api = readEnvironmentApi(target.environmentId);

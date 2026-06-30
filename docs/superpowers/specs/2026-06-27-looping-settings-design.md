@@ -39,11 +39,11 @@ dependence on the `wrap`/`continue` skills for models that don't have them.
 - **The reactor can read settings.** `UnattendedRunReactor` runs server-side and can
   inject `ServerSettingsService` (no circular dependency; same pattern as
   `ProviderCommandReactor`, which reads `serverSettingsService.getSettings`). Browser
-  `localStorage` (client settings) is *not* reachable from the reactor, which is why
+  `localStorage` (client settings) is _not_ reachable from the reactor, which is why
   the config must live in `ServerSettings`.
 - **The last assistant message is capturable.** The reactor already accumulates
   assistant text per turn (`latestAssistantText`) and detects the wrap in
-  `handleSessionSet` *before* `clearAndContinue` runs `thread.session.stop` with
+  `handleSessionSet` _before_ `clearAndContinue` runs `thread.session.stop` with
   `resetContext: true` (which forgets the whole conversation). The append feature
   captures the message before that clear and threads it into `issueContinueTurn`.
 
@@ -85,7 +85,7 @@ unattendedRun: {
 - `buildUnattendedPreamble(totalIterations, model, sentinel = WRAP_SENTINEL)` — the
   built-in preamble embeds the **effective** sentinel (currently it interpolates the
   `WRAP_SENTINEL` constant). This keeps the default preamble correct when the user
-  customizes *only* the sentinel.
+  customizes _only_ the sentinel.
 - `messageHasWrapSentinel(text, sentinel = WRAP_SENTINEL)` — detection uses the
   effective sentinel.
 - New pure, unit-testable helpers:
@@ -112,7 +112,7 @@ unattendedRun: {
 - **Capturing the iteration's assistant messages.** Add a per-thread ordered list
   (`iterationAssistantMessages: Map<string, string[]>`) appended on each
   `thread.message-sent` assistant event and **reset on context-clear and run-start**
-  (i.e. at the *iteration* boundary, not the turn boundary — so it survives an
+  (i.e. at the _iteration_ boundary, not the turn boundary — so it survives an
   iteration that spans multiple turns, e.g. when a turn ends without the sentinel to let
   background work finish). At wrap detection (in `handleSessionSet`, before
   `clearAndContinue`), resolve the appended message from this list with
@@ -142,20 +142,20 @@ unattendedRun: {
     differs from its default).
 - **Placeholders:** empty fields show what the default is, but the strategy differs by
   field because of where the default lives:
-  - **Sentinel** and **Continue message** are *static* defaults — show the literal
+  - **Sentinel** and **Continue message** are _static_ defaults — show the literal
     default text as the placeholder.
-  - **Preamble** is *server-generated and model-aware* (built by `buildUnattendedPreamble`
+  - **Preamble** is _server-generated and model-aware_ (built by `buildUnattendedPreamble`
     from the iteration count + model), so the web cannot reproduce the exact text. Show a
     descriptive placeholder instead, e.g. "Leave empty to use the built-in, model-aware
     preamble." The warning below does not need the default preamble text (it only
-    inspects a *custom* preamble), so this gap is cosmetic only.
+    inspects a _custom_ preamble), so this gap is cosmetic only.
 - **Shared default constants:** so the web and server agree on the static defaults,
   relocate the existing `WRAP_SENTINEL` (`"<<WRAP_COMPLETE>>"`) and `CONTINUE_MESSAGE`
   constants from `apps/server/.../unattendedRun.ts` to a place importable by both — e.g.
   `packages/contracts/src/settings.ts` (next to the schema) — and have `unattendedRun.ts`
   re-export/import them so there is one source of truth. The web imports them for the
   placeholders and the warning.
-- **Non-blocking warning:** under the Preamble field, if a *custom* (non-empty) preamble
+- **Non-blocking warning:** under the Preamble field, if a _custom_ (non-empty) preamble
   does not contain the **effective sentinel** (the sentinel field's value, or
   `WRAP_SENTINEL` when that field is empty), show inline warning text. This is the one
   mismatch raw-text makes easy (the reactor watches the sentinel; the preamble tells the

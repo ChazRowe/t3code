@@ -7,9 +7,9 @@
 ## 1. Problem & Goal
 
 Today, running an agent on a long task by hand means babysitting a wrap → clear →
-continue loop: the agent works until its context window fills, invokes a *wrap*
+continue loop: the agent works until its context window fills, invokes a _wrap_
 skill to write a handoff document, the human clears context, then invokes a
-*continue* skill that reads the handoff and resumes in a fresh context window.
+_continue_ skill that reads the handoff and resumes in a fresh context window.
 
 We want T3 Code to **drive this loop unattended**. The user picks how many
 iterations to run, T3 Code tells the agent the run is unattended, and then T3
@@ -22,7 +22,7 @@ interrupt at any point.
 The whole value of wrap/continue is the **deterministic fresh context** each
 iteration. This is categorically different from a provider's internal
 auto-compaction (lossy, not under the user's control). An iteration must start
-from an *empty* context window, bridged only by the handoff doc on disk. The
+from an _empty_ context window, bridged only by the handoff doc on disk. The
 design therefore makes the context clear a first-class step, not an
 afterthought.
 
@@ -65,7 +65,7 @@ User (web)                 Orchestration (events)            UnattendedRunReacto
    |          <-------- streaming turn as normal -------->           |
    |                              |  (turn ends, session leaves      |
    |                              |   "running")                     |-- read final text
-   |                              |                                  |   sentinel? 
+   |                              |                                  |   sentinel?
    |                              |                                  |     yes & k<N:
    |                              |<-- session.stop (CLEAR) ---------|
    |                              |  (session -> "stopped")          |-- wait for stopped
@@ -125,14 +125,14 @@ maintains a small per-thread state machine driven by the read model:
 - **On `unattended-run-started`:** issue `thread.turn.start` with the
   **unattended preamble** message (§5), iteration 1.
 - **On thread turn-end** (session leaving `"running"` — the existing turn-end
-  signal at `projector.ts:464`) *for a thread with a `running` unattended run*:
+  signal at `projector.ts:464`) _for a thread with a `running` unattended run_:
   read the turn's final assistant text.
   - **Sentinel present, `k < N`:** issue `thread.session.stop`; once the read
     model shows `session.status === "stopped"`, emit
     `unattended-iteration-advanced` and issue `thread.turn.start` with the
     **continue** message.
   - **Sentinel present, `k === N`:** emit `unattended-run-finished:
-    completed`.
+completed`.
   - **Sentinel absent:** emit `unattended-run-paused: no-sentinel`.
 - **On provider error / interrupt while a run is `running`:** emit
   `unattended-run-paused` (`error` / `manual`).

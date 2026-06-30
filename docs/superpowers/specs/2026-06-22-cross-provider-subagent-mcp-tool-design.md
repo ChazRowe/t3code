@@ -115,7 +115,7 @@ All null for ordinary same-thread Claude subagents (unchanged behavior); set for
 cross-provider nodes. Keep this package schema-only (no runtime logic) per AGENTS.md.
 
 `provider`/`model` exist so the watch view can show **which provider and model the
-subagent ran on at the top of its transcript** (see Web §6). `model` is the *resolved*
+subagent ran on at the top of its transcript** (see Web §6). `model` is the _resolved_
 model: at node creation we record the requested `model` (or the instance default, if
 omitted), then upgrade it to the actually-configured model once the child session
 reports it (`ProviderSession.model`, or the first `session.configured`/`turn.started`
@@ -181,11 +181,11 @@ export const ListAgentsTool = Tool.make("list_agents", {
    envelope.
 5. Append the synthetic `collab_agent_tool_call` activity to the caller's thread
    (`status: inProgress`, payload `{ childThreadId, providerInstanceId, provider,
-   model, prompt, label }`, where `model` is the requested model or the instance
+model, prompt, label }`, where `model` is the requested model or the instance
    default) via the orchestration engine's `thread.activity.append` command (same
    dispatch path ingestion uses — `ProviderRuntimeIngestion.ts:1770-1782`).
 6. `startSession(childThreadId, { providerInstanceId, runtimeMode, cwd,
-   modelSelection })` (`ProviderSessionStartInput`,
+modelSelection })` (`ProviderSessionStartInput`,
    `packages/contracts/src/provider.ts:53-65`).
 7. `sendTurn({ threadId: childThreadId, input: prompt })` → capture the returned
    `turnId` (`ProviderTurnStartResult`, `packages/contracts/src/provider.ts:80-85`).
@@ -254,12 +254,12 @@ Two ways our tool differs from the native `Agent` tool, both inherent to being a
 out-of-process MCP tool rather than harness-managed:
 
 1. **Parallelism is client-dependent, not guaranteed.** The Messages API leaves
-   "execute these tool_use blocks concurrently vs. serially" entirely to the caller's
+   "execute these tool*use blocks concurrently vs. serially" entirely to the caller's
    runtime. Claude's Agent SDK dispatches independent tool calls (including MCP ones)
    in-flight, so multi-spawn fans out as expected when **Claude** orchestrates. Other
    app-server MCP clients (Codex, Cursor, Grok, OpenCode) may serialize MCP tool calls
    even when the model emits them together. The tool supports parallelism; we do not
-   *promise* it cross-provider. (The native `Agent` tool, by contrast, is
+   \_promise* it cross-provider. (The native `Agent` tool, by contrast, is
    harness-managed and its concurrency is guaranteed.)
 2. **Each in-flight spawn holds one open `/mcp` HTTP request** for the duration of the
    child turn. So N concurrent spawns = N concurrent long-lived requests against the
@@ -270,7 +270,7 @@ out-of-process MCP tool rather than harness-managed:
 Implication for the implementation: the handler must tolerate many concurrent
 invocations (no shared mutable state, scoped subscriptions that clean up on
 completion/abort), and the long-running-tool-call mitigation (configurable max-wait →
-partial result + `childThreadId`) applies *per concurrent spawn*.
+partial result + `childThreadId`) applies _per concurrent spawn_.
 
 ## Data flow
 
@@ -339,7 +339,7 @@ quota, so it is an explicit capability rather than always-on.
   completes (possibly minutes). Claude's SDK tolerates long Task-like tool calls;
   confirm Codex/Cursor/Grok/OpenCode app-server MCP clients don't impose a tighter
   per-tool timeout. Mitigation: a configurable max-wait that returns a partial result
-  + the `childThreadId` (so the run is still inspectable) rather than hanging forever.
+  - the `childThreadId` (so the run is still inspectable) rather than hanging forever.
 - **`thread.activity.append` shape.** Confirm the exact command/payload the
   orchestration engine accepts for a manually-authored `collab_agent_tool_call`
   activity so the synthetic node is indistinguishable from an ingested one (itemType,
@@ -358,7 +358,7 @@ quota, so it is an explicit capability rather than always-on.
   (provider · model header). Plus test updates for the widened `OrchestrationSubagentRef`.
 - **Model resolution simplified.** The resolved model is read directly from
   `ProviderSession.model` returned by `startSession` (falling back to the requested
-  model), so the node is appended *after* the session starts and no event-stream
+  model), so the node is appended _after_ the session starts and no event-stream
   "upgrade" step is needed.
 - **Safety-envelope inheritance is runtimeMode + cwd only.** `ProviderSession` echoes
   `runtimeMode`/`cwd` but not `approvalPolicy`/`sandboxMode`, so only those two are
@@ -378,7 +378,7 @@ quota, so it is an explicit capability rather than always-on.
   `Layer.provide` args, to stay within the 20-argument `.pipe` limit on the serve chain.
 - **Verification:** `apps/server` + `packages/contracts` + `apps/web` typecheck clean;
   spawn handler 4/4, ProjectionSnapshotQuery 19/19, SubagentWatchView 4/4, McpHttpServer
-  + PreviewAutomationBroker 7/7, server 100/100; new files lint- and fmt-clean.
+  - PreviewAutomationBroker 7/7, server 100/100; new files lint- and fmt-clean.
 
 ## Correction: the child must be a real (hidden) thread
 
@@ -401,7 +401,7 @@ Fix (the chosen "real thread + hide from sidebar" option):
 - The **active + archived shell snapshots** filter `parent_thread_id IS NULL`
   (`listActiveThreadRows` / `listArchivedThreadRows`), hiding subagent threads from
   the sidebar. The **command read model** (`listThreadRows`, used by `getSnapshot` /
-  `getCommandReadModel`) is deliberately *not* filtered, so the child thread exists
+  `getCommandReadModel`) is deliberately _not_ filtered, so the child thread exists
   for the decider and its own `thread.activity.append`s pass `requireThread`.
 - Session teardown: an `Effect.addFinalizer` stops the spawned session when the tool
   call ends (success / error / interrupt), so spawns no longer leak live sessions.

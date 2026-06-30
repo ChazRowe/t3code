@@ -62,12 +62,9 @@ Three small pieces, mirroring the existing preview toolkit layout under
 export const ContextUsageTool = Tool.make("context_usage", {
   description:
     "Report what percentage of the current context window the calling session has " +
-    "consumed, e.g. \"20%\". Returns \"unknown\" if no usage has been measured yet.",
+    'consumed, e.g. "20%". Returns "unknown" if no usage has been measured yet.',
   success: Schema.String,
-  dependencies: [
-    McpInvocationContext.McpInvocationContext,
-    ProjectionThreadActivityRepository,
-  ],
+  dependencies: [McpInvocationContext.McpInvocationContext, ProjectionThreadActivityRepository],
 })
   .annotate(Tool.Title, "Get context window usage")
   .annotate(Tool.Readonly, true)
@@ -123,7 +120,7 @@ agent calls context_usage (no args)
 ```
 
 **Freshness note:** the snapshot is written when a turn completes, so the value
-reflects usage *as of the last completed turn* — the freshest measured value,
+reflects usage _as of the last completed turn_ — the freshest measured value,
 inherently slightly behind the in-progress turn. This is acceptable and inherent;
 no attempt is made to estimate mid-turn usage.
 

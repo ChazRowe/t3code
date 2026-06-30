@@ -105,8 +105,36 @@ describe("createServerSupervisor", () => {
       T3CODE_NO_BROWSER: "true",
       T3CODE_TAILSCALE_SERVE: "false",
       T3CODE_TAILSCALE_SERVE_PORT: "1",
+      // Forces ws to its pure-JS path so it never loads the native bufferutil/
+      // utf-8-validate addons, which are ABI-incompatible with Electron's Node and
+      // crash the server on the first inbound WebSocket frame.
+      WS_NO_BUFFER_UTIL: "1",
+      WS_NO_UTF_8_VALIDATE: "1",
     });
+    expect(args).toEqual(["/bin.mjs", "--bootstrap-fd", "3"]);
     expect(supervisor.snapshot()).toMatchObject({ running: true, ready: true });
+    await supervisor.stop();
+  });
+
+  it("passes workspace bootstrap flags when a folder workspace is open", async () => {
+    const { deps, children } = makeDeps();
+    const spawnSpy = vi.spyOn(deps, "spawn");
+    const supervisor = createServerSupervisor({
+      ...deps,
+      getWorkspaceCwd: () => "/home/user/project",
+    });
+    await supervisor.start();
+
+    const [, args] = spawnSpy.mock.calls[0]!;
+    expect(args).toEqual([
+      "/bin.mjs",
+      "--bootstrap-fd",
+      "3",
+      "--auto-bootstrap-project-from-cwd",
+      "--auto-bootstrap-create-new-thread",
+      "/home/user/project",
+    ]);
+    expect(children[0]!.opts.cwd).toBe("/home/u/.t3");
     await supervisor.stop();
   });
 

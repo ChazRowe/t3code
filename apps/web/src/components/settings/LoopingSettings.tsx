@@ -31,7 +31,9 @@ export function LoopingSettingsPanel() {
             cfg.preamble !== DEFAULTS.preamble ? (
               <SettingResetButton
                 label="preamble"
-                onClick={() => updateSettings({ unattendedRun: { ...cfg, preamble: DEFAULTS.preamble } })}
+                onClick={() =>
+                  updateSettings({ unattendedRun: { ...cfg, preamble: DEFAULTS.preamble } })
+                }
               />
             ) : null
           }
@@ -48,8 +50,7 @@ export function LoopingSettingsPanel() {
         >
           {showPreambleWarning ? (
             <p className="pt-2 pb-3.5 text-xs text-amber-600 dark:text-amber-500">
-              Your custom preamble does not mention the sentinel
-              {" "}
+              Your custom preamble does not mention the sentinel{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono">{effectiveSentinel}</code>.
               The run can only advance when the agent emits it, so be sure to instruct the agent to
               print it on its own line.
@@ -65,7 +66,9 @@ export function LoopingSettingsPanel() {
               <SettingResetButton
                 label="continue message"
                 onClick={() =>
-                  updateSettings({ unattendedRun: { ...cfg, continueMessage: DEFAULTS.continueMessage } })
+                  updateSettings({
+                    unattendedRun: { ...cfg, continueMessage: DEFAULTS.continueMessage },
+                  })
                 }
               />
             ) : null
@@ -74,7 +77,9 @@ export function LoopingSettingsPanel() {
             <DraftTextarea
               className="w-full sm:w-96"
               value={cfg.continueMessage}
-              onCommit={(next) => updateSettings({ unattendedRun: { ...cfg, continueMessage: next } })}
+              onCommit={(next) =>
+                updateSettings({ unattendedRun: { ...cfg, continueMessage: next } })
+              }
               placeholder={CONTINUE_MESSAGE}
               spellCheck={false}
               aria-label="Unattended-run continue message"
@@ -89,7 +94,9 @@ export function LoopingSettingsPanel() {
             cfg.sentinel !== DEFAULTS.sentinel ? (
               <SettingResetButton
                 label="sentinel"
-                onClick={() => updateSettings({ unattendedRun: { ...cfg, sentinel: DEFAULTS.sentinel } })}
+                onClick={() =>
+                  updateSettings({ unattendedRun: { ...cfg, sentinel: DEFAULTS.sentinel } })
+                }
               />
             ) : null
           }
@@ -114,7 +121,10 @@ export function LoopingSettingsPanel() {
                 label="append last agent message"
                 onClick={() =>
                   updateSettings({
-                    unattendedRun: { ...cfg, appendLastAgentMessage: DEFAULTS.appendLastAgentMessage },
+                    unattendedRun: {
+                      ...cfg,
+                      appendLastAgentMessage: DEFAULTS.appendLastAgentMessage,
+                    },
                   })
                 }
               />
@@ -124,7 +134,9 @@ export function LoopingSettingsPanel() {
             <Switch
               checked={cfg.appendLastAgentMessage}
               onCheckedChange={(checked) =>
-                updateSettings({ unattendedRun: { ...cfg, appendLastAgentMessage: Boolean(checked) } })
+                updateSettings({
+                  unattendedRun: { ...cfg, appendLastAgentMessage: Boolean(checked) },
+                })
               }
               aria-label="Append last agent message to the continue message"
             />

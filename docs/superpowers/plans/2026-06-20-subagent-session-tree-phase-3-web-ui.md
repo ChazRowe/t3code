@@ -57,6 +57,7 @@ OrchestrationSubagentActivitiesStreamItem =
 ## Task 1: Web `SidebarThreadSummary` + `mapThreadShell` carry `hasSubagents` / `liveSubagentCount`
 
 **Files:**
+
 - Modify: `apps/web/src/types.ts` (`SidebarThreadSummary` ~146-163; also `ThreadShell` ~123-139 to keep mapping parallel — optional but `ThreadShell` does not need it, only the summary does)
 - Modify: `apps/web/src/store.ts` (`mapThreadShell` ~262-317, the `summary` literal ~293-310)
 - Test: `apps/web/src/store.test.ts`
@@ -78,7 +79,10 @@ it("carries hasSubagents and liveSubagentCount onto the sidebar summary", () => 
         id: threadId,
         projectId: ProjectId.make("project-1"),
         title: "Has subagents",
-        modelSelection: { instanceId: ProviderInstanceId.make("claude-code"), model: DEFAULT_MODEL },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claude-code"),
+          model: DEFAULT_MODEL,
+        },
         runtimeMode: DEFAULT_RUNTIME_MODE,
         interactionMode: DEFAULT_INTERACTION_MODE,
         session: null,
@@ -116,6 +120,7 @@ Run it and confirm it FAILS (`hasSubagents`/`liveSubagentCount` are `undefined`)
 ```
 pnpm --filter @t3tools/web test store.test
 ```
+
 Expected: FAIL on the new `it`.
 
 - [ ] **Step 2**: Add the two fields to `SidebarThreadSummary` in `apps/web/src/types.ts`. The current interface ends:
@@ -153,24 +158,24 @@ Add the two fields after `hasActionableProposedPlan`:
 - [ ] **Step 3**: Populate them in `mapThreadShell` in `apps/web/src/store.ts`. The `summary` object literal currently is:
 
 ```ts
-  const summary: SidebarThreadSummary = {
-    id: thread.id,
-    environmentId,
-    projectId: thread.projectId,
-    title: thread.title,
-    interactionMode: thread.interactionMode,
-    session,
-    createdAt: thread.createdAt,
-    archivedAt: thread.archivedAt,
-    updatedAt: thread.updatedAt,
-    latestTurn: thread.latestTurn,
-    branch: thread.branch,
-    worktreePath: thread.worktreePath,
-    latestUserMessageAt: thread.latestUserMessageAt,
-    hasPendingApprovals: thread.hasPendingApprovals,
-    hasPendingUserInput: thread.hasPendingUserInput,
-    hasActionableProposedPlan: thread.hasActionableProposedPlan,
-  };
+const summary: SidebarThreadSummary = {
+  id: thread.id,
+  environmentId,
+  projectId: thread.projectId,
+  title: thread.title,
+  interactionMode: thread.interactionMode,
+  session,
+  createdAt: thread.createdAt,
+  archivedAt: thread.archivedAt,
+  updatedAt: thread.updatedAt,
+  latestTurn: thread.latestTurn,
+  branch: thread.branch,
+  worktreePath: thread.worktreePath,
+  latestUserMessageAt: thread.latestUserMessageAt,
+  hasPendingApprovals: thread.hasPendingApprovals,
+  hasPendingUserInput: thread.hasPendingUserInput,
+  hasActionableProposedPlan: thread.hasActionableProposedPlan,
+};
 ```
 
 Add the two fields after `hasActionableProposedPlan`:
@@ -187,11 +192,13 @@ Add the two fields after `hasActionableProposedPlan`:
 ```
 pnpm --filter @t3tools/web test store.test
 ```
+
 Expected: PASS. Then typecheck:
 
 ```
 cd apps/web && npx tsgo --noEmit
 ```
+
 Expected: no new errors. (If `OrchestrationThreadShell` does not have `hasSubagents`/`liveSubagentCount`, Phase 1/2 are not merged — stop.)
 
 - [ ] **Step 5** (Commit):
@@ -206,6 +213,7 @@ git commit -m "feat(web): carry hasSubagents/liveSubagentCount onto sidebar thre
 ## Task 2: `wsRpcClient` wrappers `subscribeSubagentTree` / `subscribeSubagent`
 
 **Files:**
+
 - Modify: `packages/client-runtime/src/wsRpcClient.ts` (interface `WsRpcClient.orchestration` ~182-191; implementation `orchestration:` object ~415-438)
 - Test: typecheck-only (there is no dedicated `wsRpcClient.test.ts`; the mock in `apps/web/src/environments/runtime/service.threadSubscriptions.test.ts` exercises the shape and is updated in Task 4).
 
@@ -286,6 +294,7 @@ Add after `subscribeThread`:
 ```
 cd packages/client-runtime && npx tsgo --noEmit
 ```
+
 Expected: no errors. (If `ORCHESTRATION_WS_METHODS.subscribeSubagentTree`/`subscribeSubagent` are missing, Phase 2 is not merged — stop.)
 
 - [ ] **Step 4** (Commit):
@@ -300,6 +309,7 @@ git commit -m "feat(client-runtime): add subscribeSubagentTree/subscribeSubagent
 ## Task 3: Store slices, sync actions, and selectors for subagent refs + activities
 
 **Files:**
+
 - Modify: `apps/web/src/store.ts` (`EnvironmentState` ~42-97; `initialEnvironmentState` ~104-122; new reducer functions; `AppStore` interface ~2038-2058; `useStore` create ~2060-2079)
 - Modify: `apps/web/src/storeSelectors.ts` (add two selector factories)
 - Test: `apps/web/src/store.test.ts`
@@ -427,6 +437,7 @@ Add `EventId` to the `@t3tools/contracts` import in the test (it is already impo
 ```
 pnpm --filter @t3tools/web test store.test
 ```
+
 Expected: FAIL (module has no exported member `syncSubagentTreeSnapshot`, etc.).
 
 - [ ] **Step 2**: Add the contract type imports to the top of `apps/web/src/store.ts`. The existing `@t3tools/contracts` import block (lines 1-20) lists types like `OrchestrationThreadActivity`. Add the two new ones:
@@ -442,18 +453,18 @@ Expected: FAIL (module has no exported member `syncSubagentTreeSnapshot`, etc.).
 - [ ] **Step 3**: Add the two slices to `EnvironmentState` (after `sidebarThreadSummaryById`, before `bootstrapComplete`):
 
 ```ts
-  sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary>;
+sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary>;
 
-  // ---------------------------------------------------------------------------
-  // Subagent tree + transcript — written ONLY by the subagent subscriptions
-  // (service.ts retainSubagentTreeSubscription / retainSubagentActivitiesSubscription).
-  // After Phase 1 these are NOT present in the parent thread snapshot/stream;
-  // they arrive exclusively via subscribeSubagentTree / subscribeSubagent.
-  // ---------------------------------------------------------------------------
-  subagentRefsByThreadId: Record<ThreadId, OrchestrationSubagentRef[]>;
-  subagentActivitiesByKey: Record<string, OrchestrationThreadActivity[]>;
+// ---------------------------------------------------------------------------
+// Subagent tree + transcript — written ONLY by the subagent subscriptions
+// (service.ts retainSubagentTreeSubscription / retainSubagentActivitiesSubscription).
+// After Phase 1 these are NOT present in the parent thread snapshot/stream;
+// they arrive exclusively via subscribeSubagentTree / subscribeSubagent.
+// ---------------------------------------------------------------------------
+subagentRefsByThreadId: Record<ThreadId, OrchestrationSubagentRef[]>;
+subagentActivitiesByKey: Record<string, OrchestrationThreadActivity[]>;
 
-  bootstrapComplete: boolean;
+bootstrapComplete: boolean;
 ```
 
 - [ ] **Step 4**: Add them to `initialEnvironmentState`:
@@ -625,7 +636,12 @@ import {
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
-import { selectEnvironmentState, subagentActivitiesKey, type AppState, type EnvironmentState } from "./store";
+import {
+  selectEnvironmentState,
+  subagentActivitiesKey,
+  type AppState,
+  type EnvironmentState,
+} from "./store";
 ```
 
 Append the two factories at the end of the file. Use module-level empty constants so the selector returns a stable reference when nothing exists (mirroring the `EMPTY_*` pattern elsewhere in the codebase, avoiding new array identities on every render):
@@ -661,6 +677,7 @@ export function createSubagentActivitiesSelector(
 pnpm --filter @t3tools/web test store.test
 cd apps/web && npx tsgo --noEmit
 ```
+
 Expected: PASS, no type errors.
 
 - [ ] **Step 9** (Commit):
@@ -675,6 +692,7 @@ git commit -m "feat(web): add subagent ref + activity store slices, reducers, an
 ## Task 4: `service.ts` ref-counted subscriptions for the subagent tree + activities
 
 **Files:**
+
 - Modify: `apps/web/src/environments/runtime/service.ts` (mirror the thread-detail machinery: entry type ~107-115, maps ~138, key helper ~332-334, attach ~395-419, watch/connection ~422-433, dispose, retain ~566-622, plus `attach*ForEnvironment` calls in `registerConnection` ~1429 and `detachThreadDetailSubscriptionsForEnvironment` in `removeConnection` ~1449)
 - Test: `apps/web/src/environments/runtime/service.threadSubscriptions.test.ts` (extend the mock client + add a focused dispatch test; or a new `service.subagentSubscriptions.test.ts` mirroring it)
 
@@ -737,6 +755,7 @@ it("dispatches subagent tree snapshots into the store and unsubscribes on releas
 ```
 pnpm --filter @t3tools/web test service.threadSubscriptions
 ```
+
 Expected: FAIL.
 
 - [ ] **Step 2**: Add imports + entry types + maps to `service.ts`. Extend the `@t3tools/contracts` import (top of file) with `OrchestrationSubagentRef` and `OrchestrationSubagentTreeStreamItem` and `OrchestrationSubagentActivitiesStreamItem` if a typed listener is desired (the wrapper already infers types, so explicit types are optional). Extend the store import (currently `~/store` brings `useStore`, selectors) — the actions are accessed via `useStore.getState()`, so no extra import is strictly needed.
@@ -981,35 +1000,35 @@ export function retainSubagentActivitiesSubscription(
 - [ ] **Step 5**: On environment teardown, detach both new subscription kinds so reconnect re-attaches. In `removeConnection` (~1449, after `detachThreadDetailSubscriptionsForEnvironment(environmentId)`), add detach loops:
 
 ```ts
-  detachThreadDetailSubscriptionsForEnvironment(environmentId);
-  for (const entry of subagentTreeSubscriptions.values()) {
-    if (entry.environmentId !== environmentId) continue;
-    entry.unsubscribe();
-    entry.unsubscribe = NOOP;
-    watchSubagentTreeSubscriptionConnection(entry);
-  }
-  for (const entry of subagentActivitiesSubscriptions.values()) {
-    if (entry.environmentId !== environmentId) continue;
-    entry.unsubscribe();
-    entry.unsubscribe = NOOP;
-    watchSubagentActivitiesSubscriptionConnection(entry);
-  }
+detachThreadDetailSubscriptionsForEnvironment(environmentId);
+for (const entry of subagentTreeSubscriptions.values()) {
+  if (entry.environmentId !== environmentId) continue;
+  entry.unsubscribe();
+  entry.unsubscribe = NOOP;
+  watchSubagentTreeSubscriptionConnection(entry);
+}
+for (const entry of subagentActivitiesSubscriptions.values()) {
+  if (entry.environmentId !== environmentId) continue;
+  entry.unsubscribe();
+  entry.unsubscribe = NOOP;
+  watchSubagentActivitiesSubscriptionConnection(entry);
+}
 ```
 
 And in `registerConnection` (~1429, after `attachThreadDetailSubscriptionsForEnvironment`), re-attach:
 
 ```ts
-  attachThreadDetailSubscriptionsForEnvironment(connection.environmentId);
-  for (const entry of subagentTreeSubscriptions.values()) {
-    if (entry.environmentId === connection.environmentId) {
-      attachSubagentTreeSubscription(entry);
-    }
+attachThreadDetailSubscriptionsForEnvironment(connection.environmentId);
+for (const entry of subagentTreeSubscriptions.values()) {
+  if (entry.environmentId === connection.environmentId) {
+    attachSubagentTreeSubscription(entry);
   }
-  for (const entry of subagentActivitiesSubscriptions.values()) {
-    if (entry.environmentId === connection.environmentId) {
-      attachSubagentActivitiesSubscription(entry);
-    }
+}
+for (const entry of subagentActivitiesSubscriptions.values()) {
+  if (entry.environmentId === connection.environmentId) {
+    attachSubagentActivitiesSubscription(entry);
   }
+}
 ```
 
 - [ ] **Step 6**: Re-run the service test + typecheck:
@@ -1018,6 +1037,7 @@ And in `registerConnection` (~1429, after `attachThreadDetailSubscriptionsForEnv
 pnpm --filter @t3tools/web test service.threadSubscriptions
 cd apps/web && npx tsgo --noEmit
 ```
+
 Expected: PASS, no type errors.
 
 - [ ] **Step 7** (Commit):
@@ -1032,6 +1052,7 @@ git commit -m "feat(web): add ref-counted subagent tree + activities subscriptio
 ## Task 5: `uiStateStore` subagent expand state
 
 **Files:**
+
 - Modify: `apps/web/src/uiStateStore.ts` (`UiProjectState` ~26-29 — add a sibling slice; `UiState` ~40; `initialState` ~55-61; reducers near `toggleProject`/`setProjectExpanded` ~569-591; `UiStateStore` interface ~636-650; `create` ~652-670)
 - Test: `apps/web/src/uiStateStore.test.ts` (create if absent, mirroring `store.test.ts` style with `vite-plus/test`)
 
@@ -1079,6 +1100,7 @@ Run; confirm FAIL:
 ```
 pnpm --filter @t3tools/web test uiStateStore.test
 ```
+
 Expected: FAIL (no exported member `toggleSubagent`).
 
 - [ ] **Step 2**: Add the slice. Extend `UiProjectState` is not ideal (it is project-scoped); instead add the field directly to `UiState`. Change:
@@ -1094,11 +1116,7 @@ export interface UiSubagentState {
   subagentExpandedById: Record<string, boolean>;
 }
 
-export interface UiState
-  extends UiProjectState,
-    UiThreadState,
-    UiEndpointState,
-    UiSubagentState {}
+export interface UiState extends UiProjectState, UiThreadState, UiEndpointState, UiSubagentState {}
 ```
 
 Add to `initialState`:
@@ -1164,6 +1182,7 @@ Add to the `create<UiStateStore>` object (after `setProjectExpanded`):
 pnpm --filter @t3tools/web test uiStateStore.test
 cd apps/web && npx tsgo --noEmit
 ```
+
 Expected: PASS, no type errors.
 
 - [ ] **Step 6** (Commit):
@@ -1178,12 +1197,14 @@ git commit -m "feat(web): add in-memory subagent expand state to uiStateStore"
 ## Task 6: Sidebar chevron + recursive `SidebarSubagentTree`
 
 **Files:**
+
 - Create: `apps/web/src/components/sidebar/SidebarSubagentTree.tsx`
 - Create: `apps/web/src/components/sidebar/SidebarSubagentTree.logic.ts` (pure grouping/nesting helper — keeps the testable derivation out of the component)
 - Modify: `apps/web/src/components/Sidebar.tsx` (`SidebarThreadRow` — add chevron on rows with `hasSubagents`, render `<SidebarSubagentTree>` inside the row's `SidebarMenuSubItem` after the button, gated by expand flag)
 - Test: `apps/web/src/components/sidebar/SidebarSubagentTree.logic.test.ts`
 
 **Expand keys** (per the locked contract):
+
 - Session group (the chevron on the thread row): `threadKey` = `scopedThreadKey(scopeThreadRef(environmentId, threadId))`.
 - Iteration node: `${threadKey}::iter::${iteration}`.
 - Nested subagent node: `${threadKey}::sa::${rootItemId}`.
@@ -1254,6 +1275,7 @@ Run; confirm FAIL:
 ```
 pnpm --filter @t3tools/web test SidebarSubagentTree.logic
 ```
+
 Expected: FAIL.
 
 - [ ] **Step 2**: Create `apps/web/src/components/sidebar/SidebarSubagentTree.logic.ts`:
@@ -1285,9 +1307,7 @@ export function childRefsOf(
   return refs.filter((ref) => ref.parentItemId === rootItemId);
 }
 
-export function buildSubagentForest(
-  refs: ReadonlyArray<OrchestrationSubagentRef>,
-): SubagentForest {
+export function buildSubagentForest(refs: ReadonlyArray<OrchestrationSubagentRef>): SubagentForest {
   const top = topLevelRefs(refs);
   const anyIteration = top.some((ref) => ref.iteration !== null);
   if (!anyIteration) {
@@ -1315,6 +1335,7 @@ Run; confirm PASS:
 ```
 pnpm --filter @t3tools/web test SidebarSubagentTree.logic
 ```
+
 Expected: PASS.
 
 - [ ] **Step 3**: Create the recursive component `apps/web/src/components/sidebar/SidebarSubagentTree.tsx`. It reads refs via `createSubagentRefsSelector`, navigates via `useNavigate`, and reads/toggles expansion via `useUiStateStore`. Use the exact sidebar primitives (`SidebarMenuSub`, `SidebarMenuSubItem`, `SidebarMenuSubButton`) and the project chevron className convention.
@@ -1331,15 +1352,8 @@ import { useStore } from "../../store";
 import { createSubagentRefsSelector } from "../../storeSelectors";
 import { useUiStateStore } from "../../uiStateStore";
 import { ThreadStatusLabel } from "../ThreadStatusIndicators";
-import {
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
-} from "../ui/sidebar";
-import {
-  buildSubagentForest,
-  childRefsOf,
-} from "./SidebarSubagentTree.logic";
+import { SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "../ui/sidebar";
+import { buildSubagentForest, childRefsOf } from "./SidebarSubagentTree.logic";
 
 interface SidebarSubagentTreeProps {
   environmentId: EnvironmentId;
@@ -1559,18 +1573,16 @@ import { SidebarSubagentTree } from "./sidebar/SidebarSubagentTree";
 (b) Inside `SidebarThreadRow`, read the session expand flag and the toggle, and retain the tree subscription when expanded. Add near the top of the component body (alongside the other hooks):
 
 ```ts
-  const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-  const subagentExpanded = useUiStateStore(
-    (state) => state.subagentExpandedById[threadKey] ?? false,
-  );
-  const toggleSubagent = useUiStateStore((state) => state.toggleSubagent);
+const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+const subagentExpanded = useUiStateStore((state) => state.subagentExpandedById[threadKey] ?? false);
+const toggleSubagent = useUiStateStore((state) => state.toggleSubagent);
 
-  useEffect(() => {
-    if (!thread.hasSubagents || !subagentExpanded) {
-      return;
-    }
-    return retainSubagentTreeSubscription(thread.environmentId, thread.id);
-  }, [thread.environmentId, thread.id, thread.hasSubagents, subagentExpanded]);
+useEffect(() => {
+  if (!thread.hasSubagents || !subagentExpanded) {
+    return;
+  }
+  return retainSubagentTreeSubscription(thread.environmentId, thread.id);
+}, [thread.environmentId, thread.id, thread.hasSubagents, subagentExpanded]);
 ```
 
 (`threadKey` may already be computed in the row via `scopedThreadKey(...)`; if so reuse it and do not redeclare.) Import `retainSubagentTreeSubscription` alongside the existing `retainThreadDetailSubscription` import (`../environments/runtime/service`):
@@ -1638,6 +1650,7 @@ cd apps/web && npx tsgo --noEmit
 cd /home/chaz/projects/t3code && pnpm lint
 pnpm --filter @t3tools/web test SidebarSubagentTree.logic
 ```
+
 Expected: no type errors, lint clean, test PASS.
 
 - [ ] **Step 6** (Commit):
@@ -1652,6 +1665,7 @@ git commit -m "feat(web): sidebar chevron + recursive subagent tree with iterati
 ## Task 7: Watch route + `SubagentWatchView`
 
 **Files:**
+
 - Create: `apps/web/src/components/SubagentWatchView.tsx`
 - Create: `apps/web/src/routes/_chat.$environmentId.$threadId.subagent.$subagentRootItemId.tsx`
 - Modify: `apps/web/src/routeTree.gen.ts` (regenerated automatically — see note)
@@ -1722,13 +1736,17 @@ function makeActivity(): OrchestrationThreadActivity {
 
 describe("SubagentWatchView", () => {
   it("renders the subagent transcript without a composer", () => {
-    useStore.setState((state) =>
-      useStore
-        .getState()
-        .syncSubagentActivitiesSnapshot(environmentId, threadId, rootItemId, [makeActivity()]) ?? state,
+    useStore.setState(
+      (state) =>
+        useStore
+          .getState()
+          .syncSubagentActivitiesSnapshot(environmentId, threadId, rootItemId, [makeActivity()]) ??
+        state,
     );
     // Simpler: call the reducer-backed action directly:
-    useStore.getState().syncSubagentActivitiesSnapshot(environmentId, threadId, rootItemId, [makeActivity()]);
+    useStore
+      .getState()
+      .syncSubagentActivitiesSnapshot(environmentId, threadId, rootItemId, [makeActivity()]);
     useStore.getState().syncSubagentTreeSnapshot(environmentId, threadId, [makeRef("inProgress")]);
 
     render(
@@ -1764,6 +1782,7 @@ Run; confirm FAIL (module missing):
 ```
 pnpm --filter @t3tools/web test SubagentWatchView
 ```
+
 Expected: FAIL.
 
 - [ ] **Step 2**: Create `apps/web/src/components/SubagentWatchView.tsx`. It retains the activities subscription, reads activities + the ref via selectors, derives the timeline, and renders `<MessagesTimeline>` with no composer plus a finished banner.
@@ -1775,10 +1794,7 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 
 import { useStore } from "../store";
-import {
-  createSubagentActivitiesSelector,
-  createSubagentRefsSelector,
-} from "../storeSelectors";
+import { createSubagentActivitiesSelector, createSubagentRefsSelector } from "../storeSelectors";
 import { deriveTimelineEntries, deriveWorkLogEntries } from "../session-logic";
 import { retainSubagentActivitiesSubscription } from "../environments/runtime/service";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -1889,6 +1905,7 @@ const EMPTY_REVERT_COUNTS = new Map();
 ```
 pnpm --filter @t3tools/web test SubagentWatchView
 ```
+
 Expected: PASS.
 
 - [ ] **Step 4**: Create the route file `apps/web/src/routes/_chat.$environmentId.$threadId.subagent.$subagentRootItemId.tsx`. Mirror the structure of `_chat.$environmentId.$threadId.tsx` but simpler (no draft/search handling). Wrap in `<SidebarInset>`:
@@ -1927,6 +1944,7 @@ export const Route = createFileRoute(
 ```
 pnpm --filter @t3tools/web dev
 ```
+
 (Let it boot, confirm `apps/web/src/routeTree.gen.ts` now references `subagent/$subagentRootItemId`, then Ctrl-C.) If the plugin exposes a standalone generate command in this repo, prefer it; otherwise the dev-server boot is the supported path. Commit the regenerated `routeTree.gen.ts`.
 
 - [ ] **Step 6**: Typecheck + lint:
@@ -1935,6 +1953,7 @@ pnpm --filter @t3tools/web dev
 cd apps/web && npx tsgo --noEmit
 cd /home/chaz/projects/t3code && pnpm lint
 ```
+
 Expected: no errors (route params typed via the generated tree; `SubagentWatchView` props match `MessagesTimelineProps`).
 
 - [ ] **Step 7** (Commit):
@@ -1949,6 +1968,7 @@ git commit -m "feat(web): add read-only subagent watch route and SubagentWatchVi
 ## Task 8: Replace inline `SubagentCard` with `SubagentRefChip`
 
 **Files:**
+
 - Modify: `apps/web/src/components/chat/MessagesTimeline.tsx` (replace the `<SubagentCard>` return in `WorkGroupSection` ~918-945 with a `<SubagentRefChip>`; `SubagentRefChip` lives in this same file; remove/retire `SubagentCard` if now unused; `parseSubagentLabel` ~738-744 is reused)
 - Test: `apps/web/src/components/chat/MessagesTimeline.test.tsx` (add a chip test; update any existing `SubagentCard` assertions); `apps/web/src/session-logic.test.ts` (the subagent-nesting test at ~786-808 still holds — the derivation is unchanged — but after Phase 1 the parent thread has no children, so update any test that asserted inline child rows render in the timeline)
 
@@ -1969,7 +1989,7 @@ it("renders a subagent ref chip for a collab_agent_tool_call entry", () => {
   expect(html).toContain("Subagent:");
   expect(html).toContain("code-reviewer");
   // No inline transcript / child rows:
-  expect(html).not.toContain("running...");  // old card affordance
+  expect(html).not.toContain("running..."); // old card affordance
 });
 ```
 
@@ -1978,6 +1998,7 @@ If the static-markup approach can't reach the chip's link target, prefer an inte
 ```
 pnpm --filter @t3tools/web test MessagesTimeline.test
 ```
+
 Expected: FAIL.
 
 - [ ] **Step 2**: Add `useNavigate` + the route params type import at the top of `MessagesTimeline.tsx`. The file imports `parseScopedThreadKey` from `@t3tools/client-runtime`; add a router import:
@@ -2085,6 +2106,7 @@ Thread `environmentId` and `threadId` into `WorkGroupSection`'s props (derive th
 pnpm --filter @t3tools/web test MessagesTimeline.test
 pnpm --filter @t3tools/web test session-logic.test
 ```
+
 Expected: PASS (after updating any stale card assertions).
 
 - [ ] **Step 6**: Typecheck + lint:
@@ -2093,6 +2115,7 @@ Expected: PASS (after updating any stale card assertions).
 cd apps/web && npx tsgo --noEmit
 cd /home/chaz/projects/t3code && pnpm lint
 ```
+
 Expected: no errors, lint clean.
 
 - [ ] **Step 7** (Commit):

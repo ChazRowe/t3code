@@ -33,6 +33,14 @@ const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA journal_mode = WAL;`;
+    // Under WAL there is still only a single writer at a time. With the default
+    // busy_timeout of 0 a colliding write fails instantly with "database is
+    // locked" — which drops orchestration event ingestion and leaves the UI
+    // stuck (e.g. a turn that completed server-side never clears "Working").
+    // This happens whenever a second process opens the same DB (a running
+    // daemon, the sqlite3 CLI, or two server instances). Wait for the lock
+    // instead; writes are sub-millisecond so the ceiling is effectively never hit.
+    yield* sql`PRAGMA busy_timeout = 5000;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
     yield* runMigrations();
   }),

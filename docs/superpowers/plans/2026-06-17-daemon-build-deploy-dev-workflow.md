@@ -23,10 +23,12 @@
 ### Task 1: Shared lib + daemon control script
 
 **Files:**
+
 - Create: `ops/lib.sh`
 - Create: `ops/daemon.sh`
 
 **Interfaces:**
+
 - Produces: `ops/lib.sh` exporting `REPO_DIR`, `SERVICE`, `PORT`, and functions `uctl`, `daemon_is_active`, `require_systemd_unit` (sourced by the other scripts). `ops/daemon.sh {start|stop|restart|status|logs}`.
 
 - [ ] **Step 1: Write `ops/lib.sh`**
@@ -111,10 +113,12 @@ git commit -m "Add daemon control ops scripts (lib + daemon.sh)"
 ### Task 2: Deploy script + scoped build script
 
 **Files:**
+
 - Create: `ops/deploy.sh`
 - Modify: `package.json` (add `build:server` script)
 
 **Interfaces:**
+
 - Consumes: `ops/lib.sh` (`REPO_DIR`, `SERVICE`, `PORT`, `uctl`, `require_systemd_unit`).
 - Produces: `ops/deploy.sh` (build + restart) and `pnpm build:server` (`vp run --filter t3 build`).
 
@@ -170,9 +174,11 @@ git commit -m "Add deploy script and scoped build:server"
 ### Task 3: Dev-session script
 
 **Files:**
+
 - Create: `ops/dev.sh`
 
 **Interfaces:**
+
 - Consumes: `ops/lib.sh` (`REPO_DIR`, `SERVICE`, `PORT`, `uctl`, `daemon_is_active`, `require_systemd_unit`).
 - Produces: `ops/dev.sh` — stops the daemon, runs `pnpm dev`, leaves the daemon stopped on exit.
 
@@ -224,9 +230,11 @@ git commit -m "Add dev-session script (stop daemon, run dev, leave stopped)"
 ### Task 4: Wire pnpm front-door scripts
 
 **Files:**
+
 - Modify: `package.json` (add `deploy` + `daemon:*` scripts)
 
 **Interfaces:**
+
 - Consumes: `ops/deploy.sh`, `ops/dev.sh`, `ops/daemon.sh`.
 - Produces: `pnpm daemon:deploy`, `pnpm daemon:dev`, `pnpm daemon:start|stop|restart|status|logs`.
 
@@ -261,9 +269,11 @@ git commit -m "Add pnpm front-door scripts for deploy and daemon control"
 ### Task 5: One-time cutover — point the daemon at the repo artifact
 
 **Files:**
+
 - Modify: `~/.config/systemd/user/t3code.service` (`ExecStart` line only)
 
 **Interfaces:**
+
 - Consumes: `pnpm build:server` (Task 2), `apps/server/dist/bin.mjs`.
 
 - [ ] **Step 1: Build the repo artifact first (no downtime yet)**

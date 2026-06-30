@@ -62,6 +62,14 @@ export const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-proj
   ),
   Flag.optional,
 );
+export const autoBootstrapCreateNewThreadFlag = Flag.boolean(
+  "auto-bootstrap-create-new-thread",
+).pipe(
+  Flag.withDescription(
+    "Always create a fresh thread during cwd auto-bootstrap instead of reusing an existing one.",
+  ),
+  Flag.optional,
+);
 export const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.withDescription(
     "Emit server-side logs for outbound WebSocket push traffic (equivalent to T3CODE_LOG_WS_EVENTS).",
@@ -124,6 +132,10 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  autoBootstrapCreateNewThread: Config.boolean("T3CODE_AUTO_BOOTSTRAP_CREATE_NEW_THREAD").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   logWebSocketEvents: Config.boolean("T3CODE_LOG_WS_EVENTS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -148,6 +160,7 @@ export interface CliServerFlags {
   readonly noBrowser: Option.Option<boolean>;
   readonly bootstrapFd: Option.Option<number>;
   readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
+  readonly autoBootstrapCreateNewThread: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
@@ -182,6 +195,7 @@ export const sharedServerCommandFlags = {
   noBrowser: noBrowserFlag,
   bootstrapFd: bootstrapFdFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
+  autoBootstrapCreateNewThread: autoBootstrapCreateNewThreadFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
@@ -227,6 +241,7 @@ export const resolveServerConfig = (
       noBrowser: flags.noBrowser ?? Option.none(),
       bootstrapFd: flags.bootstrapFd ?? Option.none(),
       autoBootstrapProjectFromCwd: flags.autoBootstrapProjectFromCwd ?? Option.none(),
+      autoBootstrapCreateNewThread: flags.autoBootstrapCreateNewThread ?? Option.none(),
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
@@ -307,6 +322,13 @@ export const resolveServerConfig = (
       ),
       () => mode === "web",
     );
+    const autoBootstrapCreateNewThread = Option.getOrElse(
+      resolveOptionPrecedence(
+        normalizedFlags.autoBootstrapCreateNewThread,
+        Option.fromUndefinedOr(env.autoBootstrapCreateNewThread),
+      ),
+      () => false,
+    );
     const logWebSocketEvents = Option.getOrElse(
       resolveOptionPrecedence(
         normalizedFlags.logWebSocketEvents,
@@ -371,6 +393,7 @@ export const resolveServerConfig = (
       startupPresentation,
       desktopBootstrapToken,
       autoBootstrapProjectFromCwd,
+      autoBootstrapCreateNewThread,
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
@@ -394,6 +417,7 @@ export const resolveCliAuthConfig = (
       noBrowser: Option.none(),
       bootstrapFd: Option.none(),
       autoBootstrapProjectFromCwd: Option.none(),
+      autoBootstrapCreateNewThread: Option.none(),
       logWebSocketEvents: Option.none(),
       tailscaleServeEnabled: Option.none(),
       tailscaleServePort: Option.none(),

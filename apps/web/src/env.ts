@@ -8,5 +8,4 @@ export const isElectron =
   (window.desktopBridge !== undefined || window.nativeApi !== undefined);
 
 /** True when running inside a VSCode extension webview with an injected bridge. */
-export const isVSCode =
-  typeof window !== "undefined" && window.vscodeBridge !== undefined;
+export const isVSCode = typeof window !== "undefined" && window.vscodeBridge !== undefined;

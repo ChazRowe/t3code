@@ -9,10 +9,6 @@ export default defineConfig({
         dependsOn: ["t3#build"],
         cache: false,
       },
-      "build:webview": {
-        command: "vp build --config webview/vite.config.ts",
-        cache: false,
-      },
       dev: { command: "vp pack --watch", cache: false },
     },
   },

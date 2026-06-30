@@ -21,10 +21,7 @@ import {
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
-import {
-  startServerStateSync,
-  useServerWelcomeSubscription,
-} from "../rpc/serverState";
+import { startServerStateSync, useServerWelcomeSubscription } from "../rpc/serverState";
 import { useStore } from "../store";
 import { isVSCode } from "../env";
 
@@ -41,7 +38,10 @@ function VsCodeChatShellInner() {
 
   useEffect(() => {
     if (!isVSCode) {
-      setPhase({ kind: "error", message: "T3 Code chat shell requires the VSCode webview bridge." });
+      setPhase({
+        kind: "error",
+        message: "T3 Code chat shell requires the VSCode webview bridge.",
+      });
       return;
     }
     let cancelled = false;

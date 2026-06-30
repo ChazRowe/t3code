@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Extension host runs as plain Node outside any Effect runtime; node:path is intentional.
 import * as path from "node:path";
 
 export interface ResolveServerEntryInput {

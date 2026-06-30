@@ -1,3 +1,4 @@
+// @effect-diagnostics globalTimers:off - Test harness uses setTimeout to flush microtasks; the supervisor under test injects all real timers.
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createServerSupervisor, restartDelay } from "./serverSupervisor.ts";
@@ -18,7 +19,7 @@ interface FakeChild {
 
 const makeDeps = (overrides: { probeReady?: () => Promise<boolean> } = {}) => {
   const children: FakeChild[] = [];
-  const spawn = () => {
+  const spawn = (_cmd: string, _args: readonly string[], _opts: { cwd: string; env: Record<string, string | undefined> }) => {
     let onExit: ((code: number | null) => void) | undefined;
     const child: FakeChild = {
       pid: 100 + children.length,

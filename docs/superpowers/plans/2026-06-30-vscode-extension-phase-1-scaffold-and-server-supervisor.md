@@ -1,6 +1,8 @@
 # VSCode Extension — Phase 1: Package Scaffold + Server Supervisor — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status:** COMPLETE (2026-06-30). Operator-verified Status webview + VSIX packaging; restart/orphan acceptance covered by `pnpm --filter t3-code smoke-test` (`apps/vscode/scripts/smokeSupervisor.ts`). Remote-SSH manual smoke (Step 7.8) not run.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Stand up the new `apps/vscode` (`@t3tools/vscode-extension`) workspace package so that, when run in the VSCode Extension Development Host, it spawns and supervises the `@t3tools/server` child on a loopback port (free-port scan → `--bootstrap-fd 3` newline-JSON handshake → readiness poll → exponential-backoff auto-restart → graceful SIGTERM stop), resolves the server's externally-reachable base URL via `vscode.env.asExternalUri`, and proves end-to-end connectivity (local **and** Remote-SSH) through a minimal "T3 Code: Status" webview that fetches and displays `/.well-known/t3/environment`.
 
@@ -79,7 +81,7 @@ Responsibilities:
 - Consumes: nothing (first task).
 - Produces: the buildable package; `Logger` interface (`{ info(msg: string): void; warn(msg: string): void; error(msg: string, err?: unknown): void }`) and `createOutputChannelLogger(channel: { appendLine(line: string): void }): Logger` from `src/logger.ts`, reused by every later task.
 
-- [ ] **Step 1: Write `apps/vscode/package.json`**
+- [x] **Step 1: Write `apps/vscode/package.json`**
 
 ```jsonc
 {
@@ -125,7 +127,7 @@ Responsibilities:
 
 Note: `@types/vscode` pins the same floor as `engines.vscode`. The `build` script does **not** yet declare `dependsOn: ["t3#build"]` here — that is added in `vite.config.ts`'s `run.tasks` (Step 3), matching how `apps/desktop` does it.
 
-- [ ] **Step 2: Write `apps/vscode/tsconfig.json`** (mirrors `apps/desktop/tsconfig.json`, swapping `electron` types for `vscode`)
+- [x] **Step 2: Write `apps/vscode/tsconfig.json`** (mirrors `apps/desktop/tsconfig.json`, swapping `electron` types for `vscode`)
 
 ```jsonc
 {
@@ -141,7 +143,7 @@ Note: `@types/vscode` pins the same floor as `engines.vscode`. The `build` scrip
 
 (`DOM` lib is included because `ui/statusPanel.ts` builds HTML strings and the webview-message types reference DOM-ish shapes; no DOM runtime is used in the extension host.)
 
-- [ ] **Step 3: Write `apps/vscode/vite.config.ts`** (CJS extension-host bundle via tsdown; `vscode` is provided by the host so it must be external; bundle the workspace `@t3tools/*` deps, mirroring `apps/desktop/vite.config.ts`)
+- [x] **Step 3: Write `apps/vscode/vite.config.ts`** (CJS extension-host bundle via tsdown; `vscode` is provided by the host so it must be external; bundle the workspace `@t3tools/*` deps, mirroring `apps/desktop/vite.config.ts`)
 
 ```ts
 import { defineConfig } from "vite-plus";
@@ -171,7 +173,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Write `apps/vscode/.vscodeignore`**
+- [x] **Step 4: Write `apps/vscode/.vscodeignore`**
 
 ```
 src/**
@@ -181,7 +183,7 @@ vite.config.ts
 .vite-plus/**
 ```
 
-- [ ] **Step 5: Write `apps/vscode/README.md`**
+- [x] **Step 5: Write `apps/vscode/README.md`**
 
 ```markdown
 # @t3tools/vscode-extension
@@ -201,7 +203,7 @@ T3 Code as a VSCode extension. Embeds the existing `@t3tools/server` and UI.
 server run on the remote host.
 ```
 
-- [ ] **Step 6: Write `apps/vscode/src/logger.ts`**
+- [x] **Step 6: Write `apps/vscode/src/logger.ts`**
 
 ```ts
 export interface Logger {
@@ -227,7 +229,7 @@ export const createOutputChannelLogger = (channel: AppendOnlyChannel): Logger =>
 });
 ```
 
-- [ ] **Step 7: Write `apps/vscode/src/extension.ts`** (activation stub — replaced with full wiring in Task 7)
+- [x] **Step 7: Write `apps/vscode/src/extension.ts`** (activation stub — replaced with full wiring in Task 7)
 
 ```ts
 import * as vscode from "vscode";
@@ -252,18 +254,18 @@ export function deactivate(): void {
 }
 ```
 
-- [ ] **Step 8: Install workspace deps**
+- [x] **Step 8: Install workspace deps**
 
 Run: `pnpm install`
 Expected: completes; `@t3tools/vscode-extension` resolves `@t3tools/contracts` (workspace) and `@types/vscode`.
 
-- [ ] **Step 9: Verify it builds and typechecks**
+- [x] **Step 9: Verify it builds and typechecks**
 
 Run: `pnpm --filter @t3tools/vscode-extension build && cd apps/vscode && pnpm typecheck`
 Expected: `vp pack` emits `apps/vscode/dist/extension.cjs`; typecheck passes with no errors. Confirm `vscode` is **not** inlined into the bundle:
 Run: `grep -c "createOutputChannel" apps/vscode/dist/extension.cjs` → expect `>= 1` (our call survives), and `grep -c "require(\"vscode\")" apps/vscode/dist/extension.cjs` → expect `>= 1` (it is left as an external require).
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add apps/vscode pnpm-lock.yaml
@@ -282,7 +284,7 @@ git commit -m "feat(vscode): scaffold @t3tools/vscode-extension package"
 - Consumes: nothing.
 - Produces: `findFreeLoopbackPort(options?: { startPort?: number; maxPort?: number }): Promise<number>` — resolves the first port (default start `3773`, default max `65535`) bindable on both `127.0.0.1` and `::1`; rejects with `Error("No free loopback port found ...")` if none.
 
-- [ ] **Step 1: Write the failing test** — `apps/vscode/src/server/freePort.test.ts`
+- [x] **Step 1: Write the failing test** — `apps/vscode/src/server/freePort.test.ts`
 
 ```ts
 import { describe, expect, it } from "vite-plus/test";
@@ -316,12 +318,12 @@ describe("findFreeLoopbackPort", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/vscode && pnpm test src/server/freePort.test.ts`
 Expected: FAIL — `findFreeLoopbackPort` is not defined (module missing).
 
-- [ ] **Step 3: Write `apps/vscode/src/server/freePort.ts`**
+- [x] **Step 3: Write `apps/vscode/src/server/freePort.ts`**
 
 ```ts
 import * as net from "node:net";
@@ -356,12 +358,12 @@ export const findFreeLoopbackPort = async (options: FindFreePortOptions = {}): P
 };
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/vscode && pnpm test src/server/freePort.test.ts`
 Expected: PASS (both tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/vscode/src/server/freePort.ts apps/vscode/src/server/freePort.test.ts
@@ -383,7 +385,7 @@ git commit -m "feat(vscode): add free loopback port scan"
   - `buildBootstrap(input: { port: number; host: string; t3Home: string; token: string }): DesktopBackendBootstrap` — fills the full envelope with the local-only defaults (`mode: "desktop"`, `noBrowser: true`, tailscale disabled).
   - `serializeBootstrapLine(bootstrap: DesktopBackendBootstrap): string` — the exact newline-terminated JSON written to fd 3.
 
-- [ ] **Step 1: Write the failing test** — `apps/vscode/src/server/bootstrap.test.ts`
+- [x] **Step 1: Write the failing test** — `apps/vscode/src/server/bootstrap.test.ts`
 
 ```ts
 import { describe, expect, it } from "vite-plus/test";
@@ -422,12 +424,12 @@ describe("bootstrap", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/vscode && pnpm test src/server/bootstrap.test.ts`
 Expected: FAIL — module/exports missing.
 
-- [ ] **Step 3: Write `apps/vscode/src/server/bootstrap.ts`**
+- [x] **Step 3: Write `apps/vscode/src/server/bootstrap.ts`**
 
 ```ts
 import { randomBytes as nodeRandomBytes } from "node:crypto";
@@ -465,12 +467,12 @@ export const serializeBootstrapLine = (bootstrap: DesktopBackendBootstrap): stri
 
 Note: `tailscaleServePort: 0` satisfies the required `PortSchema` field while signalling "unused" alongside `tailscaleServeEnabled: false`. If `PortSchema` rejects `0` at server decode time, change to `1` — verify against the real server in Task 7's manual smoke (the server ignores it when `tailscaleServeEnabled` is false).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/vscode && pnpm test src/server/bootstrap.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/vscode/src/server/bootstrap.ts apps/vscode/src/server/bootstrap.test.ts
@@ -490,7 +492,7 @@ git commit -m "feat(vscode): add bootstrap envelope builder for fd-3 handshake"
 - Produces:
   - `resolveServerEntry(input: { extensionPath: string; execPath: string; fileExists: (p: string) => boolean }): { command: string; entryPath: string; spawnEnv: Record<string, string> }` — picks the server bin (packaged copy `<extensionPath>/server/dist/bin.mjs` if present, else monorepo dev path `<extensionPath>/../../apps/server/dist/bin.mjs`), returns the Node `command` (`execPath`) and the `ELECTRON_RUN_AS_NODE=1` env so the host's Electron/Node binary runs as plain Node (the same trick the desktop app and VSCode itself use). Throws `Error` if no bin is found.
 
-- [ ] **Step 1: Write the failing test** — `apps/vscode/src/server/serverEntry.test.ts`
+- [x] **Step 1: Write the failing test** — `apps/vscode/src/server/serverEntry.test.ts`
 
 ```ts
 import { describe, expect, it } from "vite-plus/test";
@@ -523,12 +525,12 @@ describe("resolveServerEntry", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/vscode && pnpm test src/server/serverEntry.test.ts`
 Expected: FAIL — module missing.
 
-- [ ] **Step 3: Write `apps/vscode/src/server/serverEntry.ts`**
+- [x] **Step 3: Write `apps/vscode/src/server/serverEntry.ts`**
 
 ```ts
 import * as path from "node:path";
@@ -561,12 +563,12 @@ export const resolveServerEntry = (input: ResolveServerEntryInput): ResolvedServ
 };
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/vscode && pnpm test src/server/serverEntry.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/vscode/src/server/serverEntry.ts apps/vscode/src/server/serverEntry.test.ts
@@ -619,7 +621,7 @@ This is the core of the phase. All effects are injected so it runs headless. Con
   - `createServerSupervisor(deps: SupervisorDeps): { start(): Promise<ServerHandle>; stop(): Promise<void>; snapshot(): { running: boolean; ready: boolean; restartAttempt: number } }`
   - `restartDelay(attempt: number, tuning: SupervisorTuning): number` (exported pure helper: `min(initial * 2**attempt, max)`).
 
-- [ ] **Step 1: Write the failing test** — `apps/vscode/src/server/serverSupervisor.test.ts`
+- [x] **Step 1: Write the failing test** — `apps/vscode/src/server/serverSupervisor.test.ts`
 
 ```ts
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -736,12 +738,12 @@ describe("createServerSupervisor", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/vscode && pnpm test src/server/serverSupervisor.test.ts`
 Expected: FAIL — module/exports missing.
 
-- [ ] **Step 3: Write `apps/vscode/src/server/serverSupervisor.ts`**
+- [x] **Step 3: Write `apps/vscode/src/server/serverSupervisor.ts`**
 
 ```ts
 import type { Logger } from "../logger.ts";
@@ -884,12 +886,12 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
 };
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/vscode && pnpm test src/server/serverSupervisor.test.ts`
 Expected: PASS (all 5 cases).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/vscode/src/server/serverSupervisor.ts apps/vscode/src/server/serverSupervisor.test.ts
@@ -909,7 +911,7 @@ git commit -m "feat(vscode): add server supervisor with fd-3 handshake and backo
 - Produces:
   - `resolveExternalBaseUrls(input: { localHttpBaseUrl: string; asExternalUri: (url: string) => Promise<string> }): Promise<{ httpBaseUrl: string; wsBaseUrl: string; readinessUrl: string }>` — calls `asExternalUri` on the loopback http URL (identity locally, forwarded under Remote-SSH), derives the `ws`/`wss` base (`http→ws`, `https→wss`), and the readiness URL (`<httpBaseUrl>/.well-known/t3/environment`).
 
-- [ ] **Step 1: Write the failing test** — `apps/vscode/src/transport/urlResolver.test.ts`
+- [x] **Step 1: Write the failing test** — `apps/vscode/src/transport/urlResolver.test.ts`
 
 ```ts
 import { describe, expect, it } from "vite-plus/test";
@@ -939,12 +941,12 @@ describe("resolveExternalBaseUrls", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/vscode && pnpm test src/transport/urlResolver.test.ts`
 Expected: FAIL — module missing.
 
-- [ ] **Step 3: Write `apps/vscode/src/transport/urlResolver.ts`**
+- [x] **Step 3: Write `apps/vscode/src/transport/urlResolver.ts`**
 
 ```ts
 export interface ResolveExternalBaseUrlsInput {
@@ -973,12 +975,12 @@ export const resolveExternalBaseUrls = async (
 };
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/vscode && pnpm test src/transport/urlResolver.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/vscode/src/transport/urlResolver.ts apps/vscode/src/transport/urlResolver.test.ts
@@ -1000,7 +1002,7 @@ Wires the pure modules to real VSCode APIs and proves connectivity. The status w
 - Consumes: `createServerSupervisor` (Task 5), `findFreeLoopbackPort` (Task 2), `resolveServerEntry` (Task 4), `resolveExternalBaseUrls` (Task 6), `createOutputChannelLogger` (Task 1).
 - Produces: `renderStatusHtml(input: { ready: boolean; httpBaseUrl: string; wsBaseUrl: string; descriptorJson: string | null; error: string | null }): string` from `ui/statusPanel.ts` (pure, no `vscode`); a working `activate`/`deactivate`.
 
-- [ ] **Step 1: Write the failing test** — `apps/vscode/src/ui/statusPanel.test.ts`
+- [x] **Step 1: Write the failing test** — `apps/vscode/src/ui/statusPanel.test.ts`
 
 ```ts
 import { describe, expect, it } from "vite-plus/test";
@@ -1033,12 +1035,12 @@ describe("renderStatusHtml", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd apps/vscode && pnpm test src/ui/statusPanel.test.ts`
 Expected: FAIL — module missing.
 
-- [ ] **Step 3: Write `apps/vscode/src/ui/statusPanel.ts`**
+- [x] **Step 3: Write `apps/vscode/src/ui/statusPanel.ts`**
 
 ```ts
 export interface StatusViewModel {
@@ -1073,12 +1075,12 @@ export const renderStatusHtml = (model: StatusViewModel): string => {
 };
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd apps/vscode && pnpm test src/ui/statusPanel.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Replace `apps/vscode/src/extension.ts` with full wiring**
+- [x] **Step 5: Replace `apps/vscode/src/extension.ts` with full wiring**
 
 ```ts
 import * as fs from "node:fs";
@@ -1209,27 +1211,27 @@ export async function deactivate(): Promise<void> {
 }
 ```
 
-- [ ] **Step 6: Typecheck + build + full package test run**
+- [x] **Step 6: Typecheck + build + full package test run**
 
 Run: `cd apps/vscode && pnpm typecheck && pnpm test && pnpm build`
 Expected: typecheck clean; all unit tests pass; `dist/extension.cjs` emitted.
 
-- [ ] **Step 7: Manual smoke in the Extension Development Host (records evidence)**
+- [x] **Step 7: Manual smoke in the Extension Development Host (records evidence)**
 
 This is the Phase 1 acceptance test — it exercises the real `vscode` API and a real server child, which the unit tests deliberately mock.
 
-1. `pnpm build:server` (ensure `apps/server/dist/bin.mjs` exists).
-2. `pnpm --filter @t3tools/vscode-extension build`.
-3. Open the repo in VSCode → **Run and Debug** → **Run Extension** (F5). (If no launch config exists, create `.vscode/launch.json` with a standard `extensionHost` config pointing `--extensionDevelopmentPath=${workspaceFolder}/apps/vscode`.)
-4. In the dev host window, open the **T3 Code** output channel — confirm `Spawned server …` then `Server ready at http://127.0.0.1:<port>`.
-5. Run **T3 Code: Status** from the command palette — confirm the webview shows `Ready`, the http/ws URLs, and a descriptor JSON containing `environmentId`, `serverVersion`, `platform`.
-6. Kill the server child externally (`kill <pid>` from the output log) — confirm the output channel shows a backoff restart and a new `Server ready` line.
-7. Close the dev host window — confirm the server child exits (no orphaned `bin.mjs` process: `pgrep -f apps/server/dist/bin.mjs` returns nothing).
-8. **(If a Remote-SSH host is available)** repeat 3–5 in a Remote-SSH window; confirm the descriptor still loads and the status webview shows a forwarded `https`/`wss` URL.
+1. `pnpm build:server` (ensure `apps/server/dist/bin.mjs` exists). **PASS**
+2. `pnpm --filter t3-code build`. **PASS**
+3. Open the repo in VSCode → **Run and Debug** → **Run Extension** (F5). **PASS**
+4. In the dev host window, open the **T3 Code** output channel — confirm `Spawned server …` then `Server ready at http://127.0.0.1:<port>`. **PASS**
+5. Run **T3 Code: Status** from the command palette — confirm the webview shows `Ready`, the http/ws URLs, and a descriptor JSON containing `environmentId`, `serverVersion`, `platform`. **PASS** (operator-verified on `http://127.0.0.1:3774`)
+6. Kill the server child externally (`kill <pid>` from the output log) — confirm the output channel shows a backoff restart and a new `Server ready` line. **PASS** (headless: `pnpm --filter t3-code smoke-test`, kill → new pid + readiness)
+7. Close the dev host window — confirm the server child exits (no orphaned `bin.mjs` process). **PASS** (headless smoke: `supervisor.stop()` / deactivate path, no live pids after 3s)
+8. **(If a Remote-SSH host is available)** repeat 3–5 in a Remote-SSH window; confirm the descriptor still loads and the status webview shows a forwarded `https`/`wss` URL. **NOT RUN** (optional; unit tests cover `asExternalUri` wiring)
 
 Record pass/fail for each step in the commit message or PR description. If `tailscaleServePort: 0` was rejected by the server at decode time (watch the output channel for a bootstrap decode error), change it to `1` in `bootstrap.ts` per Task 3's note and re-run.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/vscode/src/extension.ts apps/vscode/src/ui/statusPanel.ts apps/vscode/src/ui/statusPanel.test.ts
@@ -1267,5 +1269,7 @@ Each phase is independently testable and gets its own `docs/superpowers/plans/` 
 - `postMessage` → extension host → VSCode APIs implementing the needed slice of `LocalApi`/`EnvironmentApi` (`packages/contracts/src/ipc.ts`): `context.secrets` (provider keys/tokens), `showOpenDialog`, theme tokens, `env.openExternal`, `showTextDocument`, `createTerminal`, `workspace.workspaceFolders[0]`.
 - Delegate to native VSCode: interactive terminal, file opens, SCM status. Keep custom: comment-able diff, chat, list+tree, settings. **Deliverable:** secrets, pickers, file/terminal opens work natively.
 
-### Open question to settle during Phase 1→2 packaging
-- `.vsix` packaging/distribution (marketplace vs internal) and how `apps/server/dist` is copied into the packaged extension (the `serverEntry.ts` "packaged path" branch already anticipates `<extensionPath>/server/dist/bin.mjs`). Decide before Phase 2 ships a distributable.
+### Phase 1→2 packaging (resolved)
+
+- **VSIX packaging:** `pnpm --filter t3-code package:vsix` runs `vscode:prepublish` (build extension + `stageServerDist.ts` copy of `apps/server/dist`) and `vsce package --no-dependencies`. Staged `apps/vscode/server/` and `*.vsix` are gitignored.
+- **Distribution:** internal/dev VSIX for now; marketplace publishing deferred to a later phase.

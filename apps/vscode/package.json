@@ -14,6 +14,7 @@
     "prepack": "pnpm run stage:server",
     "vscode:prepublish": "vp pack && pnpm run stage:server",
     "package:vsix": "vsce package --no-dependencies",
+    "smoke-test": "node scripts/smokeSupervisor.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run"
   },

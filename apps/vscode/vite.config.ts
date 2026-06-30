@@ -4,7 +4,15 @@ export default defineConfig({
   run: {
     tasks: {
       // The extension spawns apps/server/dist/bin.mjs, so the server must be built first.
-      build: { command: "vp pack", dependsOn: ["t3#build"], cache: false },
+      build: {
+        command: "vp pack && pnpm run build:webview",
+        dependsOn: ["t3#build"],
+        cache: false,
+      },
+      "build:webview": {
+        command: "vp build --config webview/vite.config.ts",
+        cache: false,
+      },
       dev: { command: "vp pack --watch", cache: false },
     },
   },

@@ -3,6 +3,10 @@
   "version": "0.0.27",
   "private": true,
   "type": "module",
+  "exports": {
+    "./vscode/chatShell": "./src/vscode/chatShell.tsx",
+    "./vscode/main": "./src/vscode/main.tsx"
+  },
   "scripts": {
     "dev": "vp dev",
     "build": "vp build",

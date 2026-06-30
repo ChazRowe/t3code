@@ -69,6 +69,7 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
   let restartAttempt = 0;
   let current: SpawnedChild | null = null;
   let currentPort = 0;
+  let currentHandle: ServerHandle | null = null;
 
   const waitForReady = async (httpBaseUrl: string, signal: AbortSignal): Promise<void> => {
     const deadline = deps.now() + tuning.readinessTimeoutMs;
@@ -111,6 +112,7 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
       if (child === current) {
         current = null;
         ready = false;
+        currentHandle = null;
       }
       // Fail the in-flight readiness race for this child (no-op once ready/settled).
       rejectOnExit?.(code);
@@ -131,8 +133,10 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
     childReady = true;
     ready = true;
     restartAttempt = 0;
+    const handle: ServerHandle = { port: currentPort, httpBaseUrl, token };
+    currentHandle = handle;
     deps.logger.info(`Server ready at ${httpBaseUrl}`);
-    return { port: currentPort, httpBaseUrl, token };
+    return handle;
   };
 
   const scheduleRestart = async (code: number | null): Promise<void> => {
@@ -162,6 +166,7 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
 
   const stop = async (): Promise<void> => {
     desiredRunning = false;
+    currentHandle = null;
     const child = current;
     if (child === null) return;
     child.kill("SIGTERM");
@@ -170,5 +175,7 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
 
   const snapshot = () => ({ running: desiredRunning, ready, restartAttempt });
 
-  return { start, stop, snapshot };
+  const getHandle = (): ServerHandle | null => currentHandle;
+
+  return { start, stop, snapshot, getHandle };
 };

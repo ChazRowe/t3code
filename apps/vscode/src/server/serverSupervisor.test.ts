@@ -93,6 +93,31 @@ describe("createServerSupervisor", () => {
     await supervisor.stop();
   });
 
+  it("getHandle() is null before start/after stop and reflects the new port after a restart", async () => {
+    const { deps, children } = makeDeps();
+    const ports = [3801, 3902];
+    let call = 0;
+    const findFreePort = async () => ports[call++] ?? 3902;
+    const supervisor = createServerSupervisor({ ...deps, findFreePort });
+
+    expect(supervisor.getHandle()).toBeNull();
+
+    const handle = await supervisor.start();
+    expect(handle.port).toBe(3801);
+    expect(supervisor.getHandle()?.port).toBe(3801);
+    expect(supervisor.getHandle()?.httpBaseUrl).toBe("http://127.0.0.1:3801");
+
+    // Post-ready crash → backoff restart whose fresh findFreePort yields a NEW port.
+    children[0]!.exit(1);
+    await new Promise((r) => setTimeout(r, 0));
+    await vi.waitFor(() => expect(children.length).toBe(2));
+    await vi.waitFor(() => expect(supervisor.getHandle()?.port).toBe(3902));
+    expect(supervisor.getHandle()?.httpBaseUrl).toBe("http://127.0.0.1:3902");
+
+    await supervisor.stop();
+    expect(supervisor.getHandle()).toBeNull();
+  });
+
   it("stop() sends SIGTERM and suppresses restart", async () => {
     const { deps, children } = makeDeps();
     const supervisor = createServerSupervisor(deps);

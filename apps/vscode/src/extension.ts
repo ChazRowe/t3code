@@ -11,20 +11,21 @@ import { findFreeLoopbackPort } from "./server/freePort.ts";
 import { resolveServerEntry } from "./server/serverEntry.ts";
 import {
   createServerSupervisor,
-  type ServerHandle,
   type SpawnedChild,
 } from "./server/serverSupervisor.ts";
 import { resolveExternalBaseUrls } from "./transport/urlResolver.ts";
 import { renderStatusHtml, type StatusViewModel } from "./ui/statusPanel.ts";
 
 let supervisor: ReturnType<typeof createServerSupervisor> | null = null;
-let handle: ServerHandle | null = null;
 
 const spawnChild = (
   cmd: string,
   args: readonly string[],
   opts: { cwd: string; env: Record<string, string | undefined> },
 ): SpawnedChild => {
+  // Ensure the spawn cwd exists (idempotent; covers a clean install where ~/.t3
+  // is absent, and restarts). Without it, spawn emits an async 'error', not 'exit'.
+  fs.mkdirSync(opts.cwd, { recursive: true });
   const child = nodeSpawn(cmd, [...args], {
     cwd: opts.cwd,
     env: opts.env,
@@ -41,7 +42,19 @@ const spawnChild = (
       }
     },
     kill: (signal) => child.kill(signal),
-    onExit: (cb) => child.on("exit", (code) => cb(code)),
+    onExit: (cb) => {
+      // Route both 'exit' and a spawn-time 'error' (e.g. ENOENT) through a single
+      // fire so the supervisor's exitDuringStartup race rejects promptly, and so an
+      // unhandled 'error' never throws in the extension host. Fire at most once.
+      let settled = false;
+      const fire = (code: number | null): void => {
+        if (settled) return;
+        settled = true;
+        cb(code);
+      };
+      child.on("exit", (code) => fire(code));
+      child.on("error", () => fire(null));
+    },
   };
 };
 
@@ -81,7 +94,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   try {
-    handle = await supervisor.start();
+    const handle = await supervisor.start();
     logger.info(`Server up at ${handle.httpBaseUrl}`);
   } catch (error) {
     logger.error("Failed to start the T3 Code server", error);
@@ -98,7 +111,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 const buildStatusModel = async (): Promise<StatusViewModel> => {
-  const currentHandle = handle;
+  const currentHandle = supervisor?.getHandle() ?? null;
   if (currentHandle === null) {
     return { ready: false, httpBaseUrl: "", wsBaseUrl: "", descriptorJson: null, error: "Server is not running." };
   }
@@ -127,5 +140,4 @@ const buildStatusModel = async (): Promise<StatusViewModel> => {
 export async function deactivate(): Promise<void> {
   await supervisor?.stop();
   supervisor = null;
-  handle = null;
 }

@@ -13,12 +13,17 @@ const escapeHtml = (value: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
+export const shouldContinueStatusPolling = (model: StatusViewModel): boolean =>
+  !model.ready && model.error === null;
+
 export const renderStatusHtml = (model: StatusViewModel): string => {
-  const status = model.error !== null ? "Error" : model.ready ? "Ready" : "Starting…";
+  const status = model.error !== null ? "Error" : model.ready ? "Ready" : "Starting...";
   const body =
     model.error !== null
       ? `<p class="err">${escapeHtml(model.error)}</p>`
-      : `<dl>
+      : !model.ready
+        ? `<p>Embedded server is starting.</p>`
+        : `<dl>
            <dt>HTTP</dt><dd>${escapeHtml(model.httpBaseUrl)}</dd>
            <dt>WebSocket</dt><dd>${escapeHtml(model.wsBaseUrl)}</dd>
            <dt>Descriptor</dt><dd><pre>${escapeHtml(model.descriptorJson ?? "(none)")}</pre></dd>

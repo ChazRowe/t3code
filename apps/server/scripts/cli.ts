@@ -15,6 +15,7 @@ import {
   DEVELOPMENT_ICON_OVERRIDES,
   PUBLISH_ICON_OVERRIDES,
 } from "../../../scripts/lib/brand-assets.ts";
+import { stageNativeRuntimePackages } from "./bundleDeps.ts";
 import { resolveCatalogDependencies } from "../../../scripts/lib/resolve-catalog.ts";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
@@ -179,6 +180,8 @@ const buildCmd = Command.make(
           shell: false,
         }),
       );
+
+      stageNativeRuntimePackages(path.join(serverDir, "dist"));
 
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");

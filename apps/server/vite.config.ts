@@ -4,16 +4,9 @@ import { defineConfig, mergeConfig } from "vite-plus";
 import baseConfig from "../../vite.config.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
-const bundledPackagePrefixes = [
-  "@pierre/diffs",
-  "@t3tools/",
-  "effect-acp",
-  "effect-codex-app-server",
-];
+import { shouldBundleCliDependency } from "./scripts/bundleDeps.ts";
 
-export function shouldBundleCliDependency(id: string): boolean {
-  return bundledPackagePrefixes.some((prefix) => id.startsWith(prefix));
-}
+export { shouldBundleCliDependency };
 
 const repoEnv = loadRepoEnv();
 
@@ -34,6 +27,7 @@ export default mergeConfig(
       outDir: "dist",
       sourcemap: true,
       clean: true,
+      shims: true,
       deps: {
         alwaysBundle: shouldBundleCliDependency,
         onlyBundle: false,

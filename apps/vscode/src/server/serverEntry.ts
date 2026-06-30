@@ -18,7 +18,9 @@ export const resolveServerEntry = (input: ResolveServerEntryInput): ResolvedServ
   const dev = path.resolve(input.extensionPath, "..", "..", "apps", "server", "dist", "bin.mjs");
   const entryPath = input.fileExists(packaged) ? packaged : input.fileExists(dev) ? dev : null;
   if (entryPath === null) {
-    throw new Error(`Server bin not found. Looked in:\n  ${packaged}\n  ${dev}\nRun \`pnpm build:server\`.`);
+    throw new Error(
+      `Server bin not found. Looked in:\n  ${packaged}\n  ${dev}\nRun \`pnpm build:server\`.`,
+    );
   }
   return {
     command: input.execPath,

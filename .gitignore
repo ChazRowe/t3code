@@ -33,3 +33,5 @@ node_modules/
 .env*
 !.env.example
 .t3code-tmp/
+apps/vscode/server/
+*.vsix

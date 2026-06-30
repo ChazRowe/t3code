@@ -1,30 +1,19 @@
 {
-  "name": "@t3tools/vscode-extension",
+  "name": "t3-code",
   "displayName": "T3 Code",
-  "description": "T3 Code session experience inside VSCode.",
   "version": "0.0.27",
   "private": true,
-  "type": "module",
+  "description": "T3 Code session experience inside VSCode.",
   "publisher": "t3tools",
-  "engines": {
-    "vscode": "^1.90.0",
-    "node": "^24.13.1"
-  },
+  "type": "module",
   "main": "./dist/extension.cjs",
-  "extensionKind": ["workspace"],
-  "activationEvents": ["onStartupFinished"],
-  "contributes": {
-    "commands": [
-      {
-        "command": "t3code.showStatus",
-        "title": "T3 Code: Status",
-        "category": "T3 Code"
-      }
-    ]
-  },
   "scripts": {
-    "build": "vp pack",
-    "dev": "vp pack --watch",
+    "build:bundle": "vp pack",
+    "dev:bundle": "vp pack --watch",
+    "stage:server": "node scripts/stageServerDist.ts",
+    "prepack": "pnpm run stage:server",
+    "vscode:prepublish": "vp pack && pnpm run stage:server",
+    "package:vsix": "vsce package --no-dependencies",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run"
   },
@@ -34,6 +23,26 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.7.1",
     "vite-plus": "catalog:"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "t3code.showStatus",
+        "title": "T3 Code: Status",
+        "category": "T3 Code"
+      }
+    ]
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "engines": {
+    "node": "^24.13.1",
+    "vscode": "^1.90.0"
   }
 }

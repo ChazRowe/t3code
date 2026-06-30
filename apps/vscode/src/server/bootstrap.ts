@@ -2,9 +2,8 @@ import { randomBytes as nodeRandomBytes } from "node:crypto";
 
 import type { DesktopBackendBootstrap } from "@t3tools/contracts";
 
-export const mintBootstrapToken = (
-  randomBytes: (n: number) => Buffer = nodeRandomBytes,
-): string => randomBytes(24).toString("hex");
+export const mintBootstrapToken = (randomBytes: (n: number) => Buffer = nodeRandomBytes): string =>
+  randomBytes(24).toString("hex");
 
 export interface BuildBootstrapInput {
   readonly port: number;

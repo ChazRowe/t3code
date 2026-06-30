@@ -80,7 +80,9 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
       await deps.sleep(tuning.readinessIntervalMs);
     }
     if (signal.aborted) return;
-    throw new Error(`Server readiness timed out after ${tuning.readinessTimeoutMs}ms at ${httpBaseUrl}`);
+    throw new Error(
+      `Server readiness timed out after ${tuning.readinessTimeoutMs}ms at ${httpBaseUrl}`,
+    );
   };
 
   const launch = async (): Promise<ServerHandle> => {
@@ -88,10 +90,19 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
     currentPort = await deps.findFreePort({ startPort: DEFAULT_START_PORT });
     const httpBaseUrl = `http://${host}:${currentPort}`;
     const bootstrap = buildBootstrap({ port: currentPort, host, t3Home: deps.t3Home, token });
+    const embeddedServerEnv = {
+      T3CODE_MODE: bootstrap.mode,
+      T3CODE_PORT: String(bootstrap.port),
+      T3CODE_HOST: bootstrap.host,
+      T3CODE_HOME: bootstrap.t3Home,
+      T3CODE_NO_BROWSER: String(bootstrap.noBrowser),
+      T3CODE_TAILSCALE_SERVE: String(bootstrap.tailscaleServeEnabled),
+      T3CODE_TAILSCALE_SERVE_PORT: String(bootstrap.tailscaleServePort),
+    };
 
     const child = deps.spawn(entry.command, [entry.entryPath, "--bootstrap-fd", "3"], {
       cwd: deps.t3Home,
-      env: { ...process.env, ...entry.spawnEnv },
+      env: { ...process.env, ...entry.spawnEnv, ...embeddedServerEnv },
     });
     current = child;
     deps.logger.info(`Spawned server pid=${String(child.pid)} port=${currentPort}`);
@@ -105,7 +116,8 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
     // readiness wait loses to the child crashing instead of polling a dead server.
     let rejectOnExit: ((code: number | null) => void) | undefined;
     const exitDuringStartup = new Promise<never>((_, reject) => {
-      rejectOnExit = (code) => reject(new Error(`Server exited during startup (code=${String(code)})`));
+      rejectOnExit = (code) =>
+        reject(new Error(`Server exited during startup (code=${String(code)})`));
     });
 
     child.onExit((code) => {
@@ -141,7 +153,9 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
 
   const scheduleRestart = async (code: number | null): Promise<void> => {
     const delay = restartDelay(restartAttempt, tuning);
-    deps.logger.warn(`Server exited (code=${String(code)}); restarting in ${delay}ms (attempt ${restartAttempt + 1})`);
+    deps.logger.warn(
+      `Server exited (code=${String(code)}); restarting in ${delay}ms (attempt ${restartAttempt + 1})`,
+    );
     restartAttempt += 1;
     await deps.sleep(delay);
     if (!desiredRunning) return;

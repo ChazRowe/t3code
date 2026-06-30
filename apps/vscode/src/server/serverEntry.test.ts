@@ -10,20 +10,32 @@ const dev = path.resolve(ext, "..", "..", "apps", "server", "dist", "bin.mjs");
 
 describe("resolveServerEntry", () => {
   it("prefers the packaged server bin when present", () => {
-    const r = resolveServerEntry({ extensionPath: ext, execPath: "/usr/bin/node", fileExists: (p) => p === packaged });
+    const r = resolveServerEntry({
+      extensionPath: ext,
+      execPath: "/usr/bin/node",
+      fileExists: (p) => p === packaged,
+    });
     expect(r.entryPath).toBe(packaged);
     expect(r.command).toBe("/usr/bin/node");
     expect(r.spawnEnv.ELECTRON_RUN_AS_NODE).toBe("1");
   });
 
   it("falls back to the monorepo dev path", () => {
-    const r = resolveServerEntry({ extensionPath: ext, execPath: "/usr/bin/node", fileExists: (p) => p === dev });
+    const r = resolveServerEntry({
+      extensionPath: ext,
+      execPath: "/usr/bin/node",
+      fileExists: (p) => p === dev,
+    });
     expect(r.entryPath).toBe(dev);
   });
 
   it("throws when no server bin exists", () => {
-    expect(() => resolveServerEntry({ extensionPath: ext, execPath: "/usr/bin/node", fileExists: () => false })).toThrow(
-      /server bin not found/i,
-    );
+    expect(() =>
+      resolveServerEntry({
+        extensionPath: ext,
+        execPath: "/usr/bin/node",
+        fileExists: () => false,
+      }),
+    ).toThrow(/server bin not found/i);
   });
 });

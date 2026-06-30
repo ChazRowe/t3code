@@ -1,5 +1,7 @@
 src/**
+scripts/**
 tsconfig.json
+tsconfig.tsbuildinfo
 vite.config.ts
 **/*.test.ts
 .vite-plus/**

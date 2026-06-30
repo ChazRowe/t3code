@@ -5,8 +5,11 @@ import { createServerSupervisor, restartDelay } from "./serverSupervisor.ts";
 import { createOutputChannelLogger } from "../logger.ts";
 
 const tuning = {
-  initialRestartDelayMs: 10, maxRestartDelayMs: 100,
-  readinessTimeoutMs: 1000, readinessIntervalMs: 5, terminateGraceMs: 20,
+  initialRestartDelayMs: 10,
+  maxRestartDelayMs: 100,
+  readinessTimeoutMs: 1000,
+  readinessIntervalMs: 5,
+  terminateGraceMs: 20,
 };
 const logger = createOutputChannelLogger({ appendLine: () => {} });
 
@@ -14,17 +17,23 @@ interface FakeChild {
   pid: number | undefined;
   written: string[];
   killed: NodeJS.Signals[];
+  opts: { cwd: string; env: Record<string, string | undefined> };
   exit: (code: number | null) => void;
 }
 
 const makeDeps = (overrides: { probeReady?: () => Promise<boolean> } = {}) => {
   const children: FakeChild[] = [];
-  const spawn = (_cmd: string, _args: readonly string[], _opts: { cwd: string; env: Record<string, string | undefined> }) => {
+  const spawn = (
+    _cmd: string,
+    _args: readonly string[],
+    opts: { cwd: string; env: Record<string, string | undefined> },
+  ) => {
     let onExit: ((code: number | null) => void) | undefined;
     const child: FakeChild = {
       pid: 100 + children.length,
       written: [],
       killed: [],
+      opts,
       exit: (code) => onExit?.(code),
     };
     children.push(child);
@@ -32,13 +41,19 @@ const makeDeps = (overrides: { probeReady?: () => Promise<boolean> } = {}) => {
       pid: child.pid,
       writeBootstrap: (line: string) => child.written.push(line),
       kill: (sig: NodeJS.Signals) => child.killed.push(sig),
-      onExit: (cb: (code: number | null) => void) => { onExit = cb; },
+      onExit: (cb: (code: number | null) => void) => {
+        onExit = cb;
+      },
     };
   };
   const deps = {
     logger,
     findFreePort: async () => 3801,
-    resolveEntry: () => ({ command: "node", entryPath: "/bin.mjs", spawnEnv: { ELECTRON_RUN_AS_NODE: "1" } }),
+    resolveEntry: () => ({
+      command: "node",
+      entryPath: "/bin.mjs",
+      spawnEnv: { ELECTRON_RUN_AS_NODE: "1" },
+    }),
     t3Home: "/home/u/.t3",
     spawn,
     probeReady: overrides.probeReady ?? (async () => true),
@@ -51,7 +66,13 @@ const makeDeps = (overrides: { probeReady?: () => Promise<boolean> } = {}) => {
 
 describe("restartDelay", () => {
   it("doubles per attempt and caps at max", () => {
-    const t = { initialRestartDelayMs: 500, maxRestartDelayMs: 10000, readinessTimeoutMs: 0, readinessIntervalMs: 0, terminateGraceMs: 0 };
+    const t = {
+      initialRestartDelayMs: 500,
+      maxRestartDelayMs: 10000,
+      readinessTimeoutMs: 0,
+      readinessIntervalMs: 0,
+      terminateGraceMs: 0,
+    };
     expect(restartDelay(0, t)).toBe(500);
     expect(restartDelay(1, t)).toBe(1000);
     expect(restartDelay(5, t)).toBe(10000); // 500*32 capped
@@ -71,7 +92,19 @@ describe("createServerSupervisor", () => {
     expect(args).toEqual(["/bin.mjs", "--bootstrap-fd", "3"]);
     const line = children[0]!.written[0]!;
     expect(JSON.parse(line) as { desktopBootstrapToken: string }).toMatchObject({
-      port: 3801, host: "127.0.0.1", desktopBootstrapToken: handle.token,
+      port: 3801,
+      host: "127.0.0.1",
+      desktopBootstrapToken: handle.token,
+    });
+    expect(children[0]!.opts.env).toMatchObject({
+      ELECTRON_RUN_AS_NODE: "1",
+      T3CODE_MODE: "desktop",
+      T3CODE_PORT: "3801",
+      T3CODE_HOST: "127.0.0.1",
+      T3CODE_HOME: "/home/u/.t3",
+      T3CODE_NO_BROWSER: "true",
+      T3CODE_TAILSCALE_SERVE: "false",
+      T3CODE_TAILSCALE_SERVE_PORT: "1",
     });
     expect(supervisor.snapshot()).toMatchObject({ running: true, ready: true });
     await supervisor.stop();
@@ -131,7 +164,13 @@ describe("createServerSupervisor", () => {
 
   it("rejects start() if readiness never succeeds before timeout", async () => {
     const { deps } = makeDeps({ probeReady: async () => false });
-    const supervisor = createServerSupervisor({ ...deps, now: (() => { let t = 0; return () => (t += 100); })() });
+    const supervisor = createServerSupervisor({
+      ...deps,
+      now: (() => {
+        let t = 0;
+        return () => (t += 100);
+      })(),
+    });
     await expect(supervisor.start()).rejects.toThrow(/readiness|timed out/i);
     await supervisor.stop();
   });
@@ -142,7 +181,10 @@ describe("createServerSupervisor", () => {
     // sleep yields a macrotask each readiness iteration so the test's exit() and
     // vi.waitFor can run between probes (a microtask-only sleep would starve them).
     const { deps, children } = makeDeps({ probeReady: async () => false });
-    const supervisor = createServerSupervisor({ ...deps, sleep: () => new Promise((r) => setTimeout(r, 0)) });
+    const supervisor = createServerSupervisor({
+      ...deps,
+      sleep: () => new Promise((r) => setTimeout(r, 0)),
+    });
 
     const startP = supervisor.start();
     // Let launch() spawn the child (findFreePort awaits before spawn).

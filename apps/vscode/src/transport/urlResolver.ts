@@ -9,7 +9,8 @@ export interface ResolvedBaseUrls {
   readonly readinessUrl: string;
 }
 
-const stripTrailingSlash = (value: string): string => (value.endsWith("/") ? value.slice(0, -1) : value);
+const stripTrailingSlash = (value: string): string =>
+  value.endsWith("/") ? value.slice(0, -1) : value;
 
 export const resolveExternalBaseUrls = async (
   input: ResolveExternalBaseUrlsInput,

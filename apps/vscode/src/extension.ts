@@ -9,58 +9,24 @@ import * as vscode from "vscode";
 import { createOutputChannelLogger } from "./logger.ts";
 import { findFreeLoopbackPort } from "./server/freePort.ts";
 import { resolveServerEntry } from "./server/serverEntry.ts";
-import {
-  createServerSupervisor,
-  type SpawnedChild,
-} from "./server/serverSupervisor.ts";
+import { createServerSupervisor, type SpawnedChild } from "./server/serverSupervisor.ts";
 import { resolveExternalBaseUrls } from "./transport/urlResolver.ts";
-import { renderStatusHtml, type StatusViewModel } from "./ui/statusPanel.ts";
+import {
+  renderStatusHtml,
+  shouldContinueStatusPolling,
+  type StatusViewModel,
+} from "./ui/statusPanel.ts";
 
 let supervisor: ReturnType<typeof createServerSupervisor> | null = null;
+let startupError: string | null = null;
 
-const spawnChild = (
-  cmd: string,
-  args: readonly string[],
-  opts: { cwd: string; env: Record<string, string | undefined> },
-): SpawnedChild => {
-  // Ensure the spawn cwd exists (idempotent; covers a clean install where ~/.t3
-  // is absent, and restarts). Without it, spawn emits an async 'error', not 'exit'.
-  fs.mkdirSync(opts.cwd, { recursive: true });
-  const child = nodeSpawn(cmd, [...args], {
-    cwd: opts.cwd,
-    env: opts.env,
-    stdio: ["ignore", "pipe", "pipe", "pipe"], // fd 3 = bootstrap pipe
-  });
-  return {
-    pid: child.pid,
-    writeBootstrap: (line) => {
-      const fd3 = child.stdio[3];
-      if (fd3 !== null && fd3 !== undefined && "write" in fd3) {
-        (fd3 as unknown as NodeJS.EventEmitter).on("error", () => {});
-        (fd3 as NodeJS.WritableStream).write(line);
-        (fd3 as NodeJS.WritableStream).end();
-      }
-    },
-    kill: (signal) => child.kill(signal),
-    onExit: (cb) => {
-      // Route both 'exit' and a spawn-time 'error' (e.g. ENOENT) through a single
-      // fire so the supervisor's exitDuringStartup race rejects promptly, and so an
-      // unhandled 'error' never throws in the extension host. Fire at most once.
-      let settled = false;
-      const fire = (code: number | null): void => {
-        if (settled) return;
-        settled = true;
-        cb(code);
-      };
-      child.on("exit", (code) => fire(code));
-      child.on("error", () => fire(null));
-    },
-  };
-};
+const STATUS_POLL_MS = 500;
 
 const probeReady = async (httpBaseUrl: string, signal: AbortSignal): Promise<boolean> => {
   try {
-    const res = await fetch(`${httpBaseUrl}/.well-known/t3/environment`, { signal });
+    const res = await fetch(`${httpBaseUrl}/.well-known/t3/environment`, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+    });
     return res.ok;
   } catch {
     return false;
@@ -76,6 +42,52 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   logger.info("T3 Code extension activating.");
 
   const t3Home = `${process.env.HOME ?? process.env.USERPROFILE ?? "."}/.t3`;
+
+  const spawnChild = (
+    cmd: string,
+    args: readonly string[],
+    opts: { cwd: string; env: Record<string, string | undefined> },
+  ): SpawnedChild => {
+    // Ensure the spawn cwd exists (idempotent; covers a clean install where ~/.t3
+    // is absent, and restarts). Without it, spawn emits an async 'error', not 'exit'.
+    fs.mkdirSync(opts.cwd, { recursive: true });
+    const child = nodeSpawn(cmd, [...args], {
+      cwd: opts.cwd,
+      env: opts.env,
+      stdio: ["ignore", "pipe", "pipe", "pipe"], // fd 3 = bootstrap pipe
+    });
+    child.stdout?.on("data", (chunk) => {
+      logger.info(`[server] ${String(chunk).trimEnd()}`);
+    });
+    child.stderr?.on("data", (chunk) => {
+      logger.warn(`[server] ${String(chunk).trimEnd()}`);
+    });
+    return {
+      pid: child.pid,
+      writeBootstrap: (line) => {
+        const fd3 = child.stdio[3];
+        if (fd3 !== null && fd3 !== undefined && "write" in fd3) {
+          (fd3 as unknown as NodeJS.EventEmitter).on("error", () => {});
+          (fd3 as NodeJS.WritableStream).write(line);
+          (fd3 as NodeJS.WritableStream).end();
+        }
+      },
+      kill: (signal) => child.kill(signal),
+      onExit: (cb) => {
+        // Route both 'exit' and a spawn-time 'error' (e.g. ENOENT) through a single
+        // fire so the supervisor's exitDuringStartup race rejects promptly, and so an
+        // unhandled 'error' never throws in the extension host. Fire at most once.
+        let settled = false;
+        const fire = (code: number | null): void => {
+          if (settled) return;
+          settled = true;
+          cb(code);
+        };
+        child.on("exit", (code) => fire(code));
+        child.on("error", () => fire(null));
+      },
+    };
+  };
 
   supervisor = createServerSupervisor({
     logger,
@@ -93,27 +105,65 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     now: () => performance.now(),
   });
 
-  try {
-    const handle = await supervisor.start();
-    logger.info(`Server up at ${handle.httpBaseUrl}`);
-  } catch (error) {
-    logger.error("Failed to start the T3 Code server", error);
-    void vscode.window.showErrorMessage("T3 Code: failed to start the embedded server. See the T3 Code output channel.");
-  }
-
   context.subscriptions.push(
     vscode.commands.registerCommand("t3code.showStatus", async () => {
-      const panel = vscode.window.createWebviewPanel("t3codeStatus", "T3 Code: Status", vscode.ViewColumn.Active, {});
-      const model = await buildStatusModel();
-      panel.webview.html = renderStatusHtml(model);
+      const panel = vscode.window.createWebviewPanel(
+        "t3codeStatus",
+        "T3 Code: Status",
+        vscode.ViewColumn.Active,
+        {},
+      );
+
+      let pollTimer: ReturnType<typeof setInterval> | undefined;
+      const stopPolling = (): void => {
+        if (pollTimer !== undefined) {
+          clearInterval(pollTimer);
+          pollTimer = undefined;
+        }
+      };
+      panel.onDidDispose(stopPolling);
+      context.subscriptions.push({ dispose: stopPolling });
+
+      const refresh = async (): Promise<StatusViewModel> => {
+        const model = await buildStatusModel();
+        panel.webview.html = renderStatusHtml(model);
+        return model;
+      };
+
+      const model = await refresh();
+      if (shouldContinueStatusPolling(model)) {
+        pollTimer = setInterval(() => {
+          void refresh().then((next) => {
+            if (!shouldContinueStatusPolling(next)) {
+              stopPolling();
+            }
+          });
+        }, STATUS_POLL_MS);
+      }
     }),
+  );
+
+  void supervisor.start().then(
+    (handle) => {
+      startupError = null;
+      logger.info(`Server up at ${handle.httpBaseUrl}`);
+    },
+    (error) => {
+      startupError = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to start the T3 Code server", error);
+      void vscode.window.showErrorMessage(
+        "T3 Code: failed to start the embedded server. See the T3 Code output channel.",
+      );
+    },
   );
 }
 
 const buildStatusModel = async (): Promise<StatusViewModel> => {
   const currentHandle = supervisor?.getHandle() ?? null;
   if (currentHandle === null) {
-    return { ready: false, httpBaseUrl: "", wsBaseUrl: "", descriptorJson: null, error: "Server is not running." };
+    const snapshot = supervisor?.snapshot() ?? null;
+    const error = startupError ?? (snapshot?.running ? null : "Server is not running.");
+    return { ready: false, httpBaseUrl: "", wsBaseUrl: "", descriptorJson: null, error };
   }
   try {
     const resolved = await resolveExternalBaseUrls({
@@ -131,7 +181,10 @@ const buildStatusModel = async (): Promise<StatusViewModel> => {
     };
   } catch (error) {
     return {
-      ready: false, httpBaseUrl: currentHandle.httpBaseUrl, wsBaseUrl: "", descriptorJson: null,
+      ready: false,
+      httpBaseUrl: currentHandle.httpBaseUrl,
+      wsBaseUrl: "",
+      descriptorJson: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }

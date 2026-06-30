@@ -10,7 +10,12 @@ describe("bootstrap", () => {
   });
 
   it("builds the local-only desktop bootstrap envelope", () => {
-    const bootstrap = buildBootstrap({ port: 3773, host: "127.0.0.1", t3Home: "/home/u/.t3", token: "tok" });
+    const bootstrap = buildBootstrap({
+      port: 3773,
+      host: "127.0.0.1",
+      t3Home: "/home/u/.t3",
+      token: "tok",
+    });
     expect(bootstrap).toMatchObject({
       mode: "desktop",
       noBrowser: true,

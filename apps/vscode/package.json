@@ -15,7 +15,7 @@
     "prepack": "pnpm run stage:server",
     "vscode:prepublish": "vp pack && pnpm run build:webview && pnpm run stage:server",
     "package:vsix": "vsce package --no-dependencies",
-    "smoke-test": "node scripts/smokeSupervisor.ts",
+    "smoke-test": "node scripts/smokeSupervisor.ts && node scripts/smokeChatWebview.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vp test run"
   },
@@ -40,7 +40,25 @@
         "title": "T3 Code: Status",
         "category": "T3 Code"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "t3code",
+          "title": "T3 Code",
+          "icon": "media/t3code.svg"
+        }
+      ]
+    },
+    "views": {
+      "t3code": [
+        {
+          "type": "webview",
+          "id": "t3code.chat",
+          "name": "Chat"
+        }
+      ]
+    }
   },
   "activationEvents": [
     "onStartupFinished"

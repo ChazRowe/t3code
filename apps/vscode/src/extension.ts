@@ -10,14 +10,17 @@ import { createOutputChannelLogger } from "./logger.ts";
 import { findFreeLoopbackPort } from "./server/freePort.ts";
 import { resolveServerEntry } from "./server/serverEntry.ts";
 import { createServerSupervisor, type SpawnedChild } from "./server/serverSupervisor.ts";
+import { resolveServerSession } from "./session/serverSession.ts";
 import { resolveExternalBaseUrls } from "./transport/urlResolver.ts";
 import {
   renderStatusHtml,
   shouldContinueStatusPolling,
   type StatusViewModel,
 } from "./ui/statusPanel.ts";
+import { ChatWebviewViewProvider } from "./webview/chatViewProvider.ts";
 
 let supervisor: ReturnType<typeof createServerSupervisor> | null = null;
+let chatProvider: ChatWebviewViewProvider | null = null;
 let startupError: string | null = null;
 
 const STATUS_POLL_MS = 500;
@@ -105,6 +108,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     now: () => performance.now(),
   });
 
+  const getChatSession = async () => {
+    const handle = supervisor?.getHandle() ?? null;
+    if (handle === null) {
+      return null;
+    }
+    return resolveServerSession({
+      localHttpBaseUrl: handle.httpBaseUrl,
+      bootstrapToken: handle.token,
+      asExternalUri: async (url) =>
+        (await vscode.env.asExternalUri(vscode.Uri.parse(url))).toString(),
+    });
+  };
+
+  chatProvider = new ChatWebviewViewProvider({
+    logger,
+    extensionUri: context.extensionUri,
+    getSession: getChatSession,
+  });
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider("t3code.chat", chatProvider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("t3code.showStatus", async () => {
       const panel = vscode.window.createWebviewPanel(
@@ -147,10 +174,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     (handle) => {
       startupError = null;
       logger.info(`Server up at ${handle.httpBaseUrl}`);
+      void chatProvider?.refresh();
     },
     (error) => {
       startupError = error instanceof Error ? error.message : String(error);
       logger.error("Failed to start the T3 Code server", error);
+      void chatProvider?.refresh();
       void vscode.window.showErrorMessage(
         "T3 Code: failed to start the embedded server. See the T3 Code output channel.",
       );
@@ -193,4 +222,5 @@ const buildStatusModel = async (): Promise<StatusViewModel> => {
 export async function deactivate(): Promise<void> {
   await supervisor?.stop();
   supervisor = null;
+  chatProvider = null;
 }

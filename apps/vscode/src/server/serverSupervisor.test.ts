@@ -110,4 +110,23 @@ describe("createServerSupervisor", () => {
     await expect(supervisor.start()).rejects.toThrow(/readiness|timed out/i);
     await supervisor.stop();
   });
+
+  it("rejects start() promptly when the child exits before readiness (no orphan restart)", async () => {
+    // probeReady never succeeds and now() is constant: without fail-fast, start()
+    // would block until the readiness timeout. The pre-ready exit must win.
+    // sleep yields a macrotask each readiness iteration so the test's exit() and
+    // vi.waitFor can run between probes (a microtask-only sleep would starve them).
+    const { deps, children } = makeDeps({ probeReady: async () => false });
+    const supervisor = createServerSupervisor({ ...deps, sleep: () => new Promise((r) => setTimeout(r, 0)) });
+
+    const startP = supervisor.start();
+    // Let launch() spawn the child (findFreePort awaits before spawn).
+    await vi.waitFor(() => expect(children).toHaveLength(1));
+    children[0]!.exit(1); // crash mid-startup, before readiness
+
+    await expect(startP).rejects.toThrow(/exited during startup/i);
+    // No background restart: a never-ready child is surfaced, not retried.
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot().running).toBe(false);
+  });
 });

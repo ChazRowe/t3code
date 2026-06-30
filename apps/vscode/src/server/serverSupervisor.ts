@@ -24,6 +24,9 @@ const DEFAULT_TUNING: SupervisorTuning = {
   terminateGraceMs: 2_000,
 };
 
+// Sanctioned default start port for the embedded server's free-port search.
+const DEFAULT_START_PORT = 3773;
+
 export interface ResolvedEntryLite {
   readonly command: string;
   readonly entryPath: string;
@@ -67,20 +70,21 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
   let current: SpawnedChild | null = null;
   let currentPort = 0;
 
-  const waitForReady = async (httpBaseUrl: string): Promise<void> => {
+  const waitForReady = async (httpBaseUrl: string, signal: AbortSignal): Promise<void> => {
     const deadline = deps.now() + tuning.readinessTimeoutMs;
     while (deps.now() < deadline) {
-      const controller = new AbortController();
-      const ok = await deps.probeReady(httpBaseUrl, controller.signal).catch(() => false);
+      if (signal.aborted) return;
+      const ok = await deps.probeReady(httpBaseUrl, signal).catch(() => false);
       if (ok) return;
       await deps.sleep(tuning.readinessIntervalMs);
     }
+    if (signal.aborted) return;
     throw new Error(`Server readiness timed out after ${tuning.readinessTimeoutMs}ms at ${httpBaseUrl}`);
   };
 
   const launch = async (): Promise<ServerHandle> => {
     const entry = deps.resolveEntry();
-    currentPort = await deps.findFreePort({ startPort: 3773 });
+    currentPort = await deps.findFreePort({ startPort: DEFAULT_START_PORT });
     const httpBaseUrl = `http://${host}:${currentPort}`;
     const bootstrap = buildBootstrap({ port: currentPort, host, t3Home: deps.t3Home, token });
 
@@ -91,14 +95,40 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
     current = child;
     deps.logger.info(`Spawned server pid=${String(child.pid)} port=${currentPort}`);
     child.writeBootstrap(serializeBootstrapLine(bootstrap));
+
+    // Whether THIS specific child reached readiness. Only a post-ready exit
+    // earns a background restart; a never-ready exit is surfaced via start()'s
+    // rejection (Policy A: start() owns the initial bring-up).
+    let childReady = false;
+    // Per-launch exit signal: rejects when THIS child exits during startup, so the
+    // readiness wait loses to the child crashing instead of polling a dead server.
+    let rejectOnExit: ((code: number | null) => void) | undefined;
+    const exitDuringStartup = new Promise<never>((_, reject) => {
+      rejectOnExit = (code) => reject(new Error(`Server exited during startup (code=${String(code)})`));
+    });
+
     child.onExit((code) => {
-      ready = false;
-      if (child === current) current = null;
+      if (child === current) {
+        current = null;
+        ready = false;
+      }
+      // Fail the in-flight readiness race for this child (no-op once ready/settled).
+      rejectOnExit?.(code);
       if (!desiredRunning) return;
+      if (!childReady) return; // initial bring-up failure → surfaced via start() rejection, not a restart
       void scheduleRestart(code);
     });
 
-    await waitForReady(httpBaseUrl);
+    const controller = new AbortController();
+    try {
+      await Promise.race([waitForReady(httpBaseUrl, controller.signal), exitDuringStartup]);
+    } finally {
+      // Stop any in-flight probe and the readiness loop, and stop treating further
+      // exits as a startup failure (a post-ready exit is handled by scheduleRestart).
+      controller.abort();
+      rejectOnExit = undefined;
+    }
+    childReady = true;
     ready = true;
     restartAttempt = 0;
     deps.logger.info(`Server ready at ${httpBaseUrl}`);
@@ -121,7 +151,13 @@ export const createServerSupervisor = (deps: SupervisorDeps) => {
 
   const start = async (): Promise<ServerHandle> => {
     desiredRunning = true;
-    return launch();
+    try {
+      return await launch();
+    } catch (error) {
+      // Failed initial bring-up: keep snapshot().running honest and schedule no restart.
+      desiredRunning = false;
+      throw error;
+    }
   };
 
   const stop = async (): Promise<void> => {

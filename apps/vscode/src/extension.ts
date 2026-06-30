@@ -35,6 +35,7 @@ const spawnChild = (
     writeBootstrap: (line) => {
       const fd3 = child.stdio[3];
       if (fd3 !== null && fd3 !== undefined && "write" in fd3) {
+        (fd3 as unknown as NodeJS.EventEmitter).on("error", () => {});
         (fd3 as NodeJS.WritableStream).write(line);
         (fd3 as NodeJS.WritableStream).end();
       }
@@ -97,15 +98,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 const buildStatusModel = async (): Promise<StatusViewModel> => {
-  if (handle === null) {
+  const currentHandle = handle;
+  if (currentHandle === null) {
     return { ready: false, httpBaseUrl: "", wsBaseUrl: "", descriptorJson: null, error: "Server is not running." };
   }
   try {
     const resolved = await resolveExternalBaseUrls({
-      localHttpBaseUrl: handle.httpBaseUrl,
+      localHttpBaseUrl: currentHandle.httpBaseUrl,
       asExternalUri: async (u) => (await vscode.env.asExternalUri(vscode.Uri.parse(u))).toString(),
     });
-    const res = await fetch(resolved.readinessUrl);
+    const res = await fetch(resolved.readinessUrl, { signal: AbortSignal.timeout(10_000) });
     const descriptorJson = res.ok ? JSON.stringify(JSON.parse(await res.text()), null, 2) : null;
     return {
       ready: res.ok,
@@ -116,7 +118,7 @@ const buildStatusModel = async (): Promise<StatusViewModel> => {
     };
   } catch (error) {
     return {
-      ready: false, httpBaseUrl: handle.httpBaseUrl, wsBaseUrl: "", descriptorJson: null,
+      ready: false, httpBaseUrl: currentHandle.httpBaseUrl, wsBaseUrl: "", descriptorJson: null,
       error: error instanceof Error ? error.message : String(error),
     };
   }

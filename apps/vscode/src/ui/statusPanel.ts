@@ -24,6 +24,7 @@ export const renderStatusHtml = (model: StatusViewModel): string => {
            <dt>Descriptor</dt><dd><pre>${escapeHtml(model.descriptorJson ?? "(none)")}</pre></dd>
          </dl>`;
   return `<!doctype html><html><head><meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
     <style>body{font-family:var(--vscode-font-family);padding:12px}.err{color:var(--vscode-errorForeground)}
     dt{font-weight:600;margin-top:8px}pre{white-space:pre-wrap}</style></head>
     <body><h2>T3 Code — ${escapeHtml(status)}</h2>${body}</body></html>`;

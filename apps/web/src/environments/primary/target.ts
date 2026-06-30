@@ -1,6 +1,8 @@
 import type { DesktopEnvironmentBootstrap } from "@t3tools/contracts";
 import type { KnownEnvironment } from "@t3tools/client-runtime";
 
+import { readVsCodeBridge } from "../../vscode/bridge.ts";
+
 export interface PrimaryEnvironmentTarget {
   readonly source: KnownEnvironment["source"];
   readonly target: KnownEnvironment["target"];
@@ -109,6 +111,20 @@ function resolveWindowOriginPrimaryTarget(): PrimaryEnvironmentTarget {
   };
 }
 
+function resolveVsCodePrimaryTarget(): PrimaryEnvironmentTarget | null {
+  const bootstrap = readVsCodeBridge()?.getLocalEnvironmentBootstrap() ?? null;
+  if (!bootstrap?.httpBaseUrl || !bootstrap.wsBaseUrl) {
+    return null;
+  }
+  return {
+    source: "vscode-managed",
+    target: {
+      httpBaseUrl: normalizeBaseUrl(bootstrap.httpBaseUrl),
+      wsBaseUrl: normalizeBaseUrl(bootstrap.wsBaseUrl),
+    },
+  };
+}
+
 function resolveDesktopPrimaryTarget(): PrimaryEnvironmentTarget | null {
   const desktopBootstrap = getDesktopLocalEnvironmentBootstrap();
   if (!desktopBootstrap) {
@@ -151,6 +167,7 @@ export function resolvePrimaryEnvironmentHttpUrl(
 
 export function readPrimaryEnvironmentTarget(): PrimaryEnvironmentTarget | null {
   return (
+    resolveVsCodePrimaryTarget() ??
     resolveDesktopPrimaryTarget() ??
     resolveConfiguredPrimaryTarget() ??
     resolveWindowOriginPrimaryTarget()

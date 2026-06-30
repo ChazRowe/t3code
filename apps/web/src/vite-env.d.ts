@@ -23,5 +23,6 @@ declare global {
   interface Window {
     nativeApi?: LocalApi;
     desktopBridge?: DesktopBridge;
+    vscodeBridge?: import("./vscode/bridge.ts").VsCodeBridge;
   }
 }

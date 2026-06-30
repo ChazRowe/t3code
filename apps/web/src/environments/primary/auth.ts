@@ -90,8 +90,11 @@ export function takePairingTokenFromUrl(): string | null {
   return token;
 }
 
-function getDesktopBootstrapCredential(): string | null {
-  const bootstrap = window.desktopBridge?.getLocalEnvironmentBootstrap();
+function getEmbeddedBootstrapCredential(): string | null {
+  const bootstrap =
+    window.vscodeBridge?.getLocalEnvironmentBootstrap() ??
+    window.desktopBridge?.getLocalEnvironmentBootstrap() ??
+    null;
   return typeof bootstrap?.bootstrapToken === "string" && bootstrap.bootstrapToken.length > 0
     ? bootstrap.bootstrapToken
     : null;
@@ -252,7 +255,7 @@ function isTransientBootstrapError(error: unknown): boolean {
 }
 
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
-  const bootstrapCredential = getDesktopBootstrapCredential();
+  const bootstrapCredential = getEmbeddedBootstrapCredential();
   const currentSession = await fetchSessionState();
   if (currentSession.authenticated) {
     return { status: "authenticated" };

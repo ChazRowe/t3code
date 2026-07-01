@@ -21,6 +21,7 @@ import {
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -780,6 +781,8 @@ const make = Effect.gen(function* () {
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
     );
+
+  const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   // Dispatches a placeholder turn checkpoint (status "missing") onto the durable
   // orchestration domain-event stream. The CheckpointReactor consumes this and
@@ -1557,6 +1560,7 @@ const make = Effect.gen(function* () {
             );
           }
 
+          const backgroundWork = yield* ledger.snapshotFor(thread.id);
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
             commandId: yield* providerCommandId(event, "thread-session-set"),
@@ -1571,6 +1575,7 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: nextActiveTurnId,
               lastError,
+              backgroundWork,
               updatedAt: now,
             },
             createdAt: now,
@@ -1824,6 +1829,7 @@ const make = Effect.gen(function* () {
           : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
 
         if (shouldApplyRuntimeError) {
+          const backgroundWork = yield* ledger.snapshotFor(thread.id);
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
             commandId: yield* providerCommandId(event, "runtime-error-session-set"),
@@ -1838,6 +1844,7 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
+              backgroundWork,
               updatedAt: now,
             },
             createdAt: now,
@@ -1944,6 +1951,45 @@ const make = Effect.gen(function* () {
           }
           return worker.enqueue({ source: "domain", event });
         }),
+      );
+      yield* Effect.forkScoped(
+        Stream.runForEach(ledger.changes, (threadId) =>
+          Effect.gen(function* () {
+            const shellOption = yield* projectionSnapshotQuery.getThreadShellById(threadId);
+            if (Option.isNone(shellOption)) return;
+            const session = shellOption.value.session;
+            // During an active turn the "Working" status already outranks "Background"
+            // in the UI, and the eventual turn.completed dispatch re-reads the snapshot.
+            if (!session || session.status === "running") return;
+
+            const backgroundWork = yield* ledger.snapshotFor(threadId);
+            const now = yield* nowIso;
+            const commandId = CommandId.make(`background-work:${threadId}:${yield* crypto.randomUUIDv4}`);
+            yield* orchestrationEngine.dispatch({
+              type: "thread.session.set",
+              commandId,
+              threadId,
+              session: {
+                threadId: session.threadId,
+                status: session.status,
+                providerName: session.providerName,
+                ...(session.providerInstanceId !== undefined
+                  ? { providerInstanceId: session.providerInstanceId }
+                  : {}),
+                runtimeMode: session.runtimeMode,
+                activeTurnId: session.activeTurnId,
+                lastError: session.lastError,
+                backgroundWork,
+                updatedAt: now,
+              },
+              createdAt: now,
+            });
+          }).pipe(
+            Effect.catchDefect((defect: unknown) =>
+              Effect.logWarning("background-work.ingestion.changes-defect", { defect }),
+            ),
+          ),
+        ),
       );
     });
 

@@ -3655,4 +3655,33 @@ describe("ProviderRuntimeIngestion", () => {
     await harness.drain();
     expect(await Effect.runPromise(harness.ledger.snapshotFor(threadId))).toBeNull();
   });
+
+  it("projects backgroundWork onto the session when a turn completes with pending work", async () => {
+    const harness = await createHarness();
+    harness.emit({ type: "turn.started", eventId: asEventId("evt-ts-bg"), provider: ProviderDriverKind.make("codex"), createdAt: "2026-01-01T00:00:00.000Z", threadId: asThreadId("thread-1"), turnId: asTurnId("turn-bg") });
+    harness.emit({ type: "task.started", eventId: asEventId("evt-task-bg"), provider: ProviderDriverKind.make("codex"), createdAt: "2026-01-01T00:00:00.500Z", threadId: asThreadId("thread-1"), payload: { taskId: RuntimeTaskId.make("task-bg"), taskType: "workflow" } } as never);
+    harness.emit({ type: "turn.completed", eventId: asEventId("evt-tc-bg"), provider: ProviderDriverKind.make("codex"), createdAt: "2026-01-01T00:00:01.000Z", threadId: asThreadId("thread-1"), turnId: asTurnId("turn-bg"), status: "completed" });
+    await harness.drain();
+
+    const rm = await harness.readModel();
+    const thread = rm.threads.find((t) => t.id === ThreadId.make("thread-1"));
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.backgroundWork).toMatchObject({ count: 1 });
+  });
+
+  it("clears backgroundWork between turns when the last task completes", async () => {
+    const harness = await createHarness();
+    harness.emit({ type: "turn.started", eventId: asEventId("evt-ts-bg2"), provider: ProviderDriverKind.make("codex"), createdAt: "2026-01-01T00:00:00.000Z", threadId: asThreadId("thread-1"), turnId: asTurnId("turn-bg2") });
+    harness.emit({ type: "task.started", eventId: asEventId("evt-task-bg2"), provider: ProviderDriverKind.make("codex"), createdAt: "2026-01-01T00:00:00.500Z", threadId: asThreadId("thread-1"), payload: { taskId: RuntimeTaskId.make("task-bg2"), taskType: "shell" } } as never);
+    harness.emit({ type: "turn.completed", eventId: asEventId("evt-tc-bg2"), provider: ProviderDriverKind.make("codex"), createdAt: "2026-01-01T00:00:01.000Z", threadId: asThreadId("thread-1"), turnId: asTurnId("turn-bg2"), status: "completed" });
+    await harness.drain();
+    expect((await harness.readModel()).threads.find((t) => t.id === ThreadId.make("thread-1"))?.session?.backgroundWork).toMatchObject({ count: 1 });
+
+    // Task finishes AFTER the turn already settled → only the forked changes fiber updates the UI
+    // (it dispatches directly to the engine, not through the ingestion worker queue, so poll).
+    harness.emit({ type: "task.completed", eventId: asEventId("evt-taskdone-bg2"), provider: ProviderDriverKind.make("codex"), createdAt: "2026-01-01T00:00:02.000Z", threadId: asThreadId("thread-1"), payload: { taskId: RuntimeTaskId.make("task-bg2"), status: "completed" } } as never);
+    await harness.drain();
+
+    await waitForThread(harness.readModel, (thread) => (thread.session?.backgroundWork ?? null) === null);
+  });
 });

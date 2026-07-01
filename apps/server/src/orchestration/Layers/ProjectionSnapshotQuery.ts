@@ -413,6 +413,48 @@ const subagentStatusFromActivity = (
   return "inProgress";
 };
 
+// A backgrounded/async `Agent` (Task) launch returns its tool_result IMMEDIATELY — a
+// receipt ("Async agent launched successfully. agentId: <id> …"), NOT the subagent's
+// completion. The tool stream dead-ends at that ack while the real work runs on the
+// task.* stream keyed by the embedded agentId (== taskId). Extract the id so the tree
+// can defer the ref's terminal status to that stream instead of latching the ack as
+// "completed" (which flipped backgrounded subagents to "finished" the instant they
+// were dispatched, while they were still running).
+const BACKGROUND_LAUNCH_MARKER = "Async agent launched";
+const parseBackgroundLaunchAgentId = (payload: unknown): string | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const data = (payload as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return null;
+  const result = (data as { result?: unknown }).result;
+  if (!result || typeof result !== "object") return null;
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    const text =
+      part && typeof part === "object" ? (part as { text?: unknown }).text : undefined;
+    if (typeof text !== "string" || !text.includes(BACKGROUND_LAUNCH_MARKER)) continue;
+    const match = text.match(/agentId:\s*([A-Za-z0-9_-]+)/);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+};
+
+// The terminal outcome a task.* activity row records for its taskId, or null when the row
+// is non-terminal (running / paused / backgrounded). task.completed is the authoritative
+// end; task.updated only terminates on killed / stopped / failed.
+const taskRowTerminalStatus = (
+  kind: string,
+  status: unknown,
+): OrchestrationSubagentStatus | null => {
+  if (kind === "task.completed") {
+    return status === "failed" || status === "stopped" ? "failed" : "completed";
+  }
+  if (kind === "task.updated") {
+    return status === "failed" || status === "stopped" || status === "killed" ? "failed" : null;
+  }
+  return null;
+};
+
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
@@ -1151,6 +1193,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence ASC,
           created_at ASC,
           activity_id ASC
+      `,
+  });
+
+  // Terminal signals for native task subagents (task.completed / terminal task.updated),
+  // keyed by taskId. A backgrounded `Agent` launch's real completion arrives here — never
+  // on the collab tool stream — so the subagent tree consults these to resolve the ref
+  // status of a backgrounded launch (correlated by agentId == taskId).
+  const listSubagentTaskTerminalRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: Schema.Struct({
+      taskId: Schema.NullOr(Schema.String),
+      kind: Schema.String,
+      status: Schema.NullOr(Schema.String),
+    }),
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          json_extract(payload_json, '$.taskId') AS "taskId",
+          kind,
+          json_extract(payload_json, '$.status') AS "status"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND kind IN ('task.completed', 'task.updated')
+        ORDER BY created_at ASC, activity_id ASC
       `,
   });
 
@@ -2464,6 +2530,27 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ),
       );
 
+      // Terminal outcomes from the native task stream, keyed by taskId — the only place a
+      // backgrounded launch's real completion is recorded.
+      const taskTerminalRows = yield* listSubagentTaskTerminalRowsByThread({ threadId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getSubagentTree:listTaskTerminals:query",
+            "ProjectionSnapshotQuery.getSubagentTree:listTaskTerminals:decodeRows",
+          ),
+        ),
+      );
+      const terminalByTaskId = new Map<string, OrchestrationSubagentStatus>();
+      for (const row of taskTerminalRows) {
+        if (row.taskId === null) continue;
+        const terminal = taskRowTerminalStatus(row.kind, row.status);
+        if (terminal === null) continue;
+        // task.completed is authoritative; a terminal task.updated only fills a gap.
+        if (row.kind === "task.completed" || !terminalByTaskId.has(row.taskId)) {
+          terminalByTaskId.set(row.taskId, terminal);
+        }
+      }
+
       // Scope the tree to the current context: once the context is cleared
       // (a provider `/clear`/`/new`, or unattended clear-continue between
       // iterations), subagents that ran in a prior context drop out of the
@@ -2483,6 +2570,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       const firstByItem = new Map<string, RefRow>();
       const latestByItem = new Map<string, RefRow>();
       const statusByItem = new Map<string, OrchestrationSubagentStatus>();
+      const bgAgentIdByItem = new Map<string, string>();
       const order: Array<string> = [];
       for (const row of refRows) {
         if (row.itemId === null) {
@@ -2493,6 +2581,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           order.push(row.itemId);
         }
         latestByItem.set(row.itemId, row);
+        // A backgrounded async-launch ack (tool.completed carrying the "Async agent
+        // launched" receipt) is NOT the subagent's completion — its real lifecycle runs on
+        // the task.* stream keyed by the embedded agentId. Record the correlation and do
+        // NOT latch this row's terminal, or the ref would flip "finished" at dispatch.
+        const bgAgentId = parseBackgroundLaunchAgentId(row.payload);
+        if (bgAgentId !== null) {
+          bgAgentIdByItem.set(row.itemId, bgAgentId);
+          continue;
+        }
         // A terminal outcome is authoritative no matter where its row lands in the
         // (sequence, created_at, activity_id) order. The provider stamps the final
         // tool.updated (status "inProgress") and the terminal tool.completed with the
@@ -2504,6 +2601,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           statusByItem.set(row.itemId, rowStatus);
         }
       }
+
+      // Resolve a ref's status. A genuine tool-stream terminal (latched above) always wins.
+      // Otherwise, a backgrounded launch defers to its task-stream outcome (inProgress until
+      // the real task.completed lands); everything else defaults to inProgress.
+      const resolveRefStatus = (itemId: string): OrchestrationSubagentStatus => {
+        const latched = statusByItem.get(itemId);
+        if (latched !== undefined) return latched;
+        const bgAgentId = bgAgentIdByItem.get(itemId);
+        if (bgAgentId !== undefined) {
+          return terminalByTaskId.get(bgAgentId) ?? "inProgress";
+        }
+        return "inProgress";
+      };
 
       // childSubagentCount: refs whose parentItemId === this ref's itemId.
       const childCountByItem = new Map<string, number>();
@@ -2549,7 +2659,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           label: latest.summary,
           subagentType: TrimmedNonEmptyString.make(type),
           description: description === null ? null : TrimmedNonEmptyString.make(description),
-          status: statusByItem.get(itemId) ?? "inProgress",
+          status: resolveRefStatus(itemId),
           iteration: latest.iteration,
           turnId: latest.turnId,
           depth: NonNegativeInt.make(depthOf(itemId)),

@@ -2268,6 +2268,116 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       }),
   );
 
+  // A backgrounded/async `Agent` (Task) launch returns a tool_result IMMEDIATELY — a
+  // launch receipt ("Async agent launched successfully. agentId: <id>"), not the
+  // subagent's completion. The tool stream dead-ends there while the real work runs on
+  // the task.* stream keyed by that agentId (== taskId). The ref must NOT treat the
+  // launch ack as terminal; it stays inProgress until the real task.completed lands.
+  const seedBackgroundedSubagent = (sql: SqlClient.SqlClient) =>
+    Effect.gen(function* () {
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json,
+          scripts_json, created_at, updated_at, deleted_at
+        ) VALUES (
+          'project-1', 'Project 1', '/tmp/project-1',
+          '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, runtime_mode,
+          interaction_mode, branch, worktree_path, latest_turn_id,
+          latest_user_message_at, pending_approval_count, pending_user_input_count,
+          has_actionable_proposed_plan, created_at, updated_at, deleted_at
+        ) VALUES (
+          'thread-1', 'project-1', 'Thread 1',
+          '{"provider":"codex","model":"gpt-5-codex"}', 'full-access', 'default',
+          NULL, NULL, 'turn-1', '2026-06-20T00:00:00.000Z', 0, 0, 0,
+          '2026-06-20T00:00:00.000Z', '2026-06-20T00:00:00.000Z', NULL
+        )
+      `;
+      const runningPayload =
+        '{"itemType":"collab_agent_tool_call","itemId":"item-bg","status":"inProgress","data":{"toolName":"Agent","input":{"subagent_type":"claude","description":"do bg work","model":"opus"}}}';
+      // The launch-ack tool.completed carries the receipt text with the embedded agentId.
+      const launchAckPayload =
+        '{"itemType":"collab_agent_tool_call","itemId":"item-bg","data":{"toolName":"Agent","input":{"subagent_type":"claude","description":"do bg work","model":"opus"},"result":{"content":[{"type":"text","text":"Async agent launched successfully. agentId: agent-bg (internal ID - do not mention to user)"}]},"subagentSession":{"model":"opus"}}}';
+      yield* sql`
+        INSERT INTO projection_thread_activities (activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at, item_id, parent_item_id, iteration)
+        VALUES ('act-bg-start', 'thread-1', 'turn-1', 'tool', 'tool.started', 'claude: do bg work', ${runningPayload}, '2026-06-20T00:00:01.000Z', 'item-bg', NULL, 1)
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at, item_id, parent_item_id, iteration)
+        VALUES ('act-bg-named', 'thread-1', 'turn-1', 'tool', 'tool.updated', 'claude: do bg work', ${runningPayload}, '2026-06-20T00:00:04.000Z', 'item-bg', NULL, 1)
+      `;
+      // Launch ack + a trailing tool.updated at the same created_at (activity_id sorts after) —
+      // the exact real-world shape.
+      yield* sql`
+        INSERT INTO projection_thread_activities (activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at, item_id, parent_item_id, iteration)
+        VALUES ('act-bg-launchack', 'thread-1', 'turn-1', 'tool', 'tool.completed', 'claude: do bg work', ${launchAckPayload}, '2026-06-20T00:00:05.000Z', 'item-bg', NULL, 1)
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at, item_id, parent_item_id, iteration)
+        VALUES ('act-bg-zupdate', 'thread-1', 'turn-1', 'tool', 'tool.updated', 'claude: do bg work', ${launchAckPayload}, '2026-06-20T00:00:05.000Z', 'item-bg', NULL, 1)
+      `;
+    });
+
+  const insertTaskTerminal = (
+    sql: SqlClient.SqlClient,
+    activityId: string,
+    kind: string,
+    taskId: string,
+    status: string,
+  ) =>
+    sql`
+      INSERT INTO projection_thread_activities (activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at, item_id, parent_item_id, iteration)
+      VALUES (${activityId}, 'thread-1', 'turn-1', 'info', ${kind}, 'Task', ${`{"taskId":"${taskId}","status":"${status}"}`}, '2026-06-20T00:00:20.000Z', NULL, NULL, NULL)
+    `;
+
+  it.effect(
+    "getSubagentTree keeps a backgrounded async-launch subagent inProgress until its task completes",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedBackgroundedSubagent(sql);
+        // No task.* terminal row for agent-bg yet — it is still running.
+        const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+        const root = refs.find((r) => r.rootItemId === RuntimeItemId.make("item-bg"));
+        assert.strictEqual(root?.status, "inProgress");
+      }),
+  );
+
+  it.effect(
+    "getSubagentTree marks a backgrounded subagent completed once its task.completed lands",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedBackgroundedSubagent(sql);
+        yield* insertTaskTerminal(sql, "act-task-done", "task.completed", "agent-bg", "completed");
+        const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+        const root = refs.find((r) => r.rootItemId === RuntimeItemId.make("item-bg"));
+        assert.strictEqual(root?.status, "completed");
+      }),
+  );
+
+  it.effect("getSubagentTree marks a backgrounded subagent failed when its task fails", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedBackgroundedSubagent(sql);
+      yield* insertTaskTerminal(sql, "act-task-fail", "task.completed", "agent-bg", "failed");
+      const refs = yield* snapshotQuery.getSubagentTree({ threadId: ThreadId.make("thread-1") });
+      const root = refs.find((r) => r.rootItemId === RuntimeItemId.make("item-bg"));
+      assert.strictEqual(root?.status, "failed");
+    }),
+  );
+
   it.effect("getSubagentActivities returns only the direct children of a subagent root", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;

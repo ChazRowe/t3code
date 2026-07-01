@@ -1985,9 +1985,20 @@ const make = Effect.gen(function* () {
               createdAt: now,
             });
           }).pipe(
-            Effect.catchDefect((defect: unknown) =>
-              Effect.logWarning("background-work.ingestion.changes-defect", { defect }),
-            ),
+            // A typed failure (ProjectionRepositoryError / OrchestrationDispatchError) or a
+            // defect from a single ledger change must not tear down the long-lived stream —
+            // that would silently disable all between-turns background-work projection for
+            // the rest of the process. Log and continue; re-raise interrupts so scope
+            // teardown stays clean (mirrors processInputSafely).
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterruptsOnly(cause)) {
+                return Effect.failCause(cause);
+              }
+              return Effect.logWarning("background-work.ingestion.changes-failed", {
+                threadId,
+                cause: Cause.pretty(cause),
+              });
+            }),
           ),
         ),
       );

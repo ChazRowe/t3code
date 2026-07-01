@@ -17,7 +17,19 @@ import type { OrchestrationEngineService } from "../../../orchestration/Services
 import type { ProviderInstance } from "../../../provider/ProviderDriver.ts";
 import type { ProviderInstanceRegistry } from "../../../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderService } from "../../../provider/Services/ProviderService.ts";
+import { BackgroundWorkLedger } from "../../../orchestration/Services/BackgroundWorkLedger.ts";
+import { makeBackgroundWorkLedgerLive } from "../../../orchestration/Layers/BackgroundWorkLedger.ts";
 import { makeSpawnAgentHandlers, MAX_SUBAGENT_DEPTH, SpawnAgentError } from "./handlers.ts";
+
+const noopLedger = {
+  register: () => Effect.void,
+  unregister: () => Effect.void,
+  clearThread: () => Effect.void,
+  snapshotFor: () => Effect.succeed(null),
+  sweepBackstop: Effect.succeed([]),
+  changes: Stream.empty,
+  subscribeChanges: Effect.die("unused"),
+} as unknown as typeof BackgroundWorkLedger.Service;
 
 const PARENT_THREAD_ID = "thread-parent" as ThreadId;
 
@@ -53,6 +65,7 @@ const makeDeps = (options: {
   readonly sessions?: ReadonlyArray<ProviderSession>;
   readonly sendTurnFails?: boolean;
   readonly dispatchSink: Array<OrchestrationCommand>;
+  readonly backgroundWorkLedger?: typeof BackgroundWorkLedger.Service;
 }): Parameters<typeof makeSpawnAgentHandlers>[0] => {
   const parentSession = {
     threadId: PARENT_THREAD_ID,
@@ -125,6 +138,7 @@ const makeDeps = (options: {
     orchestrationEngine,
     snapshotQuery,
     crypto: makeCrypto(),
+    backgroundWorkLedger: options.backgroundWorkLedger ?? noopLedger,
   };
 };
 
@@ -417,4 +431,18 @@ it.live("accepts a known model override and spawns", () =>
 
     expect(handle).toContain(CHILD_AGENT_ID);
   }),
+);
+
+it.effect("registers a spawned agent in the background-work ledger while it runs", () =>
+  Effect.gen(function* () {
+    const backgroundWorkLedger = yield* BackgroundWorkLedger;
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    const deps = makeDeps({ instance: codexInstance, dispatchSink, backgroundWorkLedger });
+    const { spawnAgent } = makeSpawnAgentHandlers(deps);
+
+    yield* spawnAgent({ providerInstanceId: "codex", prompt: "x" }, invocation(0));
+
+    const snap = yield* backgroundWorkLedger.snapshotFor(PARENT_THREAD_ID);
+    expect(snap).toMatchObject({ count: 1 });
+  }).pipe(Effect.provide(makeBackgroundWorkLedgerLive())),
 );

@@ -85,6 +85,7 @@ import {
   type OrchestrationEngineShape,
 } from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
+import { makeBackgroundWorkLedgerLive } from "./orchestration/Layers/BackgroundWorkLedger.ts";
 import { CONTEXT_CLEARED_ACTIVITY_KIND } from "./orchestration/unattendedRun.ts";
 import {
   ProjectionSnapshotQuery,
@@ -722,6 +723,9 @@ const buildAppUnderTest = (options?: {
             getInstance: () => Effect.succeed(undefined),
             listInstances: Effect.succeed([]),
           }),
+          // spawn_agent toolkit also requires BackgroundWorkLedger (to track live
+          // spawn jobs). Tests don't exercise spawning, so a real (no-op) ledger works.
+          makeBackgroundWorkLedgerLive(),
         ),
       ),
       Layer.provide(

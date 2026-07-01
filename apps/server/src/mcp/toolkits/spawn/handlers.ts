@@ -27,6 +27,7 @@ import { OrchestrationEngineService } from "../../../orchestration/Services/Orch
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderInstanceRegistry } from "../../../provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderService } from "../../../provider/Services/ProviderService.ts";
+import type { BackgroundWorkLedger } from "../../../orchestration/Services/BackgroundWorkLedger.ts";
 import type { CheckAgentParameters, SpawnAgentParameters } from "./tools.ts";
 
 // Bound recursive fan-out — matches Claude Code's native nested-subagent depth limit
@@ -49,6 +50,7 @@ export interface SpawnAgentDeps {
   readonly orchestrationEngine: typeof OrchestrationEngineService.Service;
   readonly snapshotQuery: typeof ProjectionSnapshotQuery.Service;
   readonly crypto: typeof Crypto.Crypto.Service;
+  readonly backgroundWorkLedger: typeof BackgroundWorkLedger.Service;
 }
 
 // Lifecycle of a backgrounded spawn, tracked in-memory so `check_agent` can report status
@@ -78,7 +80,7 @@ const firstLine = (text: string): string => {
 const spawnMaxWaitMinutes = Duration.toMillis(SPAWN_MAX_WAIT) / 60000;
 
 export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
-  const { providerService, instanceRegistry, orchestrationEngine, snapshotQuery, crypto } = deps;
+  const { providerService, instanceRegistry, orchestrationEngine, snapshotQuery, crypto, backgroundWorkLedger } = deps;
 
   // UUID generation can technically fail with a PlatformError; in practice it does not,
   // and there is no meaningful recovery, so treat a failure as a defect.
@@ -91,13 +93,26 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
   // written once as "running", then transitioned to a terminal status by its watcher fiber.
   const jobs = new Map<string, SpawnJob>();
   const putJob = (job: SpawnJob): Effect.Effect<void> =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       jobs.set(job.childThreadId, job);
+      if (job.status === "running") {
+        yield* backgroundWorkLedger.register(job.parentThreadId, {
+          key: job.childThreadId,
+          kind: "spawn",
+          startedAt: job.startedAt,
+        });
+      }
     });
   const patchJob = (childThreadId: ThreadId, patch: Partial<SpawnJob>): Effect.Effect<void> =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       const existing = jobs.get(childThreadId);
-      if (existing) jobs.set(childThreadId, { ...existing, ...patch });
+      if (!existing) return;
+      const updated = { ...existing, ...patch };
+      jobs.set(childThreadId, updated);
+      // A job leaving "running" (completed/failed/timedOut) is terminal → release it.
+      if (existing.status === "running" && updated.status !== "running") {
+        yield* backgroundWorkLedger.unregister(updated.parentThreadId, childThreadId);
+      }
     });
   const readJob = (agentId: string): Effect.Effect<SpawnJob | undefined> =>
     Effect.sync(() => jobs.get(agentId));

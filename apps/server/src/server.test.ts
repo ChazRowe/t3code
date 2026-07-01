@@ -5625,6 +5625,94 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   );
 
   it.effect(
+    "routes websocket rpc subscribeSubagentTree re-emits a snapshot when a backgrounded subagent's task completes",
+    () =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make("thread-subagent-tree-task-done");
+        // A backgrounded `Agent` subagent's real completion never lands on the collab
+        // tool stream — it arrives only as a terminal task.completed. Once it does, the
+        // recomputed tree resolves the ref out of "inProgress".
+        const completedRef = {
+          threadId,
+          rootItemId: RuntimeItemId.make("item-bg-agent"),
+          parentItemId: null,
+          label: "Agent: build the thing",
+          subagentType: "Agent",
+          description: "build the thing",
+          status: "completed" as const,
+          iteration: null,
+          turnId: null,
+          depth: 0,
+          childSubagentCount: 0,
+          prompt: null,
+          resultText: null,
+          childThreadId: null,
+          providerInstanceId: null,
+          provider: null,
+          model: null,
+          createdAt: "2026-06-20T00:00:01.000Z",
+          updatedAt: "2026-06-20T00:00:05.000Z",
+        };
+
+        yield* buildAppUnderTest({
+          layers: {
+            projectionSnapshotQuery: {
+              getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 13 }),
+              getSubagentTree: () => Effect.succeed([completedRef]),
+            },
+            orchestrationEngine: {
+              streamDomainEvents: Stream.make({
+                sequence: 1,
+                eventId: EventId.make("evt-task-completed"),
+                aggregateKind: "thread",
+                aggregateId: threadId,
+                occurredAt: "2026-06-20T00:00:05.000Z",
+                commandId: null,
+                causationEventId: null,
+                correlationId: null,
+                metadata: {},
+                type: "thread.activity-appended",
+                payload: {
+                  threadId,
+                  activity: {
+                    id: EventId.make("act-task-completed"),
+                    tone: "info",
+                    kind: "task.completed",
+                    summary: "Task completed",
+                    payload: { taskId: "task-bg-agent", status: "completed" },
+                    turnId: null,
+                    createdAt: "2026-06-20T00:00:05.000Z",
+                  },
+                },
+              } satisfies Extract<OrchestrationEvent, { type: "thread.activity-appended" }>),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeSubagentTree]({ threadId }).pipe(
+              Stream.take(2),
+              Stream.runCollect,
+            ),
+          ),
+        );
+
+        const [first, second] = Array.from(items);
+        assert.equal(first?.kind, "snapshot");
+        // The terminal task.* activity is a backgrounded subagent's ONLY completion
+        // signal, so it must trigger a full tree recompute — flipping the ref out of
+        // "inProgress" immediately, not only when the next subagent spawns.
+        assert.equal(second?.kind, "snapshot");
+        if (second?.kind === "snapshot") {
+          assert.equal(second.snapshot.refs.length, 1);
+          assert.equal(second.snapshot.refs[0]?.status, "completed");
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
     "routes websocket rpc subscribeSubagent replays snapshot then streams a direct child event",
     () =>
       Effect.gen(function* () {

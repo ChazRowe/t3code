@@ -61,6 +61,7 @@ import {
   CONTEXT_CLEARED_ACTIVITY_KIND,
   PROVIDER_CONTEXT_CLEARED_ACTIVITY_KIND,
 } from "../contextClearMarker.ts";
+import { taskRowTerminalStatus } from "../subagentTaskTerminal.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -435,22 +436,6 @@ const parseBackgroundLaunchAgentId = (payload: unknown): string | null => {
     if (typeof text !== "string" || !text.includes(BACKGROUND_LAUNCH_MARKER)) continue;
     const match = text.match(/agentId:\s*([A-Za-z0-9_-]+)/);
     if (match?.[1]) return match[1];
-  }
-  return null;
-};
-
-// The terminal outcome a task.* activity row records for its taskId, or null when the row
-// is non-terminal (running / paused / backgrounded). task.completed is the authoritative
-// end; task.updated only terminates on killed / stopped / failed.
-const taskRowTerminalStatus = (
-  kind: string,
-  status: unknown,
-): OrchestrationSubagentStatus | null => {
-  if (kind === "task.completed") {
-    return status === "failed" || status === "stopped" ? "failed" : "completed";
-  }
-  if (kind === "task.updated") {
-    return status === "failed" || status === "stopped" || status === "killed" ? "failed" : null;
   }
   return null;
 };
@@ -1215,6 +1200,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           json_extract(payload_json, '$.status') AS "status"
         FROM projection_thread_activities
         WHERE thread_id = ${threadId}
+          -- Coarse pre-filter: every kind that CAN be terminal. taskRowTerminalStatus
+          -- makes the actual terminal decision per row; keep this set in sync with it.
           AND kind IN ('task.completed', 'task.updated')
         ORDER BY created_at ASC, activity_id ASC
       `,

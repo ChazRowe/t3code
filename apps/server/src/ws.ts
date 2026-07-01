@@ -64,6 +64,7 @@ import { Keybindings } from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { isContextClearedActivityKind } from "./orchestration/contextClearMarker.ts";
+import { taskRowTerminalStatus } from "./orchestration/subagentTaskTerminal.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -168,6 +169,29 @@ function isContextClearedEvent(
     event.type === "thread.activity-appended" &&
     isContextClearedActivityKind(event.payload.activity.kind)
   );
+}
+
+// A backgrounded `Agent` (Task) subagent's real completion never lands on the collab tool
+// stream — it dead-ends at an immediate launch ack while the work runs on the native task.*
+// stream. Its ONLY terminal signal is a terminal task.* activity (task.completed, or a
+// task.updated that killed/stopped/failed the task), which is exactly what
+// getSubagentTree resolves such a ref's status from. The tree must therefore recompute when
+// one lands; otherwise the ref stays "inProgress" in the sidebar until the next
+// collab_agent_tool_call event (e.g. a new spawn) happens to trigger a recompute. Mirror the
+// resolver's terminal rule via the shared taskRowTerminalStatus so trigger and resolver
+// never disagree about what "terminal" means.
+function isSubagentTaskTerminalEvent(
+  event: OrchestrationEvent,
+): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> {
+  if (event.type !== "thread.activity-appended") {
+    return false;
+  }
+  const activity = event.payload.activity;
+  const payload =
+    typeof activity.payload === "object" && activity.payload !== null
+      ? (activity.payload as { status?: unknown })
+      : null;
+  return taskRowTerminalStatus(activity.kind, payload?.status) !== null;
 }
 
 // A subagent's direct child = a thread.activity-appended whose activity's
@@ -1093,10 +1117,13 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 ),
               ]);
 
-              // React to two kinds of events for this thread, re-emitting the full
-              // recomputed tree as a snapshot in both cases:
+              // React to three kinds of events for this thread, re-emitting the full
+              // recomputed tree as a snapshot in every case:
               //  - subagent-ref lifecycle (root or nested): the tree changed (status,
               //    depth, childSubagentCount, a new sibling).
+              //  - a terminal task.* activity: a backgrounded subagent's real completion
+              //    (its only terminal signal — the collab tool stream dead-ends at the
+              //    launch ack), which flips the ref out of "inProgress".
               //  - a context-clear marker: the tree is rebased to the new context.
               //
               // We emit the WHOLE tree rather than the single changed ref so the view is
@@ -1113,7 +1140,9 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                   ): event is Extract<OrchestrationEvent, { type: "thread.activity-appended" }> =>
                     event.aggregateKind === "thread" &&
                     event.aggregateId === input.threadId &&
-                    (isSubagentRefEvent(event) || isContextClearedEvent(event)),
+                    (isSubagentRefEvent(event) ||
+                      isSubagentTaskTerminalEvent(event) ||
+                      isContextClearedEvent(event)),
                 ),
                 Stream.mapEffect(() =>
                   projectionSnapshotQuery.getSubagentTree({ threadId: input.threadId }).pipe(

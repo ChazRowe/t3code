@@ -3628,4 +3628,31 @@ describe("ProviderRuntimeIngestion", () => {
     await harness.drain();
     expect(await Effect.runPromise(harness.ledger.snapshotFor(threadId))).toBeNull();
   });
+
+  it("clears background work for the thread on session.exited", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.make("thread-1");
+
+    harness.emit({
+      type: "task.started",
+      eventId: asEventId("evt-task-started-exit"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: asThreadId("thread-1"),
+      payload: { taskId: RuntimeTaskId.make("task-exit-1"), taskType: "shell" },
+    } as never);
+    await harness.drain();
+    expect(await Effect.runPromise(harness.ledger.snapshotFor(threadId))).toMatchObject({ count: 1 });
+
+    harness.emit({
+      type: "session.exited",
+      eventId: asEventId("evt-session-exited"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      payload: { exitKind: "graceful" },
+    } as never);
+    await harness.drain();
+    expect(await Effect.runPromise(harness.ledger.snapshotFor(threadId))).toBeNull();
+  });
 });

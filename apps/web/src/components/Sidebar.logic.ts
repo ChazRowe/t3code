@@ -32,18 +32,20 @@ export interface ThreadStatusPill {
     | "Completed"
     | "Pending Approval"
     | "Awaiting Input"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "Background";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
-  "Pending Approval": 5,
-  "Awaiting Input": 4,
-  Working: 3,
-  Connecting: 3,
-  "Plan Ready": 2,
+  "Pending Approval": 6,
+  "Awaiting Input": 5,
+  Working: 4,
+  Connecting: 4,
+  "Plan Ready": 3,
+  Background: 2,
   Completed: 1,
 };
 
@@ -387,6 +389,15 @@ export function resolveThreadStatusPill(input: {
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
       pulse: false,
+    };
+  }
+
+  if (thread.session?.backgroundWork != null) {
+    return {
+      label: "Background",
+      colorClass: "text-cyan-600 dark:text-cyan-300/80",
+      dotClass: "bg-cyan-500 dark:bg-cyan-300/80",
+      pulse: true,
     };
   }
 

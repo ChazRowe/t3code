@@ -173,4 +173,5 @@ export interface ThreadSession {
   updatedAt: string;
   lastError?: string;
   orchestrationStatus: OrchestrationSessionStatus;
+  backgroundWork?: { count: number; oldestStartedAt: string } | null;
 }

@@ -40,8 +40,33 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { BackgroundWorkLedger } from "../Services/BackgroundWorkLedger.ts";
+import type { BackgroundWorkKind } from "../Services/BackgroundWorkLedger.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
+
+/**
+ * Map the SDK `task_type` carried on `task.started` to a ledger kind. Unknown or
+ * absent types (e.g. an in-turn "plan" task) fall back to "subagent" — harmless
+ * for the count, which is all that gates the pill and the reaper. NOTE: confirm
+ * the exact runtime `task_type` strings against the daemon if kinds ever surface
+ * in the UI (open question in the design).
+ */
+const taskTypeToBackgroundKind = (taskType: string | undefined): BackgroundWorkKind => {
+  switch (taskType) {
+    case "shell":
+      return "shell";
+    case "subagent":
+      return "subagent";
+    case "workflow":
+    case "local_workflow":
+      return "workflow";
+    case "monitor":
+      return "monitor";
+    default:
+      return "subagent";
+  }
+};
 
 interface AssistantSegmentState {
   baseKey: string;
@@ -750,6 +775,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const ledger = yield* BackgroundWorkLedger;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1552,6 +1578,16 @@ const make = Effect.gen(function* () {
         }
       }
 
+      if (event.type === "task.started") {
+        yield* ledger.register(thread.id, {
+          key: event.payload.taskId,
+          kind: taskTypeToBackgroundKind(event.payload.taskType),
+          startedAt: event.createdAt,
+        });
+      } else if (event.type === "task.completed") {
+        yield* ledger.unregister(thread.id, event.payload.taskId);
+      }
+
       const assistantDelta =
         event.type === "content.delta" && event.payload.streamKind === "assistant_text"
           ? event.payload.delta
@@ -1777,6 +1813,7 @@ const make = Effect.gen(function* () {
 
       if (event.type === "session.exited") {
         yield* clearTurnStateForSession(thread.id);
+        yield* ledger.clearThread(thread.id);
       }
 
       if (event.type === "runtime.error") {

@@ -18,10 +18,13 @@ import {
   MessageId,
   ProjectId,
   ProviderItemId,
+  RuntimeTaskId,
   type ServerSettings,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import { BackgroundWorkLedger } from "../Services/BackgroundWorkLedger.ts";
+import { makeBackgroundWorkLedgerLive } from "./BackgroundWorkLedger.ts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -196,7 +199,10 @@ async function waitForThread(
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
+    | OrchestrationEngineService
+    | ProviderRuntimeIngestionService
+    | ProjectionSnapshotQuery
+    | BackgroundWorkLedger,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -246,11 +252,13 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(makeBackgroundWorkLedgerLive()),
     );
     runtime = ManagedRuntime.make(layer);
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
+    const ledger = await runtime.runPromise(Effect.service(BackgroundWorkLedger));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(ingestion.drain);
@@ -320,6 +328,7 @@ describe("ProviderRuntimeIngestion", () => {
       emit: provider.emit,
       setProviderSession: provider.setSession,
       drain,
+      ledger,
     };
   }
 
@@ -3591,5 +3600,32 @@ describe("ProviderRuntimeIngestion", () => {
     expect(activity?.parentItemId).toBe("item-root-1");
     expect(activity?.itemId).toBe("item-child-1");
     expect(activity?.iteration).toBeUndefined();
+  });
+
+  it("registers a native background task on task.started and clears it on task.completed", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.make("thread-1");
+
+    harness.emit({
+      type: "task.started",
+      eventId: asEventId("evt-task-started-bg"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: asThreadId("thread-1"),
+      payload: { taskId: RuntimeTaskId.make("task-1"), taskType: "shell" },
+    } as never);
+    await harness.drain();
+    expect(await Effect.runPromise(harness.ledger.snapshotFor(threadId))).toMatchObject({ count: 1 });
+
+    harness.emit({
+      type: "task.completed",
+      eventId: asEventId("evt-task-completed-bg"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: asThreadId("thread-1"),
+      payload: { taskId: RuntimeTaskId.make("task-1"), status: "completed" },
+    } as never);
+    await harness.drain();
+    expect(await Effect.runPromise(harness.ledger.snapshotFor(threadId))).toBeNull();
   });
 });

@@ -111,7 +111,7 @@ export const makeSpawnAgentHandlers = (deps: SpawnAgentDeps) => {
       jobs.set(childThreadId, updated);
       // A job leaving "running" (completed/failed/timedOut) is terminal → release it.
       if (existing.status === "running" && updated.status !== "running") {
-        yield* backgroundWorkLedger.unregister(updated.parentThreadId, childThreadId);
+        yield* backgroundWorkLedger.unregister(existing.parentThreadId, childThreadId);
       }
     });
   const readJob = (agentId: string): Effect.Effect<SpawnJob | undefined> =>

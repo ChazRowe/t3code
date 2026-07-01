@@ -446,3 +446,32 @@ it.effect("registers a spawned agent in the background-work ledger while it runs
     expect(snap).toMatchObject({ count: 1 });
   }).pipe(Effect.provide(makeBackgroundWorkLedgerLive())),
 );
+
+it.live("unregisters a spawned agent from the ledger when the job reaches a terminal state", () =>
+  Effect.gen(function* () {
+    const backgroundWorkLedger = yield* BackgroundWorkLedger;
+    const dispatchSink: Array<OrchestrationCommand> = [];
+    const deps = makeDeps({
+      instance: codexInstance,
+      dispatchSink,
+      backgroundWorkLedger,
+      events: [event("subagent-id-1", "turn.completed", { state: "completed" })],
+    });
+    const { spawnAgent, checkAgent } = makeSpawnAgentHandlers(deps);
+
+    yield* spawnAgent({ providerInstanceId: "codex", prompt: "x" }, invocation(0));
+
+    // Confirm the job is registered while the watcher is still running.
+    const snapBefore = yield* backgroundWorkLedger.snapshotFor(PARENT_THREAD_ID);
+    expect(snapBefore).toMatchObject({ count: 1 });
+
+    // Drive the watcher fiber to completion — it emits turn.completed which triggers patchJob,
+    // which calls backgroundWorkLedger.unregister via the real handler path.
+    yield* pollUntilTerminal(checkAgent, CHILD_AGENT_ID);
+
+    // The unregister call in patchJob must have cleared the ledger entry; null means no live
+    // entries remain — this assertion fails if the unregister call is removed from patchJob.
+    const snapAfter = yield* backgroundWorkLedger.snapshotFor(PARENT_THREAD_ID);
+    expect(snapAfter).toBeNull();
+  }).pipe(Effect.provide(makeBackgroundWorkLedgerLive())),
+);

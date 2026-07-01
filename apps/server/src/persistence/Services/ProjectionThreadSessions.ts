@@ -29,6 +29,14 @@ export const ProjectionThreadSession = Schema.Struct({
   runtimeMode: RuntimeMode,
   activeTurnId: Schema.NullOr(TurnId),
   lastError: Schema.NullOr(Schema.String),
+  backgroundWork: Schema.NullOr(
+    Schema.fromJsonString(
+      Schema.Struct({
+        count: Schema.Number,
+        oldestStartedAt: IsoDateTime,
+      }),
+    ),
+  ),
   updatedAt: IsoDateTime,
 });
 export type ProjectionThreadSession = typeof ProjectionThreadSession.Type;

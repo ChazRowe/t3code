@@ -152,6 +152,7 @@ interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
+  backgroundWork: { count: number; oldestStartedAt: string } | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   latestTurn: TimelineLatestTurn | null;
@@ -179,6 +180,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
   activeTurnStartedAt,
+  backgroundWork,
   listRef,
   timelineEntries,
   latestTurn,
@@ -273,6 +275,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         expandedTurnIds,
         isWorking,
         activeTurnStartedAt,
+        backgroundWork,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
       }),
@@ -282,6 +285,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       expandedTurnIds,
       isWorking,
       activeTurnStartedAt,
+      backgroundWork,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
     ],
@@ -433,6 +437,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
+      {row.kind === "background" ? <BackgroundTimelineRow row={row} /> : null}
     </div>
   );
 });
@@ -680,6 +685,28 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
             </>
           ) : (
             "Working..."
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function BackgroundTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "background" }> }) {
+  return (
+    <div className="py-0.5 pl-1.5">
+      <div className="flex items-center gap-2 pt-1 text-[11px] text-cyan-600/80 dark:text-cyan-300/70 tabular-nums">
+        <span className="inline-flex size-3 items-center justify-center">
+          <span className="size-1.5 rounded-full bg-cyan-500/70 dark:bg-cyan-300/60 animate-pulse" />
+        </span>
+        <span>
+          {row.createdAt ? (
+            <>
+              Running in background for <WorkingTimer createdAt={row.createdAt} /> — resumes when it
+              finishes
+            </>
+          ) : (
+            "Running in background…"
           )}
         </span>
       </div>

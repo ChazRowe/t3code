@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  IsoDateTime,
   ProjectId,
   ThreadId,
   TurnId,
@@ -17,6 +18,8 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { BackgroundWorkLedger } from "../../orchestration/Services/BackgroundWorkLedger.ts";
+import { makeBackgroundWorkLedgerLive } from "../../orchestration/Layers/BackgroundWorkLedger.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
@@ -121,7 +124,7 @@ function makeReadModel(
 
 describe("ProviderSessionReaper", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    ProviderSessionReaper | ProviderSessionRuntimeRepository,
+    ProviderSessionReaper | ProviderSessionRuntimeRepository | BackgroundWorkLedger,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -142,7 +145,6 @@ describe("ProviderSessionReaper", () => {
     readonly stopSessionImplementation?: (input: {
       readonly threadId: ThreadId;
     }) => ReturnType<ProviderServiceShape["stopSession"]>;
-    readonly pendingBackgroundWorkThreadIds?: ReadonlySet<ThreadId>;
   }) {
     const stoppedThreadIds = new Set<ThreadId>();
     const stopSession = vi.fn<ProviderServiceShape["stopSession"]>(
@@ -163,8 +165,6 @@ describe("ProviderSessionReaper", () => {
       stopSession,
       clearResumeCursor: () => Effect.void,
       listSessions: () => Effect.succeed([]),
-      hasPendingBackgroundWork: ({ threadId }) =>
-        Effect.succeed(input.pendingBackgroundWorkThreadIds?.has(threadId) ?? false),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       getInstanceInfo: (instanceId) => {
         const driverKind = ProviderDriverKind.make(String(instanceId));
@@ -226,6 +226,7 @@ describe("ProviderSessionReaper", () => {
           getSubagentActivities: () => Effect.die("unused"),
         }),
       ),
+      Layer.provideMerge(makeBackgroundWorkLedgerLive()),
       Layer.provideMerge(NodeServices.layer),
     );
 
@@ -328,7 +329,7 @@ describe("ProviderSessionReaper", () => {
     expect(Option.isSome(remaining)).toBe(true);
   });
 
-  it("skips stale sessions that are hosting pending background work", async () => {
+  it("skips stale sessions that are hosting pending background work (shell kind)", async () => {
     const threadId = ThreadId.make("thread-reaper-bg-work");
     const now = "2026-01-01T00:00:00.000Z";
     const harness = await createHarness({
@@ -338,7 +339,7 @@ describe("ProviderSessionReaper", () => {
           session: {
             threadId,
             // No active turn: the launching turn already ended "standing by" for
-            // a backgrounded Workflow, which is exactly the incident shape.
+            // a backgrounded task, which is exactly the incident shape.
             status: "ready",
             providerName: "claudeAgent",
             runtimeMode: "full-access",
@@ -348,7 +349,6 @@ describe("ProviderSessionReaper", () => {
           },
         },
       ]),
-      pendingBackgroundWorkThreadIds: new Set([threadId]),
     });
     const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
 
@@ -361,13 +361,19 @@ describe("ProviderSessionReaper", () => {
         runtimeMode: "full-access",
         status: "running",
         // Well past the inactivity threshold — lastSeenAt does not advance while
-        // a background workflow runs, so only the new guard prevents a reap.
+        // background work runs, so only the ledger guard prevents a reap.
         lastSeenAt: "2026-04-14T00:00:00.000Z",
         resumeCursor: {
           opaque: "resume-bg-work",
         },
         runtimePayload: null,
       }),
+    );
+
+    await runtime!.runPromise(
+      Effect.flatMap(BackgroundWorkLedger, (ledger) =>
+        ledger.register(threadId, { key: "task-1", kind: "shell", startedAt: IsoDateTime.make(now) }),
+      ),
     );
 
     const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
@@ -380,12 +386,127 @@ describe("ProviderSessionReaper", () => {
     expect(Option.isSome(remaining)).toBe(true);
   });
 
+  it("skips stale sessions that are hosting pending background work (spawn kind)", async () => {
+    const threadId = ThreadId.make("thread-reaper-bg-work-spawn");
+    const childThreadId = ThreadId.make("thread-reaper-bg-work-spawn-child");
+    const now = "2026-01-01T00:00:00.000Z";
+    const harness = await createHarness({
+      readModel: makeReadModel([
+        {
+          id: threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "claudeAgent",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+        },
+      ]),
+    });
+    const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
+
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId,
+        providerName: "claudeAgent",
+        providerInstanceId: null,
+        adapterKey: "claudeAgent",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: "2026-04-14T00:00:00.000Z",
+        resumeCursor: {
+          opaque: "resume-bg-work-spawn",
+        },
+        runtimePayload: null,
+      }),
+    );
+
+    await runtime!.runPromise(
+      Effect.flatMap(BackgroundWorkLedger, (ledger) =>
+        ledger.register(threadId, {
+          key: String(childThreadId),
+          kind: "spawn",
+          startedAt: IsoDateTime.make(now),
+        }),
+      ),
+    );
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+    await Effect.runPromise(drainFibers);
+
+    expect(harness.stopSession).not.toHaveBeenCalled();
+    const remaining = await runtime!.runPromise(repository.getByThreadId({ threadId }));
+    expect(Option.isSome(remaining)).toBe(true);
+  });
+
+  it("reaps a session once its background work entry is unregistered (becomes-eligible)", async () => {
+    const threadId = ThreadId.make("thread-reaper-bg-work-cleared");
+    const now = "2026-01-01T00:00:00.000Z";
+    const harness = await createHarness({
+      readModel: makeReadModel([
+        {
+          id: threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "claudeAgent",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+        },
+      ]),
+    });
+    const repository = await runtime!.runPromise(Effect.service(ProviderSessionRuntimeRepository));
+
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId,
+        providerName: "claudeAgent",
+        providerInstanceId: null,
+        adapterKey: "claudeAgent",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: "2026-04-14T00:00:00.000Z",
+        resumeCursor: {
+          opaque: "resume-bg-work-cleared",
+        },
+        runtimePayload: null,
+      }),
+    );
+
+    // Register then immediately clear — session has no pending work by the time
+    // the reaper sweeps; it should be reaped like a normal stale session.
+    await runtime!.runPromise(
+      Effect.flatMap(BackgroundWorkLedger, (ledger) =>
+        Effect.flatMap(
+          ledger.register(threadId, { key: "task-gone", kind: "shell", startedAt: IsoDateTime.make(now) }),
+          () => ledger.clearThread(threadId),
+        ),
+      ),
+    );
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+
+    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+
+    expect(harness.stopSession.mock.calls[0]?.[0]).toEqual({ threadId });
+  });
+
   it("skips stale-lastSeen sessions whose projection updatedAt is recent (synthetic turns)", async () => {
     // Repro of the looping+ultracode reaper incident: a backgrounded Workflow
     // re-invokes the live SDK query via synthetic turns, which never bump
     // `lastSeenAt` (only sendTurn/startSession/stop do) but DO advance the
     // projection session's `updatedAt`. Once the last workflow watcher clears,
-    // `hasPendingBackgroundWork` is false, so only the synthetic-activity clock
+    // the background-work ledger is empty, so only the synthetic-activity clock
     // keeps the session alive. lastSeenAt is far in the past; updatedAt is now.
     const threadId = ThreadId.make("thread-reaper-synthetic-activity");
     const recent = DateTime.formatIso(await Effect.runPromise(DateTime.now));

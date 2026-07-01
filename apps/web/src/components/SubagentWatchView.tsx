@@ -158,6 +158,7 @@ export function SubagentWatchView({
           isWorking={!isFinished}
           activeTurnInProgress={!isFinished}
           activeTurnStartedAt={null}
+          backgroundWork={null}
           listRef={listRef}
           timelineEntries={timelineEntries}
           latestTurn={null}

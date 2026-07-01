@@ -303,7 +303,6 @@ describe("ProviderCommandReactor", () => {
       stopSession: stopSession as ProviderServiceShape["stopSession"],
       clearResumeCursor: clearResumeCursor as ProviderServiceShape["clearResumeCursor"],
       listSessions: () => Effect.succeed(runtimeSessions),
-      hasPendingBackgroundWork: () => Effect.succeed(false),
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",

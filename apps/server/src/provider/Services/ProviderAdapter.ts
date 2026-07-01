@@ -102,18 +102,6 @@ export interface ProviderAdapterShape<TError> {
   readonly hasSession: (threadId: ThreadId) => Effect.Effect<boolean>;
 
   /**
-   * Whether this thread's live session is hosting work that outlives the active
-   * turn — currently a backgrounded `Workflow` run the agent launched and is
-   * waiting on. The idle reaper consults this so it never tears down a session
-   * whose background work would be orphaned (and whose completion would
-   * otherwise re-invoke the agent).
-   *
-   * Optional: adapters with no concept of post-turn background work may omit it,
-   * and callers MUST treat an absent implementation as `false`.
-   */
-  readonly hasPendingBackgroundWork?: (threadId: ThreadId) => Effect.Effect<boolean>;
-
-  /**
    * Whether a persisted resume cursor can actually be resumed by this adapter.
    * A non-null cursor is not necessarily resumable — e.g. a Claude binding can
    * carry a resume-id-less `{ turnCount: 0 }` cursor that cannot resurrect the

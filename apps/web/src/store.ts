@@ -174,6 +174,7 @@ function mapSession(session: OrchestrationSession): ThreadSession {
     createdAt: session.updatedAt,
     updatedAt: session.updatedAt,
     ...(session.lastError ? { lastError: session.lastError } : {}),
+    backgroundWork: session.backgroundWork ?? null,
   };
 }
 

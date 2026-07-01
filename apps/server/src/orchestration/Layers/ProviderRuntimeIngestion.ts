@@ -21,6 +21,7 @@ import {
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -40,8 +41,33 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { BackgroundWorkLedger } from "../Services/BackgroundWorkLedger.ts";
+import type { BackgroundWorkKind } from "../Services/BackgroundWorkLedger.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
+
+/**
+ * Map the SDK `task_type` carried on `task.started` to a ledger kind. Unknown or
+ * absent types (e.g. an in-turn "plan" task) fall back to "subagent" — harmless
+ * for the count, which is all that gates the pill and the reaper. NOTE: confirm
+ * the exact runtime `task_type` strings against the daemon if kinds ever surface
+ * in the UI (open question in the design).
+ */
+const taskTypeToBackgroundKind = (taskType: string | undefined): BackgroundWorkKind => {
+  switch (taskType) {
+    case "shell":
+      return "shell";
+    case "subagent":
+      return "subagent";
+    case "workflow":
+    case "local_workflow":
+      return "workflow";
+    case "monitor":
+      return "monitor";
+    default:
+      return "subagent";
+  }
+};
 
 interface AssistantSegmentState {
   baseKey: string;
@@ -750,10 +776,13 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const ledger = yield* BackgroundWorkLedger;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
     );
+
+  const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
   // Dispatches a placeholder turn checkpoint (status "missing") onto the durable
   // orchestration domain-event stream. The CheckpointReactor consumes this and
@@ -1531,6 +1560,7 @@ const make = Effect.gen(function* () {
             );
           }
 
+          const backgroundWork = yield* ledger.snapshotFor(thread.id);
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
             commandId: yield* providerCommandId(event, "thread-session-set"),
@@ -1545,11 +1575,22 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: nextActiveTurnId,
               lastError,
+              backgroundWork,
               updatedAt: now,
             },
             createdAt: now,
           });
         }
+      }
+
+      if (event.type === "task.started") {
+        yield* ledger.register(thread.id, {
+          key: event.payload.taskId,
+          kind: taskTypeToBackgroundKind(event.payload.taskType),
+          startedAt: event.createdAt,
+        });
+      } else if (event.type === "task.completed") {
+        yield* ledger.unregister(thread.id, event.payload.taskId);
       }
 
       const assistantDelta =
@@ -1777,6 +1818,7 @@ const make = Effect.gen(function* () {
 
       if (event.type === "session.exited") {
         yield* clearTurnStateForSession(thread.id);
+        yield* ledger.clearThread(thread.id);
       }
 
       if (event.type === "runtime.error") {
@@ -1787,6 +1829,7 @@ const make = Effect.gen(function* () {
           : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
 
         if (shouldApplyRuntimeError) {
+          const backgroundWork = yield* ledger.snapshotFor(thread.id);
           yield* orchestrationEngine.dispatch({
             type: "thread.session.set",
             commandId: yield* providerCommandId(event, "runtime-error-session-set"),
@@ -1801,6 +1844,7 @@ const make = Effect.gen(function* () {
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
+              backgroundWork,
               updatedAt: now,
             },
             createdAt: now,
@@ -1907,6 +1951,56 @@ const make = Effect.gen(function* () {
           }
           return worker.enqueue({ source: "domain", event });
         }),
+      );
+      yield* Effect.forkScoped(
+        Stream.runForEach(ledger.changes, (threadId) =>
+          Effect.gen(function* () {
+            const shellOption = yield* projectionSnapshotQuery.getThreadShellById(threadId);
+            if (Option.isNone(shellOption)) return;
+            const session = shellOption.value.session;
+            // During an active turn the "Working" status already outranks "Background"
+            // in the UI, and the eventual turn.completed dispatch re-reads the snapshot.
+            if (!session || session.status === "running") return;
+
+            const backgroundWork = yield* ledger.snapshotFor(threadId);
+            const now = yield* nowIso;
+            const commandId = CommandId.make(`background-work:${threadId}:${yield* crypto.randomUUIDv4}`);
+            yield* orchestrationEngine.dispatch({
+              type: "thread.session.set",
+              commandId,
+              threadId,
+              session: {
+                threadId: session.threadId,
+                status: session.status,
+                providerName: session.providerName,
+                ...(session.providerInstanceId !== undefined
+                  ? { providerInstanceId: session.providerInstanceId }
+                  : {}),
+                runtimeMode: session.runtimeMode,
+                activeTurnId: session.activeTurnId,
+                lastError: session.lastError,
+                backgroundWork,
+                updatedAt: now,
+              },
+              createdAt: now,
+            });
+          }).pipe(
+            // A typed failure (ProjectionRepositoryError / OrchestrationDispatchError) or a
+            // defect from a single ledger change must not tear down the long-lived stream —
+            // that would silently disable all between-turns background-work projection for
+            // the rest of the process. Log and continue; re-raise interrupts so scope
+            // teardown stays clean (mirrors processInputSafely).
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterruptsOnly(cause)) {
+                return Effect.failCause(cause);
+              }
+              return Effect.logWarning("background-work.ingestion.changes-failed", {
+                threadId,
+                cause: Cause.pretty(cause),
+              });
+            }),
+          ),
+        ),
       );
     });
 

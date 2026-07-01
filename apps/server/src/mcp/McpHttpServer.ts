@@ -12,6 +12,7 @@ import { McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { BackgroundWorkLedger } from "../orchestration/Services/BackgroundWorkLedger.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionThreadActivityRepository } from "../persistence/Services/ProjectionThreadActivities.ts";
@@ -246,12 +247,14 @@ const registerSpawnToolkit = Effect.fn("McpHttpServer.registerSpawnToolkit")(fun
   const orchestrationEngine = yield* OrchestrationEngineService;
   const snapshotQuery = yield* ProjectionSnapshotQuery;
   const crypto = yield* Crypto.Crypto;
+  const backgroundWorkLedger = yield* BackgroundWorkLedger;
   const handlers = makeSpawnAgentHandlers({
     providerService,
     instanceRegistry,
     orchestrationEngine,
     snapshotQuery,
     crypto,
+    backgroundWorkLedger,
   });
   const decodeSpawnParams = Schema.decodeUnknownEffect(SpawnAgentParameters);
   const decodeCheckParams = Schema.decodeUnknownEffect(CheckAgentParameters);

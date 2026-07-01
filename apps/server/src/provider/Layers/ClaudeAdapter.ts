@@ -4598,19 +4598,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return context !== undefined && !context.stopped;
     });
 
-  // A backgrounded `Workflow` the agent launched registers a live watcher fiber
-  // (see `watchWorkflowRun`); the entry is removed when the run reaches a
-  // terminal state. A non-empty set means the SDK query is still hosting work
-  // that outlives the active turn, so the session must not be reaped — its
-  // completion is what re-invokes the agent.
-  const hasPendingBackgroundWork: NonNullable<ClaudeAdapterShape["hasPendingBackgroundWork"]> = (
-    threadId,
-  ) =>
-    Effect.sync(() => {
-      const context = sessions.get(threadId);
-      return context !== undefined && !context.stopped && context.workflowWatchers.size > 0;
-    });
-
   // A persisted Claude cursor is resumable only when it carries a real session
   // `resume` uuid; `readClaudeResumeState` validates that. A resume-id-less
   // cursor (e.g. `{ turnCount: 0 }`, which is what a loop torn down before its
@@ -4660,7 +4647,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     stopSession,
     listSessions,
     hasSession,
-    hasPendingBackgroundWork,
     isResumableCursor,
     stopAll,
     get streamEvents() {

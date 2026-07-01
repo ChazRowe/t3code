@@ -53,6 +53,7 @@ function buildProps() {
     isWorking: false,
     activeTurnInProgress: false,
     activeTurnStartedAt: null,
+    backgroundWork: null,
     listRef: createRef<LegendListRef | null>(),
     latestTurn: null,
     turnDiffSummaryByAssistantMessageId: new Map(),

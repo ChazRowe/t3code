@@ -572,6 +572,58 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Completed", pulse: false });
   });
 
+  it("shows the Background pill when background work is pending after the turn settled", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            backgroundWork: { count: 2, oldestStartedAt: "2026-03-09T10:00:00.000Z" },
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Background", pulse: true });
+  });
+
+  it("prefers Working over Background while a turn is active", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            status: "running",
+            orchestrationStatus: "running",
+            backgroundWork: { count: 1, oldestStartedAt: "2026-03-09T10:00:00.000Z" },
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("prefers Background over Completed when both would apply", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+            backgroundWork: { count: 1, oldestStartedAt: "2026-03-09T10:00:00.000Z" },
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Background", pulse: true });
+  });
+
   it("shows completed when there is an unseen completion and no active blocker", () => {
     expect(
       resolveThreadStatusPill({

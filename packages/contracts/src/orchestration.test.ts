@@ -888,3 +888,45 @@ it("registers both subagent methods in ORCHESTRATION_WS_METHODS and Orchestratio
   assert.strictEqual("subscribeSubagentTree" in OrchestrationRpcSchemas, true);
   assert.strictEqual("subscribeSubagent" in OrchestrationRpcSchemas, true);
 });
+
+// ── OrchestrationSession.backgroundWork ──────────────────────────────────────
+
+const baseSession = {
+  threadId: "thread-1",
+  status: "ready",
+  providerName: "claudeAgent",
+  runtimeMode: "full-access",
+  activeTurnId: null,
+  lastError: null,
+  updatedAt: "2026-06-30T00:00:00.000Z",
+} as const;
+
+it.effect("decodes a session that carries pending background work", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeOrchestrationSession({
+      ...baseSession,
+      backgroundWork: { count: 2, oldestStartedAt: "2026-06-30T00:00:00.000Z" },
+    });
+    assert.deepStrictEqual(decoded.backgroundWork, {
+      count: 2,
+      oldestStartedAt: "2026-06-30T00:00:00.000Z",
+    });
+  }),
+);
+
+it.effect("treats an omitted backgroundWork as no pending work", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeOrchestrationSession(baseSession);
+    assert.strictEqual(decoded.backgroundWork ?? null, null);
+  }),
+);
+
+it.effect("accepts an explicit null backgroundWork", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeOrchestrationSession({
+      ...baseSession,
+      backgroundWork: null,
+    });
+    assert.strictEqual(decoded.backgroundWork, null);
+  }),
+);

@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 
+import { BackgroundWorkLedger } from "../../orchestration/Services/BackgroundWorkLedger.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import {
@@ -26,6 +27,7 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
     const providerService = yield* ProviderService;
     const directory = yield* ProviderSessionDirectory;
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const backgroundWorkLedger = yield* BackgroundWorkLedger;
 
     const inactivityThresholdMs = Math.max(
       1,
@@ -73,8 +75,8 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
         // lifecycle event (incl. synthetic), so use the later of the two as the
         // session's true last-activity time. Without this, the reaper tears a
         // session down seconds after its final synthetic turn — the moment the
-        // `hasPendingBackgroundWork` guard below stops covering it — orphaning
-        // in-flight subagent work (the looping+ultracode reaper incident).
+        // background-work guard below stops covering it — orphaning in-flight
+        // subagent work (the looping+ultracode reaper incident).
         const sessionUpdatedAtMs = thread?.session?.updatedAt
           ? Date.parse(thread.session.updatedAt)
           : Number.NaN;
@@ -102,18 +104,17 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
-        // A session with no active turn can still be hosting a backgrounded
-        // `Workflow` the agent launched and is waiting on. `lastSeenAt` does not
-        // advance for that work, so without this guard the reaper tears the
-        // session down, orphaning the workflow and losing the completion that
-        // would have re-invoked the agent.
-        const hasPendingBackgroundWork = yield* providerService
-          .hasPendingBackgroundWork({ threadId: binding.threadId })
-          .pipe(Effect.orElseSucceed(() => false));
-        if (hasPendingBackgroundWork) {
+        // A session with no active turn can still be hosting background work the agent
+        // launched and is waiting on (a Workflow, backgrounded Bash/subagent, MCP
+        // monitor, or spawn_agent child). `lastSeenAt` does not advance for that work,
+        // so without this guard the reaper tears the session down, orphaning the work
+        // and losing the completion that would re-invoke the agent.
+        const backgroundWork = yield* backgroundWorkLedger.snapshotFor(binding.threadId);
+        if (backgroundWork !== null) {
           yield* Effect.logDebug("provider.session.reaper.skipped-pending-background-work", {
             threadId: binding.threadId,
             provider: binding.provider,
+            backgroundWorkCount: backgroundWork.count,
             idleDurationMs,
           });
           continue;

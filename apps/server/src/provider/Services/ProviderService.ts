@@ -102,17 +102,6 @@ export interface ProviderServiceShape {
   readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>>;
 
   /**
-   * Whether a thread's live provider session is hosting background work that
-   * outlives the active turn (currently a backgrounded `Workflow` run). The idle
-   * reaper consults this so it never tears down a session whose in-flight
-   * background work would be orphaned. Returns `false` when no live session
-   * reports pending work (including providers that have no such concept).
-   */
-  readonly hasPendingBackgroundWork: (input: {
-    readonly threadId: ThreadId;
-  }) => Effect.Effect<boolean, ProviderServiceError>;
-
-  /**
    * Read capabilities for the adapter bound to a configured provider instance.
    */
   readonly getCapabilities: (

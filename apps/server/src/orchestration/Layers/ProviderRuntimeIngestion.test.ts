@@ -109,7 +109,6 @@ function createProviderServiceHarness() {
     stopSession: () => unsupported(),
     clearResumeCursor: () => unsupported(),
     listSessions: () => Effect.succeed([...runtimeSessions]),
-    hasPendingBackgroundWork: () => Effect.succeed(false),
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     getInstanceInfo: (instanceId) => {
       const driverKind = ProviderDriverKind.make(String(instanceId));

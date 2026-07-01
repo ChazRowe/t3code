@@ -1112,21 +1112,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     yield* analytics.flush;
   });
 
-  const hasPendingBackgroundWork: ProviderServiceShape["hasPendingBackgroundWork"] = (input) =>
-    Effect.gen(function* () {
-      const currentAdapters = yield* getAdapterEntries;
-      for (const [, adapter] of currentAdapters) {
-        if (adapter.hasPendingBackgroundWork === undefined) {
-          continue;
-        }
-        const pending = yield* adapter.hasPendingBackgroundWork(input.threadId);
-        if (pending) {
-          return true;
-        }
-      }
-      return false;
-    });
-
   yield* Effect.addFinalizer(() =>
     runStopAll().pipe(
       Effect.catchCause((cause) =>
@@ -1144,7 +1129,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     stopSession,
     clearResumeCursor,
     listSessions,
-    hasPendingBackgroundWork,
     getCapabilities,
     getInstanceInfo,
     rollbackConversation,

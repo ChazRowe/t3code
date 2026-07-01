@@ -970,3 +970,41 @@ describe("computeStableMessagesTimelineRows", () => {
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
   });
 });
+
+describe("deriveMessagesTimelineRows background row", () => {
+  const emptyInput = {
+    timelineEntries: [],
+    isWorking: false,
+    activeTurnStartedAt: null,
+    turnDiffSummaryByAssistantMessageId: new Map(),
+    revertTurnCountByUserMessageId: new Map(),
+  };
+
+  it("emits a background row when backgroundWork is present and not working", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...emptyInput,
+      backgroundWork: { count: 2, oldestStartedAt: "2026-01-01T00:00:00Z" },
+    });
+    expect(rows).toContainEqual({
+      kind: "background",
+      id: "background-indicator-row",
+      createdAt: "2026-01-01T00:00:00Z",
+    });
+  });
+
+  it("does not emit a background row while working (working takes precedence)", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...emptyInput,
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      backgroundWork: { count: 1, oldestStartedAt: "2026-01-01T00:00:00Z" },
+    });
+    expect(rows.some((r) => r.kind === "background")).toBe(false);
+    expect(rows.some((r) => r.kind === "working")).toBe(true);
+  });
+
+  it("emits no background row when backgroundWork is null", () => {
+    const rows = deriveMessagesTimelineRows({ ...emptyInput, backgroundWork: null });
+    expect(rows.some((r) => r.kind === "background")).toBe(false);
+  });
+});

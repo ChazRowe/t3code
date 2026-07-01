@@ -67,7 +67,8 @@ export type MessagesTimelineRow =
       createdAt: string;
       proposedPlan: ProposedPlan;
     }
-  | { kind: "working"; id: string; createdAt: string | null };
+  | { kind: "working"; id: string; createdAt: string | null }
+  | { kind: "background"; id: string; createdAt: string | null };
 
 export interface StableMessagesTimelineRowsState {
   byId: Map<string, MessagesTimelineRow>;
@@ -295,6 +296,7 @@ export function deriveMessagesTimelineRows(input: {
   expandedTurnIds?: ReadonlySet<TurnId>;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
+  backgroundWork?: { count: number; oldestStartedAt: string } | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
@@ -419,6 +421,12 @@ export function deriveMessagesTimelineRows(input: {
       id: "working-indicator-row",
       createdAt: input.activeTurnStartedAt,
     });
+  } else if (input.backgroundWork != null) {
+    nextRows.push({
+      kind: "background",
+      id: "background-indicator-row",
+      createdAt: input.backgroundWork.oldestStartedAt,
+    });
   }
 
   return nextRows;
@@ -450,6 +458,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
   switch (a.kind) {
     case "working":
+      return a.createdAt === (b as typeof a).createdAt;
+
+    case "background":
       return a.createdAt === (b as typeof a).createdAt;
 
     case "turn-fold": {

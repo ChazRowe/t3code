@@ -85,7 +85,7 @@ export async function startNewThreadFromContext(
   return true;
 }
 
-export async function startNewLocalThreadFromContext(
+export async function startNewThreadWithDefaultEnvMode(
   context: ChatThreadActionContext,
 ): Promise<boolean> {
   const projectRef = resolveThreadActionProjectRef(context);

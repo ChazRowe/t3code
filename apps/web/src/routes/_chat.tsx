@@ -5,8 +5,8 @@ import { useCommandPaletteStore } from "../commandPaletteStore";
 import { dispatchPreviewAction } from "../components/preview/previewActionBus";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import {
-  startNewLocalThreadFromContext,
   startNewThreadFromContext,
+  startNewThreadWithDefaultEnvMode,
 } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -66,7 +66,7 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
-        void startNewLocalThreadFromContext({
+        void startNewThreadWithDefaultEnvMode({
           activeDraftThread,
           activeThread,
           defaultProjectRef,

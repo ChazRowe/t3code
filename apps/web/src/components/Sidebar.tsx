@@ -4,8 +4,8 @@ import {
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
-  GitBranchPlusIcon,
   Globe2Icon,
+  MessageSquarePlusIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -95,7 +95,6 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread, useNewThreadHandler } from "../hooks/useHandleNewThread";
 import {
   resolveThreadActionProjectRef,
-  startNewLocalThreadFromContext,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "../lib/chatThreadActions";
@@ -2703,7 +2702,6 @@ interface SidebarProjectsContentProps {
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
   newThreadShortcutLabel: string | null;
-  onNewSession: () => void;
   onNewSessionWithContext: () => void;
   canCreateNewSession: boolean;
   newSessionWithContextShortcutLabel: string | null;
@@ -2720,57 +2718,38 @@ interface SidebarProjectsContentProps {
 }
 
 interface SidebarNewSessionButtonProps {
-  onNewSession: () => void;
   onNewSessionWithContext: () => void;
   disabled: boolean;
-  newSessionShortcutLabel: string | null;
   newSessionWithContextShortcutLabel: string | null;
 }
 
 export function SidebarNewSessionButton({
-  onNewSession,
   onNewSessionWithContext,
   disabled,
-  newSessionShortcutLabel,
   newSessionWithContextShortcutLabel,
 }: SidebarNewSessionButtonProps) {
   return (
-    <div className="flex items-center gap-1">
-      <SidebarMenuButton
-        size="sm"
-        data-testid="sidebar-new-session"
-        disabled={disabled}
-        className="flex-1 gap-2 px-2 py-1.5 font-medium hover:bg-accent hover:text-foreground focus-visible:ring-0"
-        onClick={onNewSession}
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="New session"
+            data-testid="sidebar-new-session"
+            disabled={disabled}
+            className={`${SIDEBAR_ICON_ACTION_BUTTON_CLASS} disabled:opacity-50`}
+            onClick={onNewSessionWithContext}
+          />
+        }
       >
-        <SquarePenIcon className="size-3.5" />
-        <span className="flex-1 truncate text-left text-xs">New Session</span>
-        {newSessionShortcutLabel ? (
-          <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">{newSessionShortcutLabel}</Kbd>
-        ) : null}
-      </SidebarMenuButton>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              aria-label="New session with current context"
-              data-testid="sidebar-new-session-with-context"
-              disabled={disabled}
-              className={`${SIDEBAR_ICON_ACTION_BUTTON_CLASS} disabled:opacity-50`}
-              onClick={onNewSessionWithContext}
-            />
-          }
-        >
-          <GitBranchPlusIcon className="size-3.5" />
-        </TooltipTrigger>
-        <TooltipPopup side="right">
-          {newSessionWithContextShortcutLabel
-            ? `New session with current context (${newSessionWithContextShortcutLabel})`
-            : "New session with current context"}
-        </TooltipPopup>
-      </Tooltip>
-    </div>
+        <MessageSquarePlusIcon className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="right">
+        {newSessionWithContextShortcutLabel
+          ? `New session (${newSessionWithContextShortcutLabel})`
+          : "New session"}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -2803,7 +2782,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     activeRouteProjectKey,
     routeThreadKey,
     newThreadShortcutLabel,
-    onNewSession,
     onNewSessionWithContext,
     canCreateNewSession,
     newSessionWithContextShortcutLabel,
@@ -2849,36 +2827,30 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <SidebarGroup className="px-2 pt-2 pb-1">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarNewSessionButton
-              onNewSession={onNewSession}
-              onNewSessionWithContext={onNewSessionWithContext}
-              disabled={!canCreateNewSession}
-              newSessionShortcutLabel={newThreadShortcutLabel}
-              newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}
-            />
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
-      <SidebarGroup className="px-2 pt-2 pb-1">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <CommandDialogTrigger
-              render={
-                <SidebarMenuButton
-                  size="sm"
-                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
-                  data-testid="command-palette-trigger"
-                />
-              }
-            >
-              <SearchIcon className="size-3.5 text-muted-foreground/70" />
-              <span className="flex-1 truncate text-left text-xs">Search</span>
-              {commandPaletteShortcutLabel ? (
-                <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
-                  {commandPaletteShortcutLabel}
-                </Kbd>
-              ) : null}
-            </CommandDialogTrigger>
+            <div className="flex items-center gap-1">
+              <CommandDialogTrigger
+                render={
+                  <SidebarMenuButton
+                    size="sm"
+                    className="flex-1 gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                    data-testid="command-palette-trigger"
+                  />
+                }
+              >
+                <SearchIcon className="size-3.5 text-muted-foreground/70" />
+                <span className="flex-1 truncate text-left text-xs">Search/New</span>
+                {commandPaletteShortcutLabel ? (
+                  <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
+                    {commandPaletteShortcutLabel}
+                  </Kbd>
+                ) : null}
+              </CommandDialogTrigger>
+              <SidebarNewSessionButton
+                onNewSessionWithContext={onNewSessionWithContext}
+                disabled={!canCreateNewSession}
+                newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}
+              />
+            </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroup>
@@ -3221,13 +3193,6 @@ export default function Sidebar() {
   );
 
   const canCreateNewSession = resolveThreadActionProjectRef(newSessionContext) != null;
-
-  const handleNewSessionClick = useCallback(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    void startNewLocalThreadFromContext(newSessionContext);
-  }, [isMobile, setOpenMobile, newSessionContext]);
 
   const handleNewSessionWithContextClick = useCallback(() => {
     if (isMobile) {
@@ -3733,7 +3698,6 @@ export default function Sidebar() {
             activeRouteProjectKey={activeRouteProjectKey}
             routeThreadKey={routeThreadKey}
             newThreadShortcutLabel={newThreadShortcutLabel}
-            onNewSession={handleNewSessionClick}
             onNewSessionWithContext={handleNewSessionWithContextClick}
             canCreateNewSession={canCreateNewSession}
             newSessionWithContextShortcutLabel={newSessionWithContextShortcutLabel}

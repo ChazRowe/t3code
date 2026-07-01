@@ -3,8 +3,8 @@ import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
-  startNewLocalThreadFromContext,
   startNewThreadFromContext,
+  startNewThreadWithDefaultEnvMode,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
 
@@ -74,10 +74,10 @@ describe("chatThreadActions", () => {
     });
   });
 
-  it("starts a local thread with the configured default env mode", async () => {
+  it("starts a thread with the configured default env mode", async () => {
     const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
 
-    const didStart = await startNewLocalThreadFromContext(
+    const didStart = await startNewThreadWithDefaultEnvMode(
       createContext({
         defaultProjectRef: scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID),
         defaultThreadEnvMode: "worktree",
